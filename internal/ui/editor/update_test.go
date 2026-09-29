@@ -308,10 +308,20 @@ func TestNeedClipboard(t *testing.T) {
 		opts := testOptions(t)
 		opts.Clipboard = &fakeClipboard{image: []byte("PNG")}
 		m := newModel(t, opts, "x", buffer.Pos{}, 40, 3)
-		_, out := typeKeys(m, `"`, "+", "p")
-		imp, ok := find[msgs.ImportImageMsg](out)
+		m, out := typeKeys(m, `"`, "+", "p")
+		img, ok := find[clipboardImageMsg](out)
+		if !ok {
+			t.Fatalf("messages = %#v, want the clipboard image", out)
+		}
+		_, cmd := m.Update(img)
+		imp, ok := find[msgs.ImportImageMsg](collect(cmd))
 		if !ok || string(imp.Data) != "PNG" || imp.Ext != "png" {
-			t.Errorf("messages = %#v, want ImportImageMsg with data", out)
+			t.Errorf("got %#v, want ImportImageMsg with data", imp)
+		}
+		// An image read for a note that is no longer open is dropped.
+		other := m.Load("other.md", "", buffer.Pos{})
+		if _, cmd := other.Update(img); cmd != nil {
+			t.Error("stale clipboard image imported into another note")
 		}
 	})
 	t.Run("text pastes", func(t *testing.T) {

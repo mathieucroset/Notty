@@ -18,6 +18,14 @@ type clipboardTextMsg struct {
 	before bool
 }
 
+// clipboardImageMsg delivers an image read from the clipboard back to the
+// editor that asked for it; it becomes msgs.ImportImageMsg only if that
+// note is still open.
+type clipboardImageMsg struct {
+	path string
+	data []byte
+}
+
 // copyCmd puts text on the system clipboard, falling back to OSC52 when the
 // clipboard tool fails (e.g. over SSH) or there is none.
 func (m Model) copyCmd(text string) tea.Cmd {
@@ -33,9 +41,9 @@ func (m Model) copyCmd(text string) tea.Cmd {
 	}
 }
 
-// readClipboardCmd reads the clipboard for a paste (spec §6.2): an image
-// becomes msgs.ImportImageMsg (the app imports it), otherwise the text is
-// delivered back as clipboardTextMsg. When there is no text either and the
+// readClipboardCmd reads the clipboard for a paste (spec §6.2): an image is
+// delivered back as clipboardImageMsg (then msgs.ImportImageMsg, which the
+// app imports), otherwise the text is delivered back as clipboardTextMsg. When there is no text either and the
 // image tool is missing, a toast names the tool.
 func (m Model) readClipboardCmd(before bool) tea.Cmd {
 	cb, p := m.opts.Clipboard, m.path
@@ -45,7 +53,7 @@ func (m Model) readClipboardCmd(before bool) tea.Cmd {
 	return func() tea.Msg {
 		data, err := cb.ReadImage()
 		if err == nil && len(data) > 0 {
-			return msgs.ImportImageMsg{Data: data, Ext: "png"}
+			return clipboardImageMsg{path: p, data: data}
 		}
 		var noTool clipboard.ErrNoTool
 		missing := errors.As(err, &noTool)
@@ -74,4 +82,16 @@ func (m Model) pasteClipboardText(msg clipboardTextMsg) (Model, tea.Cmd) {
 		m.ed.PasteClipboard(m.buf, sanitize(msg.text), msg.before)
 		return vim.Effect{}
 	})
+}
+
+// importClipboardImage asks the app to import a clipboard image into the
+// note that requested it.
+func (m Model) importClipboardImage(msg clipboardImageMsg) (Model, tea.Cmd) {
+	if msg.path != m.path {
+		return m, nil // the note changed while the clipboard was read
+	}
+	if m.readOnly {
+		return m.flash()
+	}
+	return m, emit(msgs.ImportImageMsg{Data: msg.data, Ext: "png"})
 }

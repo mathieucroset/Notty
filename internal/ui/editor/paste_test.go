@@ -45,7 +45,12 @@ func TestPaste(t *testing.T) {
 		opts := testOptions(t)
 		opts.Clipboard = &fakeClipboard{image: []byte("PNG")}
 		m := newModel(t, opts, "x", buffer.Pos{}, 40, 3)
-		_, cmd := m.Update(tea.PasteMsg{})
+		m, cmd := m.Update(tea.PasteMsg{})
+		img, ok := find[clipboardImageMsg](collect(cmd))
+		if !ok {
+			t.Fatal("empty paste does not read the clipboard image")
+		}
+		_, cmd = m.Update(img)
 		imp, ok := find[msgs.ImportImageMsg](collect(cmd))
 		if !ok || string(imp.Data) != "PNG" || imp.Ext != "png" {
 			t.Errorf("empty paste: got %#v, want ImportImageMsg with data", imp)

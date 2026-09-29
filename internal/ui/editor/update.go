@@ -61,6 +61,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.pasteClipboardText(msg)
+	case clipboardImageMsg:
+		if m.locked {
+			m.queue = append(m.queue, msg)
+			return m, nil
+		}
+		return m.importClipboardImage(msg)
 	case toggleMsg:
 		return m.replayToggle(msg)
 	case insertTextMsg:
