@@ -7,6 +7,7 @@ import (
 
 	"charm.land/glamour/v2"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mathieucroset/notty/internal/ui/icons"
 )
@@ -29,6 +30,31 @@ func TestStylesCarryIcons(t *testing.T) {
 			}
 			if got, want := tt.st.Accent.GetForeground(), NewStyles(p).Accent.GetForeground(); got != want {
 				t.Errorf("accent changed: %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestGlamourStyleTaskGlyphs checks the preview's checkboxes come from the
+// icon set, like the editor's.
+func TestGlamourStyleTaskGlyphs(t *testing.T) {
+	p, _ := Get("catppuccin-mocha")
+	for _, name := range icons.Names() {
+		t.Run(name, func(t *testing.T) {
+			set := mustIcons(t, name)
+			r, err := glamour.NewTermRenderer(glamour.WithStyles(GlamourStyle(p, set)), glamour.WithWordWrap(60))
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := r.Render("- [ ] open\n- [x] done\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = ansi.Strip(out)
+			for _, want := range []string{set.TaskOpen + " open", set.TaskDone + " done"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("render lacks %q:\n%s", want, out)
+				}
 			}
 		})
 	}
@@ -169,7 +195,7 @@ func TestChromaStyleDoesNotLeakAcrossPalettes(t *testing.T) {
 			t.Fatalf("Get(%q) failed", name)
 		}
 		r, err := glamour.NewTermRenderer(
-			glamour.WithStyles(GlamourStyle(p)),
+			glamour.WithStyles(GlamourStyle(p, icons.Default())),
 			glamour.WithWordWrap(60),
 		)
 		if err != nil {
@@ -224,7 +250,7 @@ func TestGlamourStyleRenders(t *testing.T) {
 	for _, name := range Names() {
 		p, _ := Get(name)
 		r, err := glamour.NewTermRenderer(
-			glamour.WithStyles(GlamourStyle(p)),
+			glamour.WithStyles(GlamourStyle(p, icons.Default())),
 			glamour.WithWordWrap(60),
 		)
 		if err != nil {

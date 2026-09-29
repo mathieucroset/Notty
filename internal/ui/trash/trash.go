@@ -20,6 +20,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/vault"
@@ -241,7 +242,7 @@ func (m Model) refreshPreview() Model {
 	if m.onRender != nil {
 		m.onRender()
 	}
-	out, err := renderMarkdown(m.previewContent, m.palette, previewW)
+	out, err := renderMarkdown(m.previewContent, m.palette, m.styles.Icons, previewW)
 	if err != nil {
 		out = m.previewContent
 	}
@@ -389,12 +390,12 @@ func (m Model) renderPreview(w int) string {
 
 // renderMarkdown renders content as Glamour-styled markdown at width w using
 // p's tokens.
-func renderMarkdown(content string, p theme.Palette, w int) (string, error) {
+func renderMarkdown(content string, p theme.Palette, set icons.Set, w int) (string, error) {
 	if w < 1 {
 		w = 1
 	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStyles(theme.GlamourStyle(p)),
+		glamour.WithStyles(theme.GlamourStyle(p, set)),
 		glamour.WithWordWrap(w),
 	)
 	if err != nil {

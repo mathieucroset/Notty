@@ -20,6 +20,7 @@ import (
 
 	"github.com/mathieucroset/notty/internal/gitsync"
 	"github.com/mathieucroset/notty/internal/merge"
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -432,7 +433,7 @@ func (m Model) computeContent() string {
 	if m.mode == modeDiff {
 		return m.renderDiff()
 	}
-	out, err := renderMarkdown(m.loadedContent, m.palette, m.contentWidth())
+	out, err := renderMarkdown(m.loadedContent, m.palette, m.styles.Icons, m.contentWidth())
 	if err != nil {
 		return m.loadedContent
 	}
@@ -472,12 +473,12 @@ func (m Model) renderDiff() string {
 
 // renderMarkdown renders content as Glamour-styled markdown at width w using
 // p's tokens.
-func renderMarkdown(content string, p theme.Palette, w int) (string, error) {
+func renderMarkdown(content string, p theme.Palette, set icons.Set, w int) (string, error) {
 	if w < 1 {
 		w = 1
 	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStyles(theme.GlamourStyle(p)),
+		glamour.WithStyles(theme.GlamourStyle(p, set)),
 		glamour.WithWordWrap(w),
 	)
 	if err != nil {

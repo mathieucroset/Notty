@@ -16,10 +16,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mathieucroset/notty/internal/imgrender"
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
 // --- helpers ---------------------------------------------------------------
+
+// img is the default icon set's image glyph, which leads every chip.
+var img = icons.Default().Image
 
 func testPalette(t *testing.T) theme.Palette {
 	t.Helper()
@@ -293,10 +297,10 @@ func TestMissingImageRendersWarningChip(t *testing.T) {
 		m := newTest(t, proto, t.TempDir())
 		m, _ = setContent(t, m, "notes/n.md", "![x](nope.png)\n\n![y](https://example.com/y.png)")
 		v := ansi.Strip(m.View())
-		if !strings.Contains(v, "🖼 nope.png  (missing)") {
+		if !strings.Contains(v, img+" nope.png  (missing)") {
 			t.Fatalf("%v: no missing chip:\n%s", proto, v)
 		}
-		if !strings.Contains(v, "🖼 y.png  (external)") {
+		if !strings.Contains(v, img+" y.png  (external)") {
 			t.Fatalf("%v: no external chip:\n%s", proto, v)
 		}
 	}
@@ -309,7 +313,7 @@ func TestUndecodableImageRendersWarningChip(t *testing.T) {
 	}
 	m := newTest(t, imgrender.ProtoHalfBlocks, vault)
 	m, _ = setContent(t, m, "n.md", "![](/bad.png)")
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "🖼 bad.png  (unreadable)") {
+	if v := ansi.Strip(m.View()); !strings.Contains(v, img+" bad.png  (unreadable)") {
 		t.Fatalf("no unreadable chip:\n%s", v)
 	}
 }
@@ -337,7 +341,7 @@ func TestHalfBlockImageAndOverlayChips(t *testing.T) {
 	if strings.Contains(ov, "▀") {
 		t.Fatal("image still drawn while overlay open")
 	}
-	if !strings.Contains(ansi.Strip(ov), "🖼 pic.png") {
+	if !strings.Contains(ansi.Strip(ov), img+" pic.png") {
 		t.Fatalf("no chip while overlay open:\n%s", ansi.Strip(ov))
 	}
 	if lineOf(ov, "Outro") != lineOf(v, "Outro") || lineOf(v, "Outro") < 0 {
@@ -370,7 +374,7 @@ func TestImagesOffRenderPlainChips(t *testing.T) {
 	m := newTest(t, imgrender.ProtoOff, vault)
 	m, _ = setContent(t, m, "n.md", "![](pic.png)")
 	v := ansi.Strip(m.View())
-	if !strings.Contains(v, "🖼 pic.png") || strings.Contains(v, "(missing)") {
+	if !strings.Contains(v, img+" pic.png") || strings.Contains(v, "(missing)") {
 		t.Fatalf("view:\n%s", v)
 	}
 }
@@ -382,7 +386,7 @@ func TestInlineImageBecomesChipAndBlock(t *testing.T) {
 	m, _ = setContent(t, m, "notes/n.md", "look ![alt](pic.png) and ![](pic.png) here")
 	v := m.View()
 	text := strings.Split(ansi.Strip(v), "\n")[0]
-	for _, want := range []string{"look", "🖼 alt", "🖼 pic.png", "here"} {
+	for _, want := range []string{"look", img+" alt", img+" pic.png", "here"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text row %q misses %q", text, want)
 		}

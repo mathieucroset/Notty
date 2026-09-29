@@ -11,6 +11,8 @@ import (
 
 	"charm.land/glamour/v2/ansi"
 	"charm.land/glamour/v2/styles"
+
+	"github.com/mathieucroset/notty/internal/ui/icons"
 )
 
 // hexString renders c as a "#rrggbb" string, suitable for
@@ -129,8 +131,8 @@ func registerChromaStyle(name string, p Palette) {
 // GlamourStyle builds a glamour ansi.StyleConfig from p's tokens, so the
 // markdown preview always matches the rest of the UI. It starts from
 // glamour's built-in dark or light style (depending on p.Dark) and recolors
-// everything from the palette.
-func GlamourStyle(p Palette) ansi.StyleConfig {
+// everything from the palette. Task checkboxes are drawn with set.
+func GlamourStyle(p Palette, set icons.Set) ansi.StyleConfig {
 	var s ansi.StyleConfig
 	if p.Dark {
 		s = styles.DarkStyleConfig
@@ -170,8 +172,8 @@ func GlamourStyle(p Palette) ansi.StyleConfig {
 	s.Item.Color = hexString(p.Text)
 	s.Enumeration.Color = hexString(p.Text)
 
-	s.Task.Ticked = "☑ "
-	s.Task.Unticked = "☐ "
+	s.Task.Ticked = set.TaskDone + " "
+	s.Task.Unticked = set.TaskOpen + " "
 
 	s.Link.Color = hexString(p.Accent)
 	s.Link.Underline = boolPtr(true)

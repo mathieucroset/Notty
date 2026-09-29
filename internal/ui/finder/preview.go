@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mathieucroset/notty/internal/search"
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -83,9 +84,9 @@ func (m Model) checkPreview() (Model, tea.Cmd) {
 
 	m.previewSeq++
 	seq := m.previewSeq
-	palette := m.palette
+	palette, set := m.palette, m.styles.Icons
 	return m, func() tea.Msg {
-		lines := renderMarkdown(excerpt, width, palette)
+		lines := renderMarkdown(excerpt, width, palette, set)
 		return previewRenderedMsg{seq: seq, key: key, lines: lines}
 	}
 }
@@ -122,9 +123,9 @@ func previewExcerpt(content string, paneHeight, hitLine int) (excerpt string, wi
 // renderMarkdown renders content with Glamour at wordWrap width, styled from
 // p, split into individually width-padded lines. Render errors fall back to
 // a single placeholder line rather than failing the whole overlay.
-func renderMarkdown(content string, width int, p theme.Palette) []string {
+func renderMarkdown(content string, width int, p theme.Palette, set icons.Set) []string {
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStyles(theme.GlamourStyle(p)),
+		glamour.WithStyles(theme.GlamourStyle(p, set)),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {

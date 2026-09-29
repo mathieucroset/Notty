@@ -258,6 +258,7 @@ func (m Model) startRender() tea.Cmd {
 		width:     m.width,
 		height:    m.height,
 		palette:   m.palette,
+		icons:     m.styles.Icons,
 		caps:      m.caps,
 		vaultRoot: m.vaultRoot,
 		segs:      segs,
@@ -286,8 +287,8 @@ func (m Model) startRender() tea.Cmd {
 		if i+1 < len(segs) && segs[i+1].Kind == Image && segs[i+1].StartLine >= s.StartLine && segs[i+1].EndLine <= s.EndLine {
 			imgs = segs[i+1].Images
 		}
-		md := prepareText(s, imgs, m.notePath, defs)
-		key := textKey{hash: hashString(md), width: cw, palette: m.palette.Name}
+		md := prepareText(s, imgs, m.notePath, defs, m.styles.Icons.Image)
+		key := textKey{hash: hashString(md), width: cw, palette: m.palette.Name, icons: m.styles.Icons.Name}
 		lines, ok := m.sh.textCache[key]
 		job.texts = append(job.texts, textJob{key: key, markdown: md, lines: lines, cached: ok})
 	}
@@ -463,9 +464,9 @@ func (m Model) row(r int) string {
 // shown, a plain chip otherwise (overlay open, images off).
 func (m Model) chip(item *imgItem) string {
 	if item.reason != "" {
-		return m.styles.Warning.Render("🖼 " + item.name + "  (" + item.reason + ")")
+		return m.styles.Warning.Render(m.styles.Icons.Image + " " + item.name + "  (" + item.reason + ")")
 	}
-	return m.styles.Chip.Render("🖼 " + item.name)
+	return m.styles.Chip.Render(m.styles.Icons.Image + " " + item.name)
 }
 
 // fit crops or pads s to exactly n columns.
