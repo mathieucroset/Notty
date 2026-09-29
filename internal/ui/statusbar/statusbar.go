@@ -26,6 +26,9 @@ type Model struct {
 	Words int
 	// Sync is the latest sync state.
 	Sync msgs.SyncStatusMsg
+	// Busy is a short background-work label such as "indexing…", shown
+	// before the sync state; "" for none.
+	Busy string
 
 	styles theme.Styles
 	width  int
@@ -113,6 +116,9 @@ func (m Model) View() string {
 	leftW := lipgloss.Width(left)
 
 	syncText := SyncText(m.Sync)
+	if m.Busy != "" {
+		syncText = strings.TrimSpace(m.Busy + "   " + syncText)
+	}
 	showSync, showHelp := syncText != "", true
 
 	// right builds the right-hand segment for the current choices.
