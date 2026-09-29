@@ -286,6 +286,9 @@ func TestPlaceholderCommands(t *testing.T) {
 		{palette.SetupSyncMsg{}, "Sync is not set up yet"},
 		{msgs.OpenResolverMsg{}, "No conflicts to resolve"},
 		{palette.CleanAttachmentsMsg{}, "No unused attachments"},
+		{keyMsg("ctrl+p"), "fuzzy finder is coming soon"},
+		{keyMsg("ctrl+f"), "Full-text search is coming soon"},
+		{keyMsg("ctrl+s"), "Saving from the editor is coming soon"},
 	}
 	for _, tt := range tests {
 		m := start(t, testOptions(t), 120, 30)

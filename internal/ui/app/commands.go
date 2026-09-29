@@ -296,6 +296,15 @@ func (m *Model) updateCommandMsg(msg tea.Msg) (tea.Cmd, bool) {
 		return m.openConfig(), true
 	case configEditedMsg:
 		return m.handleConfigEdited(msg), true
+	// TODO(integration pass B): the finder overlays and the editor save
+	// replace these placeholders.
+	case msgs.OpenFinderMsg:
+		if msg.FullText {
+			return m.pushToast(msgs.ToastInfo, "Full-text search is coming soon"), true
+		}
+		return m.pushToast(msgs.ToastInfo, "The fuzzy finder is coming soon"), true
+	case msgs.SaveRequestMsg:
+		return m.pushToast(msgs.ToastInfo, "Saving from the editor is coming soon"), true
 	case palette.CleanAttachmentsMsg:
 		if m.opts.Vault == nil {
 			return nil, true
