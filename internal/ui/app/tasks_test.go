@@ -45,6 +45,11 @@ func TestTasksView(t *testing.T) {
 	if strings.Contains(s, "done thing") {
 		t.Errorf("done task shown:\n%s", s)
 	}
+	for _, l := range strings.Split(s, "\n") {
+		if strings.Contains(l, "write report") && (!strings.HasSuffix(l, " │") || !strings.Contains(l, "││ ")) {
+			t.Errorf("no one-column gutter around the tasks view: %q", l)
+		}
+	}
 	assertSize(t, m, 120, 30)
 }
 

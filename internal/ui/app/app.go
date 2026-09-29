@@ -415,8 +415,9 @@ func (m *Model) relayout() {
 	} else if m.focus == FocusSidebar {
 		m.setFocus(FocusMain)
 	}
-	m.tasks = m.tasks.SetSize(l.Content.W, l.Content.H)
-	m.trash = m.trash.SetSize(l.Content.W, l.Content.H)
+	// The Tasks and Trash views get a one-column gutter on each side.
+	m.tasks = m.tasks.SetSize(max(l.Content.W-2*viewGutter, 0), l.Content.H)
+	m.trash = m.trash.SetSize(max(l.Content.W-2*viewGutter, 0), l.Content.H)
 	if m.history != nil {
 		h := m.history.SetSize(m.width, m.height)
 		m.history = &h
@@ -549,6 +550,17 @@ func (m *Model) renderMain(l Layout) string {
 		l.Main.W, l.Main.H, m.focus == FocusMain)
 }
 
+// viewGutter is the blank columns left and right of the Tasks and Trash
+// views, inside the pane border.
+const viewGutter = 1
+
+// withGutter indents every line of a main-pane view by the gutter (the
+// right gutter comes from the view being sized narrower).
+func withGutter(s string) string {
+	pad := strings.Repeat(" ", viewGutter)
+	return pad + strings.ReplaceAll(s, "\n", "\n"+pad)
+}
+
 // emptyHint is the main pane text when no note is open. It only suggests
 // keys that work at the current size.
 func (m *Model) emptyHint() string {
@@ -571,9 +583,9 @@ func (m *Model) mainContent(w, h int) string {
 	}
 	switch m.mainView {
 	case ViewTasks:
-		return m.tasks.View()
+		return withGutter(m.tasks.View())
 	case ViewTrash:
-		return m.trash.View()
+		return withGutter(m.trash.View())
 	}
 	if m.note.path == "" {
 		return centered(m.emptyHint())
