@@ -158,6 +158,9 @@ func (m *Model) handleSaved(msg savedMsg) tea.Cmd {
 	}
 	m.queueReindex(msg.path)
 	m.discardOnQuit = false // a later quit must save again
+	if msg.path == m.editor.Path() {
+		m.baseline = msg.content
+	}
 	m.editor = m.editor.MarkSaved(msg.path, msg.version)
 	m.sidebar.SetDirty(m.dirtyPath())
 	m.refreshIndexViews()

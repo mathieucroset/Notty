@@ -58,6 +58,7 @@ func TestExternalChangeDirtyReloadFromDisk(t *testing.T) {
 	if got := readFile(t, opts.Vault, "ideas.md"); got != external {
 		t.Fatalf("autosave overwrote the external change while asking: %q", got)
 	}
+	run(t, m, keyMsg("j"))
 	run(t, m, keyMsg("enter")) // Reload from disk
 	if m.overlayOpen() {
 		t.Error("dialog still open")
@@ -72,7 +73,6 @@ func TestExternalChangeDirtyReloadFromDisk(t *testing.T) {
 
 func TestExternalChangeDirtyKeepMine(t *testing.T) {
 	m, opts := dirtyExternal(t)
-	run(t, m, keyMsg("j"))
 	run(t, m, keyMsg("enter")) // Keep mine
 	if !strings.HasPrefix(m.editor.Content(), "mine # Ideas") {
 		t.Fatalf("buffer = %q", m.editor.Content())

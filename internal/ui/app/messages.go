@@ -51,10 +51,11 @@ type noteReloadedMsg struct {
 // while its buffer has unsaved edits (spec §9).
 const dlgExternalChange = "external-change"
 
-// External change choices, in dialog order.
+// External change choices, in dialog order: keeping the edits is the
+// default.
 const (
-	choiceReload = iota
-	choiceKeepMine
+	choiceKeepMine = iota
+	choiceReload
 )
 
 // reloadNoteIf re-reads the open note when it is one of paths (or inside
@@ -89,10 +90,16 @@ func (m *Model) handleNoteReloaded(msg noteReloadedMsg) tea.Cmd {
 	if msg.err != nil || msg.path != m.note.path || msg.path != m.editor.Path() {
 		return nil
 	}
-	if m.editor.Dirty() && !msg.force && msg.content != m.editor.Content() {
-		return m.askExternalChange(msg.path)
+	if !msg.force {
+		if msg.content == m.baseline {
+			return nil // unchanged since Notty last read or wrote it
+		}
+		if m.editor.Dirty() && msg.content != m.editor.Content() {
+			return m.askExternalChange(msg.path)
+		}
 	}
 	m.editor = m.editor.Reload(msg.content)
+	m.baseline = msg.content
 	m.note.title = vault.Title(msg.content, msg.path)
 	m.note.words = len(strings.Fields(msg.content))
 	m.sidebar.SetDirty(m.dirtyPath())
@@ -110,7 +117,7 @@ func (m *Model) askExternalChange(p string) tea.Cmd {
 	m.extConflict = p
 	d := dialog.NewChoice(dlgExternalChange, "Changed on disk",
 		"'"+displayName(p)+"' changed on disk, and you have unsaved edits.",
-		[]string{"Reload from disk", "Keep mine"}, m.opts.Styles)
+		[]string{"Keep mine", "Reload from disk"}, m.opts.Styles)
 	m.openDialog(d, pendingOp{kind: opExternalChange, path: p})
 	return nil
 }

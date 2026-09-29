@@ -162,6 +162,10 @@ type Model struct {
 	// editorStatus is the editor's last message (unknown command, search
 	// wrapped), shown in the status row until the next key.
 	editorStatus string
+	// baseline is the open note's content as Notty last read or wrote it:
+	// a change on disk only counts as external when the file differs
+	// from it.
+	baseline string
 	// extConflict is the open note while the "changed on disk" dialog
 	// waits for an answer; its saves are held until then.
 	extConflict string
@@ -304,7 +308,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if p := m.editor.Path(); p != "" && p != msg.path {
 			// Typed into the old note while the new one was read: save
 			// it before its buffer is replaced.
-			if cmd := m.saveThen(msg); cmd != nil {
+			if cmd := m.saveThen(msg, "it stays open"); cmd != nil {
 				return m, cmd
 			}
 		}
@@ -313,6 +317,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadNote(msg)
 	case savedThenMsg:
 		return m, m.handleSavedThen(msg)
+	case runPendingMsg:
+		return m, m.runPending(msg.op, msg.res)
 
 	case editor.ChangedMsg:
 		return m, m.handleEditorChanged(msg)
@@ -500,6 +506,7 @@ func (m *Model) showNote(p, content string, line int) tea.Cmd {
 	m.editor = m.editor.SetReadOnly(m.isConflicted(p), "").Load(p, content, cur)
 	m.editorStatus = ""
 	m.extConflict = ""
+	m.baseline = content
 	m.note = note{
 		path:  p,
 		title: vault.Title(content, p),

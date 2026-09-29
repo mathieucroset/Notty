@@ -53,7 +53,7 @@ func (m *Model) openNote(msg msgs.OpenNoteMsg) tea.Cmd {
 	}
 	m.rememberCursor()
 	load := loadNoteMsg{path: msg.Path, line: msg.Line, seq: m.openSeq}
-	if cmd := m.saveThen(load); cmd != nil {
+	if cmd := m.saveThen(load, "it stays open"); cmd != nil {
 		return cmd // the new note loads once the old one is saved
 	}
 	return m.loadNote(load)
@@ -75,16 +75,17 @@ func (m *Model) loadNote(msg loadNoteMsg) tea.Cmd {
 }
 
 // savedThenMsg reports the save of the open buffer that must succeed
-// before next is handled.
+// before next is handled; abort says what did not happen if it failed.
 type savedThenMsg struct {
 	saved savedMsg
 	next  tea.Msg
+	abort string
 }
 
 // saveThen saves the dirty buffer and then delivers next; it returns nil
-// when there is nothing to save. A failed save drops next and keeps the
-// note open (handleSavedThen).
-func (m *Model) saveThen(next tea.Msg) tea.Cmd {
+// when there is nothing to save. A failed save drops next with an error
+// toast ("Could not save X, so <abort>").
+func (m *Model) saveThen(next tea.Msg, abort string) tea.Cmd {
 	if !m.editor.Dirty() {
 		return nil
 	}
@@ -94,7 +95,7 @@ func (m *Model) saveThen(next tea.Msg) tea.Cmd {
 	}
 	return func() tea.Msg {
 		res, _ := save().(savedMsg)
-		return savedThenMsg{saved: res, next: next}
+		return savedThenMsg{saved: res, next: next, abort: abort}
 	}
 }
 
@@ -102,8 +103,8 @@ func (m *Model) saveThen(next tea.Msg) tea.Cmd {
 // the note open when the save failed.
 func (m *Model) handleSavedThen(msg savedThenMsg) tea.Cmd {
 	if msg.saved.err != nil {
-		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s, so it stays open: %v",
-			msg.saved.path, msg.saved.err))
+		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s, so %s: %v",
+			msg.saved.path, msg.abort, msg.saved.err))
 	}
 	return tea.Batch(m.handleSaved(msg.saved), emit(msg.next))
 }
@@ -148,6 +149,7 @@ func (m *Model) closeNote() {
 	m.editor = m.editor.SetReadOnly(false, "").Load("", "", buffer.Pos{})
 	m.editorStatus = ""
 	m.extConflict = ""
+	m.baseline = ""
 	m.sidebar.SetDirty("")
 }
 

@@ -9,6 +9,17 @@ import (
 	"github.com/mathieucroset/notty/internal/vault"
 )
 
+// opDone names a finished rename, move or trash for messages.
+func opDone(op opKind) string {
+	switch op {
+	case opRename:
+		return "renamed"
+	case opMove:
+		return "moved"
+	}
+	return "moved to trash"
+}
+
 // opKind is the action a dialog's result feeds.
 type opKind int
 
@@ -46,11 +57,28 @@ type pendingOp struct {
 	ext  string
 }
 
-// runPending performs op with the confirmed dialog result res.
+// runPendingMsg runs a confirmed operation once the buffer it touches is
+// saved.
+type runPendingMsg struct {
+	op  pendingOp
+	res dialog.ResultMsg
+}
+
+// runPending performs op with the confirmed dialog result res. Renaming,
+// moving or trashing the open note (or a folder holding it) saves its
+// buffer first, and is abandoned if that save fails.
 func (m *Model) runPending(op pendingOp, res dialog.ResultMsg) tea.Cmd {
 	v, value := m.opts.Vault, strings.TrimSpace(res.Value)
 	if v == nil {
 		return nil
+	}
+	switch op.kind {
+	case opRename, opMove, opTrash:
+		if m.note.path != "" && isUnder(m.note.path, op.path) {
+			if cmd := m.saveThen(runPendingMsg{op: op, res: res}, "it was not "+opDone(op.kind)); cmd != nil {
+				return cmd
+			}
+		}
 	}
 	switch op.kind {
 	case opNewNote:

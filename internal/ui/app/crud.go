@@ -329,6 +329,9 @@ func (m *Model) pathRenamed(oldPath, newPath string) tea.Cmd {
 			// a new one so the buffer is saved under the new name.
 			rearm = m.editor.ChangeCmd()
 		}
+		// The buffer was saved before the operation; re-read the note
+		// so link rewrites made on disk by a move win.
+		rearm = tea.Batch(rearm, m.reloadNoteIf(m.note.path), m.syncPreview())
 	}
 	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd(), rearm)
 }
