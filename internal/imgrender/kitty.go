@@ -57,6 +57,31 @@ func KittyTransmit(img image.Image, id uint32, cols, rows int) string {
 	return kittyChunks(control, base64.StdEncoding.EncodeToString(data.Bytes()))
 }
 
+// KittyDirect returns the APC sequence(s) that transmit img as PNG and
+// display it at the cursor over cols x rows cells, without moving the cursor
+// (a=T,C=1, a direct placement rather than KittyTransmit's virtual one).
+// The caller positions the cursor first. Responses are suppressed (q=2),
+// payloads are chunked like [KittyTransmit]'s, and sources larger than
+// cols*20 x rows*40 pixels are downscaled first (aspect preserved); Kitty
+// scales the image to the cells.
+//
+// It returns "" for a nil image, id 0, an empty placement, or when encoding
+// fails.
+func KittyDirect(img image.Image, id uint32, cols, rows int) string {
+	if img == nil || id == 0 || cols <= 0 || rows <= 0 {
+		return ""
+	}
+	bounds := img.Bounds()
+	w, h := fitWithin(bounds.Dx(), bounds.Dy(), cols*kittyMaxCellW, rows*kittyMaxCellH)
+	var data bytes.Buffer
+	if err := png.Encode(&data, Scale(img, w, h)); err != nil {
+		return ""
+	}
+	control := "a=T,f=100,q=2,C=1,i=" + strconv.FormatUint(uint64(id), 10) +
+		",c=" + strconv.Itoa(cols) + ",r=" + strconv.Itoa(rows)
+	return kittyChunks(control, base64.StdEncoding.EncodeToString(data.Bytes()))
+}
+
 // kittyChunks frames a base64 payload as one APC G command, or as several of
 // at most kitty.MaxChunkSize bytes each when it is longer: the first chunk
 // carries control plus m=1, later ones only q=2 and m=1, the last m=0. It
