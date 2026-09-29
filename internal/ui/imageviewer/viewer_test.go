@@ -247,6 +247,34 @@ func TestRunSixelAndITerm(t *testing.T) {
 	}
 }
 
+func TestRunPixelProtocolsWithUnknownCellSize(t *testing.T) {
+	dir := t.TempDir()
+	sq := writePNG(t, dir, "sq.png", 16, 16)
+	tests := []struct {
+		name         string
+		proto        imgrender.Protocol
+		cellW, cellH int
+		want         []string
+	}{
+		// Unknown cells: 22 usable rows, 44x22 cells centered at column 19;
+		// 22*16 = 352 px rounded down to a multiple of 6.
+		{"sixel guessed cells", imgrender.ProtoSixel, 0, 0, []string{cup(1, 19) + "\x1bP", "\"1;1;352;348"}},
+		{"iterm guessed cells", imgrender.ProtoITerm, 0, 0, []string{cup(1, 19) + "\x1b]1337;File="}},
+		// Detected cells use all 23 rows: 46x23 cells at column 18;
+		// 23*16 = 368 px rounded down to 366.
+		{"sixel detected cells", imgrender.ProtoSixel, 8, 16, []string{cup(1, 18) + "\x1bP", "\"1;1;368;366"}},
+		{"iterm detected cells", imgrender.ProtoITerm, 8, 16, []string{cup(1, 18) + "\x1b]1337;File="}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, out := newTestViewer([]string{sq}, tt.proto, strings.NewReader("q"))
+			v.Caps.CellW, v.Caps.CellH = tt.cellW, tt.cellH
+			runViewer(t, v)
+			assertOrder(t, out.String(), append(append([]string{altEnter}, tt.want...), altLeave)...)
+		})
+	}
+}
+
 func TestRunErrorImages(t *testing.T) {
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "bad.png")

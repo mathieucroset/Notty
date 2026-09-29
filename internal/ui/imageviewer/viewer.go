@@ -318,13 +318,21 @@ func (s *session) draw() {
 // image draws the current image centered in cols x area cells.
 func (s *session) image(b *strings.Builder, cols, area int) {
 	cw, ch := s.cellSize()
+	proto := s.v.Caps.Viewer
+	pixels := proto == imgrender.ProtoSixel || proto == imgrender.ProtoITerm
+	if pixels && (s.v.Caps.CellW <= 0 || s.v.Caps.CellH <= 0) {
+		// The image is sized in pixels from a guessed 8x16 cell; when the
+		// real cells are shorter it runs taller than planned. Keep a spare
+		// row so it cannot reach the footer and scroll the screen.
+		area = max(area-1, 1)
+	}
 	maxCols, maxRows := cols, area
-	if s.v.Caps.Viewer == imgrender.ProtoKitty {
+	if proto == imgrender.ProtoKitty {
 		maxCols, maxRows = min(maxCols, maxKittyCells), min(maxRows, maxKittyCells)
 	}
 	c, r := imgrender.FitCells(s.imgW, s.imgH, maxCols, maxRows, cw, ch)
 	top, left := (area-r)/2+1, (cols-c)/2+1
-	switch s.v.Caps.Viewer {
+	switch proto {
 	case imgrender.ProtoKitty:
 		if s.v.Caps.TmuxPassthrough {
 			// tmux does not track where a direct placement lands; unicode
@@ -338,7 +346,10 @@ func (s *session) image(b *strings.Builder, cols, area int) {
 		}
 		s.kittyVisible = true
 	case imgrender.ProtoSixel:
-		b.WriteString(cup(top, left) + s.wrap(imgrender.Sixel(s.img, c*cw, r*ch)))
+		// Sixel rows are drawn in bands of 6 pixels: a height that is not a
+		// multiple of 6 would spill a partial band into the next cell row.
+		pxH := max(r*ch/6*6, 6)
+		b.WriteString(cup(top, left) + s.wrap(imgrender.Sixel(s.img, c*cw, pxH)))
 	case imgrender.ProtoITerm:
 		b.WriteString(cup(top, left) + s.wrap(imgrender.ITerm(s.img, c*cw, r*ch)))
 	default: // ProtoHalfBlocks, ProtoOff
