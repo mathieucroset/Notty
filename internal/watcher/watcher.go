@@ -64,11 +64,12 @@ type Watcher struct {
 	selfWrites map[string]fileStamp // rel -> stamp recorded by NoteSelfWrite
 
 	// Owned by the run goroutine.
-	dirs     map[string]bool // watched directories, vault-relative ("." = root)
-	pending  map[string]bool // changed paths not yet debounced
-	ready    map[string]bool // debounced paths awaiting delivery
-	urgent   []error         // errors delivered even when the Errors buffer is full
-	rootGone bool            // ErrRootGone already queued
+	dirs           map[string]bool // watched directories, vault-relative ("." = root)
+	pending        map[string]bool // changed paths not yet debounced
+	ready          map[string]bool // debounced paths awaiting delivery
+	urgent         []error         // errors delivered even when the Errors buffer is full
+	rootGone       bool            // ErrRootGone already queued
+	overflowQueued bool            // an overflow error is queued in urgent
 }
 
 // New starts watching root and every directory below it, except ignored ones.
@@ -76,6 +77,16 @@ type Watcher struct {
 // cannot be (for example because of permissions) are skipped and reported on
 // Errors.
 func New(root string) (*Watcher, error) {
+	w, err := newWatcher(root)
+	if err != nil {
+		return nil, err
+	}
+	w.start()
+	return w, nil
+}
+
+// newWatcher sets up the watches without starting the event loop.
+func newWatcher(root string) (*Watcher, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("watcher: resolve root: %w", err)
@@ -110,9 +121,12 @@ func New(root string) (*Watcher, error) {
 	for _, e := range errs {
 		w.sendError(e) // buffered: delivered once the caller reads Errors
 	}
+	return w, nil
+}
+
+func (w *Watcher) start() {
 	w.wg.Add(1)
 	go w.run()
-	return w, nil
 }
 
 // Events delivers debounced batches of changes. It is closed by Close.
@@ -222,7 +236,7 @@ func (w *Watcher) run() {
 			if !ok {
 				return
 			}
-			w.sendError(fmt.Errorf("watcher: %w", err))
+			w.handleFSError(err)
 
 		case <-timerC:
 			timerC = nil
@@ -238,7 +252,48 @@ func (w *Watcher) run() {
 
 		case errOut <- urgentErr:
 			w.urgent = w.urgent[1:]
+			if errors.Is(urgentErr, fsnotify.ErrEventOverflow) {
+				w.overflowQueued = false
+			}
 		}
+	}
+}
+
+// handleFSError forwards an fsnotify error. After a queue overflow, events
+// (including directory creations and removals) were lost: the overflow is
+// queued for guaranteed delivery, once until delivered, and the directory
+// watches are rebuilt.
+func (w *Watcher) handleFSError(err error) {
+	if !errors.Is(err, fsnotify.ErrEventOverflow) {
+		w.sendError(fmt.Errorf("watcher: %w", err))
+		return
+	}
+	if !w.overflowQueued {
+		w.overflowQueued = true
+		w.urgent = append(w.urgent, fmt.Errorf("watcher: events lost, re-index the vault: %w", err))
+	}
+	w.resync()
+}
+
+// resync rebuilds the directory watches from disk: it drops watches on
+// directories that no longer exist (or were renamed away) and watches every
+// directory currently present.
+func (w *Watcher) resync() {
+	for d := range w.dirs {
+		if d == "." {
+			continue
+		}
+		if info, err := os.Lstat(w.abs(d)); err != nil || !info.IsDir() {
+			w.unwatchTree(d)
+		}
+	}
+	clear(w.dirs) // re-adding an existing watch is harmless
+	errs, err := w.addTree(".", nil)
+	for _, e := range errs {
+		w.sendError(e)
+	}
+	if err != nil {
+		w.sendError(err)
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 const (
@@ -498,6 +500,51 @@ func TestRootRemovalReportsError(t *testing.T) {
 				break
 			}
 		})
+	}
+}
+
+func TestOverflowDeliveredWhenErrorBufferFullAndWatchesResynced(t *testing.T) {
+	root := t.TempDir()
+	mkdir(t, root, "missed")
+	w, err := newWatcher(root)
+	if err != nil {
+		t.Fatalf("newWatcher: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+
+	// Simulate a directory whose creation event was lost in the overflow.
+	if err := w.fsw.Remove(filepath.Join(w.root, "missed")); err != nil {
+		t.Fatalf("remove watch: %v", err)
+	}
+	delete(w.dirs, "missed")
+	// Fill the Errors buffer so an ordinary send would be dropped.
+	filler := errors.New("filler")
+	for range cap(w.errors) {
+		w.sendError(filler)
+	}
+	w.handleFSError(fsnotify.ErrEventOverflow)
+	w.handleFSError(fsnotify.ErrEventOverflow) // sticky: queued only once
+	w.start()
+
+	var overflows int
+	for range cap(w.errors) + 1 {
+		select {
+		case err := <-w.Errors():
+			if errors.Is(err, fsnotify.ErrEventOverflow) {
+				overflows++
+			}
+		case <-time.After(waitTimeout):
+			t.Fatal("timed out draining errors")
+		}
+	}
+	if overflows != 1 {
+		t.Fatalf("overflow errors = %d, want 1", overflows)
+	}
+
+	writeFile(t, root, "missed/a.md", "x")
+	ev := nextEvent(t, w)
+	if !slices.Equal(ev.Paths, []string{"missed/a.md"}) {
+		t.Fatalf("paths = %v, want [missed/a.md]", ev.Paths)
 	}
 }
 
