@@ -124,7 +124,7 @@ func TestFirstRunEscOnVaultAsksToQuit(t *testing.T) {
 	m, _ = press(t, m, "esc", "esc")
 	mustNotContain(t, m, "Quit Notty?")
 	// y quits.
-	m, out = press(t, m, "esc", "y")
+	_, out = press(t, m, "esc", "y")
 	if len(out) != 1 {
 		t.Fatalf("y emitted %v, want QuitMsg", out)
 	}
