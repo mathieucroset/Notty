@@ -1,10 +1,47 @@
 package vim
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/mathieucroset/notty/internal/buffer"
 )
+
+func TestLargeCountsAreFast(t *testing.T) {
+	many := strings.Repeat("word\n", 10000)
+	tests := []struct {
+		name, in, keys string
+		check          func(b *buffer.Buffer) bool
+	}{
+		{"9999ia", "|x", "9999ia<esc>", func(b *buffer.Buffer) bool {
+			return b.String() == strings.Repeat("a", 9999)+"x"
+		}},
+		{"9999ia then dot", "|x", "9999ia<esc>.", func(b *buffer.Buffer) bool {
+			return b.LineLen(0) == 2*9999+1
+		}},
+		{"9999J", "|" + many, "9999J", func(b *buffer.Buffer) bool {
+			return strings.HasPrefix(b.Line(0), "word word") && b.LineCount() == 2
+		}},
+		{"9999x", "|" + strings.Repeat("a", 20000), "9999x", func(b *buffer.Buffer) bool {
+			return b.LineLen(0) == 20000-9999
+		}},
+		{"9999p", "|ab", "yl9999p", func(b *buffer.Buffer) bool { return b.LineLen(0) == 10001 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start := time.Now()
+			_, b, _ := run(t, tt.in, tt.keys)
+			elapsed := time.Since(start)
+			if !tt.check(b) {
+				t.Errorf("wrong result: %d lines, line 0 len %d", b.LineCount(), b.LineLen(0))
+			}
+			if elapsed > 50*time.Millisecond*raceSlowdown {
+				t.Errorf("took %v", elapsed)
+			}
+		})
+	}
+}
 
 func TestInsertDeleteWord(t *testing.T) {
 	runEditCases(t, []editCase{

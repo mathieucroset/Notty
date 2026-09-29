@@ -1,6 +1,8 @@
 package vim
 
 import (
+	"strings"
+
 	"github.com/mathieucroset/notty/internal/buffer"
 )
 
@@ -144,13 +146,36 @@ func (m *Machine) insertSpecial(b *buffer.Buffer, tok string) bool {
 	return true
 }
 
+// typedText returns the text of keys if they are all plain typed text.
+func typedText(keys []Key) (string, bool) {
+	var sb strings.Builder
+	for _, k := range keys {
+		switch specialToken(k) {
+		case "":
+			sb.WriteString(k.Text)
+		case "<space>":
+			sb.WriteByte(' ')
+		default:
+			return "", false
+		}
+	}
+	return sb.String(), true
+}
+
 // leaveInsert returns to normal mode: it applies the i/a count, closes the
 // undo group and moves the cursor left one column, as vim does.
 func (m *Machine) leaveInsert(b *buffer.Buffer) {
 	keys := m.sessionKeys
-	for i := 1; i < m.insertRepeat; i++ {
-		for _, k := range keys {
-			m.insertApply(b, k, specialToken(k))
+	if m.insertRepeat > 1 {
+		if text, ok := typedText(keys); ok {
+			// Plain typing: insert all the copies in one edit.
+			b.SetCursor(b.Insert(b.Cursor(), strings.Repeat(text, m.insertRepeat-1)))
+		} else {
+			for i := 1; i < m.insertRepeat; i++ {
+				for _, k := range keys {
+					m.insertApply(b, k, specialToken(k))
+				}
+			}
 		}
 	}
 	m.endInsertSession(keys)

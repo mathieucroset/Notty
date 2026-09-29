@@ -303,20 +303,26 @@ func joinLines(b *buffer.Buffer, l, count int) bool {
 		return false
 	}
 	count = min(max(count, 2), last-l+1)
-	col := 0
+	// Build the joined line once so large counts stay linear.
+	var sb strings.Builder
+	sb.WriteString(b.Line(l))
+	joinAt := 0 // byte offset of the last join point
 	for i := 1; i < count; i++ {
-		cur, next := b.Line(l), b.Line(l+1)
-		ws := leadingWS(next)
-		rest := next[len(ws):]
+		next := b.Line(l + i)
+		rest := next[len(leadingWS(next)):]
+		cur := sb.String() // no copy: Builder.String shares its buffer
 		sep := " "
 		if rest == "" || cur == "" || strings.HasSuffix(cur, " ") || strings.HasSuffix(cur, "\t") ||
 			strings.HasPrefix(rest, ")") {
 			sep = ""
 		}
-		col = graphemeLen(cur)
-		b.Replace(buffer.Range{Start: pos(l, col), End: pos(l+1, graphemeLen(ws))}, sep)
+		joinAt = sb.Len()
+		sb.WriteString(sep)
+		sb.WriteString(rest)
 	}
-	b.SetCursor(pos(l, col))
+	joined := sb.String()
+	b.Replace(buffer.Range{Start: pos(l, 0), End: lineEnd(b, l+count-1)}, joined)
+	b.SetCursor(pos(l, buffer.ByteToCol(joined, joinAt)))
 	return true
 }
 
