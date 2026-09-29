@@ -23,6 +23,7 @@ import (
 	"github.com/mathieucroset/notty/internal/imgrender"
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
+	"github.com/mathieucroset/notty/internal/recovery"
 	"github.com/mathieucroset/notty/internal/ui/app"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/vault"
@@ -69,11 +70,18 @@ func runProgram(opts app.Options) error {
 	if p, force := colorProfileFor(opts.Caps); force {
 		progOpts = append(progOpts, tea.WithColorProfile(p))
 	}
+	// The snapshot holds the open buffer and any panic, for the crash
+	// report once the terminal is restored (spec §9).
+	snap := &recovery.Snapshot{}
+	opts.Snapshot = snap
 	m := app.New(opts)
-	_, err := tea.NewProgram(m, progOpts...).Run()
+	_, err := tea.NewProgram(app.Guard(m, snap), progOpts...).Run()
 	// Once the program is done the syncer's host fails fast (amendment A7)
 	// and a lock taken after the wizard is released.
 	m.Shutdown()
+	if _, _, panicked := snap.Panic(); panicked || errors.Is(err, tea.ErrProgramPanic) {
+		return errors.New(crashMessage(snap, logPathIfAny(opts.StateDir), time.Now()))
+	}
 	return err
 }
 
