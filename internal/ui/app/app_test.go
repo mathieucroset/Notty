@@ -349,6 +349,30 @@ func TestOpenNoteFromSidebar(t *testing.T) {
 	}
 }
 
+func TestStaleNoteLoadDropped(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	_, cmdA := m.Update(msgs.OpenNoteMsg{Path: "ideas.md", Line: -1})
+	_, cmdB := m.Update(msgs.OpenNoteMsg{Path: "Work/Standup notes.md", Line: -1})
+	loadedA, loadedB := cmdA(), cmdB()
+	// B finishes first, then the stale A arrives.
+	run(t, m, loadedB)
+	run(t, m, loadedA)
+	if m.NotePath() != "Work/Standup notes.md" {
+		t.Errorf("NotePath = %q, want the most recently requested note", m.NotePath())
+	}
+	// A stale failure does not toast either.
+	_, cmdC := m.Update(msgs.OpenNoteMsg{Path: "missing.md", Line: -1})
+	_, cmdD := m.Update(msgs.OpenNoteMsg{Path: "ideas.md", Line: -1})
+	loadedC, loadedD := cmdC(), cmdD()
+	run(t, m, loadedD)
+	if got := run(t, m, loadedC); len(got) != 0 {
+		t.Errorf("stale failed load produced %#v", got)
+	}
+	if m.NotePath() != "ideas.md" {
+		t.Errorf("NotePath = %q, want ideas.md", m.NotePath())
+	}
+}
+
 func TestOpenMissingNoteToasts(t *testing.T) {
 	m := start(t, testOptions(t), 120, 30)
 	got := run(t, m, msgs.OpenNoteMsg{Path: "nope.md", Line: -1})

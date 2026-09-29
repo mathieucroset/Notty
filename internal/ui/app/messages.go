@@ -16,10 +16,14 @@ type treeLoadedMsg struct {
 	err  error
 }
 
-// noteLoadedMsg carries a note read from disk.
+// noteLoadedMsg carries a note read from disk, or the read error. seq
+// identifies the open request, so a slow read that a newer request has
+// superseded is dropped.
 type noteLoadedMsg struct {
+	seq     int
 	path    string
 	content string
+	err     error
 }
 
 func emit(msg tea.Msg) tea.Cmd {
@@ -39,13 +43,10 @@ func loadTreeCmd(v *vault.Vault) tea.Cmd {
 }
 
 // loadNoteCmd reads a note off the UI goroutine.
-func loadNoteCmd(v *vault.Vault, path string) tea.Cmd {
+func loadNoteCmd(v *vault.Vault, path string, seq int) tea.Cmd {
 	return func() tea.Msg {
 		content, err := v.Read(path)
-		if err != nil {
-			return msgs.ToastMsg{Level: msgs.ToastError, Text: fmt.Sprintf("Could not open %s: %v", path, err)}
-		}
-		return noteLoadedMsg{path: path, content: content}
+		return noteLoadedMsg{seq: seq, path: path, content: content, err: err}
 	}
 }
 

@@ -92,6 +92,7 @@ type Model struct {
 	sidebar sidebar.Model
 	status  statusbar.Model
 	note    note
+	openSeq int // number of the latest open request
 	sync    msgs.SyncStatusMsg
 }
 
@@ -164,9 +165,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.opts.Vault == nil {
 			return m, nil
 		}
-		return m, loadNoteCmd(m.opts.Vault, msg.Path)
+		m.openSeq++
+		return m, loadNoteCmd(m.opts.Vault, msg.Path, m.openSeq)
 
 	case noteLoadedMsg:
+		if msg.seq != m.openSeq {
+			return m, nil // superseded by a newer open request
+		}
+		if msg.err != nil {
+			return m, errorToast("Could not open %s: %v", msg.path, msg.err)
+		}
 		return m, m.showNote(msg.path, msg.content)
 
 	case msgs.FocusMainMsg:
