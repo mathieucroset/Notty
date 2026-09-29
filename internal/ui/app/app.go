@@ -146,8 +146,9 @@ type Model struct {
 	// the displayed palette's Name after a startup fallback or during a
 	// picker preview (user themes spec §1).
 	themeName string
-	// lastThemeErr is the last theme load warning shown while previewing,
-	// so moving over a broken theme again does not repeat it.
+	// lastThemeErr is the last theme load warning shown by a picker preview
+	// or a live reload, so the same error is not repeated (reset when the
+	// palette opens).
 	lastThemeErr string
 	// lastPaletteSeq and lastWizardSeq are the Seq of the last theme
 	// preview accepted from the open palette and wizard: an older one,

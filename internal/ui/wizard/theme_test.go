@@ -320,3 +320,32 @@ func TestThemePreviewSeq(t *testing.T) {
 		}
 	}
 }
+
+// TestThemeStepUnlistedCurrent: when the current theme is not listed (its
+// file is gone), the cursor starts on the first theme and the app is asked
+// to show it, so the screen matches the cursor.
+func TestThemeStepUnlistedCurrent(t *testing.T) {
+	cat, dir := userCatalog(t)
+	cur, err := cat.Resolve("good")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "good.toml")); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeEnv{vaultState: setup.Empty}
+	m := New(FirstRun, "~/Notes", cur, cat, f.env(), testStyles()).SetSize(100, 40)
+	m, _ = drive(t, m, m.Init())
+	m, out := press(t, m, "enter", "down", "enter")
+	if m.Stage() != StageTheme {
+		t.Fatalf("stage = %v", m.Stage())
+	}
+	first := cat.Names()[0]
+	if p := previewPalettes(out); len(p) != 1 || p[0].Name != first || p[0].Key() == cur.Key() {
+		t.Errorf("previews on entering the step = %v, want %s", p, first)
+	}
+	_, out = press(t, m, "enter")
+	if d := doneMsg(t, out); d.Palette.Name != first {
+		t.Errorf("DoneMsg theme = %q, want %q", d.Palette.Name, first)
+	}
+}

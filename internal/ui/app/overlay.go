@@ -84,7 +84,9 @@ func (m *Model) pushOverlay(s *overlayState) {
 
 // leaveOverlay cleans up after an overlay dropped without a result: a
 // palette previewing a theme cancels the preview, exactly as its own
-// ThemeCancelMsg would.
+// ThemeCancelMsg would. It also runs when a theme choice closes the
+// palette, and does nothing then: chooseTheme set paletteOrig to the
+// choice.
 func (m *Model) leaveOverlay(s *overlayState) {
 	if s.kind == overlayPalette {
 		m.restorePalette(s.paletteOrig)

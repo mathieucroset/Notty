@@ -41,8 +41,12 @@ type attachmentsCleanedMsg struct {
 // configEditedMsg reports that $EDITOR exited after editing config.toml.
 type configEditedMsg struct{ err error }
 
-// openPalette opens the command palette (ctrl+k).
+// openPalette opens the command palette (ctrl+k). An open palette's
+// preview is undone first, so the new one starts from the original.
 func (m *Model) openPalette() {
+	if o := m.paletteOverlay(); o != nil {
+		m.restorePalette(o.paletteOrig)
+	}
 	cmds := palette.DefaultCommands()
 	if len(m.trashWarnings) > 0 {
 		cmds = append(cmds, palette.Command{
@@ -190,6 +194,12 @@ func (m *Model) paletteOverlay() *overlayState {
 	return nil
 }
 
+// themeLoadWarning is the warning toast for a theme that does not load.
+// Its errors name the theme file.
+func themeLoadWarning(err error) string {
+	return fmt.Sprintf("Could not load %v", err)
+}
+
 // previewTheme shows the theme highlighted in the picker. A theme that
 // does not load keeps the current colors, with a warning toast (once per
 // distinct error while the picker is open). Previews run as concurrent
@@ -205,7 +215,7 @@ func (m *Model) previewTheme(msg palette.ThemePreviewMsg) tea.Cmd {
 	if err == nil {
 		return nil
 	}
-	text := fmt.Sprintf("Could not load %v", err)
+	text := themeLoadWarning(err)
 	if text == m.lastThemeErr {
 		return nil
 	}
@@ -230,13 +240,21 @@ func (m *Model) restorePalette(orig theme.Palette) {
 }
 
 // chooseTheme applies and saves the theme confirmed in the picker, then
-// closes the picker. A theme that does not load is not saved: the picker
-// closes on the palette it opened with and a warning toast says why.
+// closes the picker. The picker's original is used from memory, so
+// confirming the theme on screen never fails. A theme that does not load
+// is not saved: the picker closes on the palette it opened with and a
+// warning toast says why.
 func (m *Model) chooseTheme(name string) tea.Cmd {
-	p, err := m.opts.Catalog.Resolve(name)
+	var p theme.Palette
+	var err error
+	if o := m.paletteOverlay(); o != nil && name == o.paletteOrig.Name {
+		p = o.paletteOrig
+	} else {
+		p, err = m.opts.Catalog.Resolve(name)
+	}
 	if err != nil {
 		m.closeOverlayKind(overlayPalette) // restores the original
-		return m.pushToast(msgs.ToastWarn, fmt.Sprintf("Could not load %v — theme not changed", err))
+		return m.pushToast(msgs.ToastWarn, themeLoadWarning(err)+" — theme not changed")
 	}
 	m.applyPalette(p)
 	m.themeName = p.Name

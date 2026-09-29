@@ -31,16 +31,21 @@ type themeState struct {
 }
 
 // enterTheme shows the theme list after a successful first-run setup, with
-// the cursor on the current theme.
+// the cursor on the current theme. When the current theme is not listed
+// (its file is gone), the cursor starts on the first theme, previewed so
+// the screen matches the cursor.
 func (m Model) enterTheme() (Model, tea.Cmd) {
 	m.stage = StageTheme
 	m.theme.names = m.cat.Names()
-	m.theme.idx = max(slices.Index(m.theme.names, m.current.Name), 0)
 	m.theme.cur, m.theme.err = m.current, nil
-	if len(m.theme.names) > 0 && m.theme.names[m.theme.idx] != m.current.Name {
-		m.theme.cur, m.theme.err = m.resolve(m.theme.names[m.theme.idx])
-	}
 	m.focus()
+	m.theme.idx = slices.Index(m.theme.names, m.current.Name)
+	if m.theme.idx < 0 {
+		m.theme.idx = 0
+		if len(m.theme.names) > 0 {
+			return m.preview(m.theme.names[0])
+		}
+	}
 	return m, nil
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/mathieucroset/notty/internal/gitsync/gittest"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/palette"
+	"github.com/mathieucroset/notty/internal/ui/resolver"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/ui/wizard"
 )
@@ -380,5 +381,119 @@ func TestLateWizardPreviewsDropped(t *testing.T) {
 				t.Errorf("palette = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestReopenPaletteKeepsTheOriginal: ctrl+k while the picker previews a
+// theme opens a new palette on the original theme, not on the preview.
+func TestReopenPaletteKeepsTheOriginal(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	openThemePicker(t, m)
+	run(t, m, downKey)
+	if m.opts.Palette.Name == "catppuccin-mocha" {
+		t.Fatal("no preview")
+	}
+	run(t, m, msgs.OpenPaletteMsg{})
+	run(t, m, palette.CloseMsg{})
+	if got := m.opts.Palette.Name; got != "catppuccin-mocha" {
+		t.Errorf("palette = %q after closing the reopened palette, want catppuccin-mocha", got)
+	}
+}
+
+// TestResolverOpensOnTheOriginalTheme: the resolver replacing a picker
+// mid-preview is drawn in the original theme.
+func TestResolverOpensOnTheOriginalTheme(t *testing.T) {
+	files := []resolver.File{{Path: "a.md", Kind: resolver.Text,
+		Base: []byte("a\n"), Ours: []byte("b\n"), Theirs: []byte("c\n")}}
+	open := func(preview bool) string {
+		m := start(t, testOptions(t), 120, 30)
+		if preview {
+			openThemePicker(t, m)
+			run(t, m, downKey)
+		}
+		run(t, m, conflictsLoadedMsg{files: files})
+		if m.resolver == nil {
+			t.Fatal("resolver not open")
+		}
+		if m.opts.Palette.Name != "catppuccin-mocha" {
+			t.Errorf("palette = %q, want catppuccin-mocha", m.opts.Palette.Name)
+		}
+		return m.View().Content
+	}
+	if open(true) != open(false) {
+		t.Error("the resolver opened over a preview is not drawn in the original theme")
+	}
+}
+
+// TestThemeCancelRestoresByKey: a rewritten file gives the same name new
+// colors; esc still returns to the colors the picker opened with.
+func TestThemeCancelRestoresByKey(t *testing.T) {
+	opts := testOptions(t)
+	dir := withUserThemes(t, &opts, map[string]string{"mine": userThemeFile})
+	startWithTheme(t, &opts, "mine")
+	m := start(t, opts, 120, 30)
+	orig := m.opts.Palette
+	openThemePicker(t, m)
+	writeTheme(t, dir, "mine", strings.Replace(userThemeFile, "#141318", "#000000", 1))
+	run(t, m, upKey)
+	run(t, m, downKey)
+	if m.opts.Palette.Name != "mine" || m.opts.Palette.Key() == orig.Key() {
+		t.Fatalf("displayed %q, want the rewritten mine", m.opts.Palette.Key())
+	}
+	run(t, m, keyMsg("esc"))
+	if m.opts.Palette.Key() != orig.Key() {
+		t.Errorf("palette = %q after esc, want %q", m.opts.Palette.Key(), orig.Key())
+	}
+}
+
+// TestChooseCurrentThemeAfterItsFileBroke: confirming the theme on screen
+// uses it from memory, so a file broken meanwhile cannot fail the choice.
+func TestChooseCurrentThemeAfterItsFileBroke(t *testing.T) {
+	opts := testOptions(t)
+	dir := withUserThemes(t, &opts, map[string]string{"mine": userThemeFile})
+	startWithTheme(t, &opts, "mine")
+	m := start(t, opts, 120, 30)
+	orig := m.opts.Palette
+	openThemePicker(t, m)
+	writeTheme(t, dir, "mine", brokenThemeFile)
+	run(t, m, keyMsg("enter"))
+	if m.overlayOpen() {
+		t.Error("palette still open")
+	}
+	if m.opts.Palette.Key() != orig.Key() {
+		t.Errorf("palette = %q, want %q", m.opts.Palette.Key(), orig.Key())
+	}
+	if len(toastTexts(m)) != 0 {
+		t.Errorf("toasts %q, want none", toastTexts(m))
+	}
+	b, err := os.ReadFile(opts.ConfigPath)
+	if err != nil || !strings.Contains(string(b), `theme = "mine"`) {
+		t.Errorf("config = %q (%v), want theme = \"mine\"", b, err)
+	}
+}
+
+// TestThemeWarningRepeatsInANewPicker: the once-per-error rule holds while
+// one picker is open; a new picker shows the error again.
+func TestThemeWarningRepeatsInANewPicker(t *testing.T) {
+	opts := testOptions(t)
+	withUserThemes(t, &opts, map[string]string{"mine": brokenThemeFile})
+	m := start(t, opts, 120, 30)
+	for range 2 {
+		openThemePicker(t, m)
+		highlightTheme(t, m, "catppuccin-mocha", "mine")
+		run(t, m, keyMsg("esc"))
+		run(t, m, keyMsg("esc"))
+		if m.overlayOpen() {
+			t.Fatal("palette still open")
+		}
+	}
+	n := 0
+	for _, e := range m.toast.Log() {
+		if e.Level == msgs.ToastWarn && strings.Contains(e.Text, "mine.toml") {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("%d warnings for the broken theme over two pickers, want 2; toasts %q", n, toastTexts(m))
 	}
 }

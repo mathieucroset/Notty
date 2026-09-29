@@ -161,33 +161,52 @@ func TestWizardThemePreviewRethemes(t *testing.T) {
 }
 
 func TestWizardDoneSavesUserTheme(t *testing.T) {
-	gittest.Isolate(t)
-	setIdentity(t)
-	opts := wizardOptions(t)
-	withUserThemes(t, &opts, map[string]string{"mine": userThemeFile})
-	m := start(t, opts, 100, 30)
-	t.Cleanup(m.Shutdown)
+	tests := []struct {
+		name    string
+		preview bool // browse to the theme first, or send DoneMsg directly
+	}{
+		{"after previewing it", true},
+		{"without a preview", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gittest.Isolate(t)
+			setIdentity(t)
+			opts := wizardOptions(t)
+			withUserThemes(t, &opts, map[string]string{"mine": userThemeFile})
+			m := start(t, opts, 100, 30)
+			t.Cleanup(m.Shutdown)
 
-	run(t, m, keyMsg("enter")) // vault folder
-	run(t, m, keyMsg("j"))     // Existing URL → Local only
-	run(t, m, keyMsg("enter"))
-	waitFor(t, m, func() bool { return m.wizard != nil && m.wizard.Stage() == wizard.StageTheme })
-	names := opts.Catalog.Names()
-	for range slices.Index(names, "mine") - slices.Index(names, "catppuccin-mocha") {
-		run(t, m, downKey)
-	}
-	if m.opts.Palette.Name != "mine" {
-		t.Fatalf("previewed palette = %q, want mine", m.opts.Palette.Name)
-	}
-	run(t, m, keyMsg("enter")) // theme
-	finishWizard(t, m)
+			run(t, m, keyMsg("enter")) // vault folder
+			run(t, m, keyMsg("j"))     // Existing URL → Local only
+			run(t, m, keyMsg("enter"))
+			waitFor(t, m, func() bool { return m.wizard != nil && m.wizard.Stage() == wizard.StageTheme })
+			if tt.preview {
+				names := opts.Catalog.Names()
+				for range slices.Index(names, "mine") - slices.Index(names, "catppuccin-mocha") {
+					run(t, m, downKey)
+				}
+				if m.opts.Palette.Name != "mine" {
+					t.Fatalf("previewed palette = %q, want mine", m.opts.Palette.Name)
+				}
+				run(t, m, keyMsg("enter")) // theme
+			} else {
+				mine, err := opts.Catalog.Resolve("mine")
+				if err != nil {
+					t.Fatal(err)
+				}
+				run(t, m, wizard.DoneMsg{Vault: m.wizard.VaultInput(), Palette: mine, Choice: setup.LocalOnly})
+			}
+			finishWizard(t, m)
 
-	if m.opts.Palette.Name != "mine" || m.themeName != "mine" {
-		t.Errorf("palette / themeName = %q / %q, want mine", m.opts.Palette.Name, m.themeName)
-	}
-	b, err := os.ReadFile(opts.ConfigPath)
-	if err != nil || !strings.Contains(string(b), `theme = "mine"`) {
-		t.Errorf("config = %q (%v), want theme = \"mine\"", b, err)
+			if m.opts.Palette.Name != "mine" || m.themeName != "mine" {
+				t.Errorf("palette / themeName = %q / %q, want mine", m.opts.Palette.Name, m.themeName)
+			}
+			b, err := os.ReadFile(opts.ConfigPath)
+			if err != nil || !strings.Contains(string(b), `theme = "mine"`) {
+				t.Errorf("config = %q (%v), want theme = \"mine\"", b, err)
+			}
+		})
 	}
 }
 

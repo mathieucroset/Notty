@@ -172,6 +172,9 @@ func (m *Model) handleConflictsLoaded(msg conflictsLoadedMsg) tea.Cmd {
 	for _, f := range msg.files {
 		m.conflictFiles[f.Path] = f
 	}
+	// Closing a picker mid-preview restores the original theme, which the
+	// resolver is then built with.
+	m.closeOverlayKind(overlayPalette)
 	r := resolver.New(msg.files, m.opts.Styles, m.opts.Palette, m.opts.Caps, m.resolverEditorOptions()).
 		SetSize(m.width, m.height)
 	if msg.sel != "" {
@@ -180,7 +183,6 @@ func (m *Model) handleConflictsLoaded(msg conflictsLoadedMsg) tea.Cmd {
 	var cmd tea.Cmd
 	r, cmd = r.LoadPreviews()
 	m.resolver = &r
-	m.closeOverlayKind(overlayPalette)
 	return cmd
 }
 
