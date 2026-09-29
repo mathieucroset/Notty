@@ -149,6 +149,36 @@ func TestInputSuggestionsTabCompletes(t *testing.T) {
 	}
 }
 
+func TestInputEnterTakesHighlightedSuggestion(t *testing.T) {
+	suggest := func(prefix string) []string {
+		if prefix == "" {
+			return nil
+		}
+		var out []string
+		for _, s := range []string{"Work", "Work/Clients"} {
+			if strings.HasPrefix(s, prefix) {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	m := NewInput("move", "Move to…", "folder", "", nil, testStyles(t)).WithSuggestions(suggest)
+	m = typeText(t, m, "Wo")
+	m, _ = m.Update(namedKey("down"))
+	_, cmd := m.Update(namedKey("enter"))
+	if res := cmd().(ResultMsg); !res.OK || res.Value != "Work/Clients" {
+		t.Fatalf("enter with a highlighted suggestion = %+v, want Work/Clients", res)
+	}
+
+	// No suggestion shown: enter confirms the typed text.
+	m = NewInput("move", "Move to…", "folder", "", nil, testStyles(t)).WithSuggestions(suggest)
+	m = typeText(t, m, "Else")
+	_, cmd = m.Update(namedKey("enter"))
+	if res := cmd().(ResultMsg); !res.OK || res.Value != "Else" {
+		t.Fatalf("enter without suggestions = %+v, want Else", res)
+	}
+}
+
 func TestConfirmYesNoEscEnter(t *testing.T) {
 	styles := testStyles(t)
 

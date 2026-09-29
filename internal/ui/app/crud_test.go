@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
 	"github.com/mathieucroset/notty/internal/localstate"
@@ -149,8 +150,7 @@ func TestMoveWithFolderSuggestions(t *testing.T) {
 	if !strings.Contains(m.overlay.dialog.View(), "Work") {
 		t.Fatalf("folder suggestion missing:\n%s", m.overlay.dialog.View())
 	}
-	run(t, m, keyMsg("tab"))
-	run(t, m, keyMsg("enter"))
+	run(t, m, keyMsg("enter")) // takes the highlighted suggestion
 
 	if !exists(opts.Vault, "Work/ideas.md") {
 		t.Fatal("note not moved")
@@ -160,6 +160,36 @@ func TestMoveWithFolderSuggestions(t *testing.T) {
 	}
 	if m.overlayOpen() {
 		t.Error("dialog still open")
+	}
+}
+
+func TestMoveRejectsUnknownFolder(t *testing.T) {
+	opts := testOptions(t)
+	m := start(t, opts, 120, 30)
+	run(t, m, msgs.RequestMove{Path: "ideas.md"})
+	typeText(t, m, "Nope")
+	run(t, m, keyMsg("enter"))
+	if !m.overlayOpen() {
+		t.Fatal("move to an unknown folder was accepted")
+	}
+	if s := screen(m); !strings.Contains(s, "No such folder") {
+		t.Errorf("validation error missing:\n%s", s)
+	}
+	if exists(opts.Vault, "Nope") || !exists(opts.Vault, "ideas.md") {
+		t.Error("the note moved or a folder was created")
+	}
+}
+
+func TestMoveToRootWithEmptyField(t *testing.T) {
+	opts := testOptions(t)
+	m := start(t, opts, 120, 30)
+	run(t, m, msgs.RequestMove{Path: "Work/Standup notes.md"})
+	for range len("Work") {
+		run(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+	run(t, m, keyMsg("enter"))
+	if !exists(opts.Vault, "Standup notes.md") {
+		t.Errorf("note not moved to the root; toasts = %v", toastTexts(m))
 	}
 }
 

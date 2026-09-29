@@ -58,10 +58,16 @@ func isUnder(p, target string) bool {
 	return p == target || strings.HasPrefix(p, target+"/")
 }
 
+// validationError is a dialog validation message, shown as is under the
+// input.
+type validationError string
+
+func (e validationError) Error() string { return string(e) }
+
 // requireName is the validation for name inputs.
 func requireName(s string) error {
 	if strings.TrimSpace(s) == "" {
-		return errors.New("enter a name")
+		return validationError("Enter a name")
 	}
 	return nil
 }
@@ -107,6 +113,11 @@ func (m *Model) requestMove(p string) tea.Cmd {
 	folders := m.moveTargets(p)
 	suggest := func(prefix string) []string {
 		q := strings.ToLower(strings.Trim(prefix, "/"))
+		if q == "" {
+			// Nothing highlighted, so enter on an empty field means the
+			// vault root.
+			return nil
+		}
 		var starts, contains []string
 		for _, f := range folders {
 			lf := strings.ToLower(f)
@@ -119,8 +130,16 @@ func (m *Model) requestMove(p string) tea.Cmd {
 		}
 		return append(starts, contains...)
 	}
+	// Only existing folders: a typo must not silently create a folder.
+	validate := func(s string) error {
+		dest := strings.Trim(strings.TrimSpace(s), "/")
+		if dest == "" || slices.Contains(folders, dest) || dest == parentOf(p) {
+			return nil
+		}
+		return validationError("No such folder")
+	}
 	d := dialog.NewInput(dlgMove, "Move '"+displayName(p)+"' to", "Folder (empty for the vault root)",
-		parentOf(p), nil, m.opts.Styles).WithSuggestions(suggest)
+		parentOf(p), validate, m.opts.Styles).WithSuggestions(suggest)
 	m.openDialog(d, pendingOp{kind: opMove, path: p})
 	return nil
 }

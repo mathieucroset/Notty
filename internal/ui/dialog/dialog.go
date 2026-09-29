@@ -115,7 +115,8 @@ func NewInput(id, title, placeholder, initial string, validate func(string) erro
 
 // WithSuggestions enables an autocomplete dropdown for an Input dialog,
 // showing up to 6 matches under the field. tab completes the highlighted
-// suggestion; up/down or ctrl+j/ctrl+k move the highlight.
+// suggestion and enter confirms it; up/down or ctrl+j/ctrl+k move the
+// highlight. With no suggestion shown, enter confirms the typed text.
 func (m Model) WithSuggestions(fn SuggestFunc) Model {
 	m.suggestFn = fn
 	m.refreshSuggestions()
@@ -210,6 +211,12 @@ func (m Model) updateInput(k tea.KeyPressMsg) (Model, tea.Cmd) {
 	case "esc":
 		return m, emit(ResultMsg{ID: m.id, OK: false})
 	case "enter":
+		// A highlighted suggestion is what the user is pointing at: enter
+		// takes it, as tab would, and then confirms.
+		if len(m.suggestions) > 0 && m.sugIndex >= 0 {
+			m.input.SetValue(m.suggestions[m.sugIndex])
+			m.input.CursorEnd()
+		}
 		m.recomputeError()
 		m.attempted = true
 		if m.errMsg != "" {
