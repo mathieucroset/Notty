@@ -115,6 +115,14 @@ func (p *inline) link(open, hi int) (textEnd, urlStart, urlEnd, end int, ok bool
 		case '\\':
 			j++
 			continue
+		case '`': // brackets inside a code span do not count
+			m := runLenTo(line, j, hi, '`')
+			if cl := findRun(line, j+m, hi, '`', m); cl >= 0 {
+				j = cl + m - 1
+			} else {
+				j += m - 1
+			}
+			continue
 		case '[':
 			depth++
 		case ']':

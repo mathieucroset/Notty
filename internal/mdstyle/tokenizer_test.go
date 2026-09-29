@@ -71,6 +71,7 @@ func TestTokenizeLine(t *testing.T) {
 		{"no tag inside code", "`#a` #b", []sp{{"`", Markup}, {"#a", Code}, {"`", Markup}, {"#b", Tag}}},
 		{"link", "see [docs](http://x.io/#a) now", []sp{{"[", Markup}, {"docs", Link}, {"](", Markup}, {"http://x.io/#a", LinkURL}, {")", Markup}}},
 		{"link with parens in url", "[w](a(b)c)", []sp{{"[", Markup}, {"w", Link}, {"](", Markup}, {"a(b)c", LinkURL}, {")", Markup}}},
+		{"code span in link text", "[a `]` b](u)", []sp{{"[", Markup}, {"a `]` b", Link}, {"](", Markup}, {"u", LinkURL}, {")", Markup}}},
 		{"brackets without url", "[not a link]", nil},
 		{"image", "![alt](img/a.png)", []sp{{"![alt](img/a.png)", Image}}},
 		{"image in text", "x ![a](b.png) y", []sp{{"![a](b.png)", Image}}},
