@@ -145,7 +145,7 @@ func TestGGAndGJumpToEnds(t *testing.T) {
 		t.Fatalf("j: msg = %#v, want select c2", got)
 	}
 	m, _ = send(m, "g")
-	m, got = send(m, "j")
+	_, got = send(m, "j")
 	if got != (SelectionChangedMsg{Rev: "c1"}) {
 		t.Errorf("gj: msg = %#v, want plain j (select c1), not a gg jump", got)
 	}
