@@ -316,6 +316,8 @@ func TestMoveErrors(t *testing.T) {
 		{"target exists", "a.md", "Work", ErrExists},
 		{"folder into itself", "Work", "Work", ErrInvalidPath},
 		{"folder into descendant", "Work", "Work/Sub", ErrInvalidPath},
+		{"folder into itself other case", "Work", "WORK", ErrInvalidPath},
+		{"folder into descendant other case", "Work", "work/Sub", ErrInvalidPath},
 		{"missing source", "nope.md", "Work", os.ErrNotExist},
 		{"dest is a file", "b.md", "a.md", ErrInvalidPath},
 		{"root", "", "Work", ErrInvalidPath},
@@ -345,6 +347,35 @@ func TestMoveSiblingPrefixAllowed(t *testing.T) {
 	}
 	if got != "WorkX/Work" {
 		t.Errorf("newRel = %q, want WorkX/Work", got)
+	}
+}
+
+func TestMoveOntoHardLinkRefused(t *testing.T) {
+	// A hard link is the same file but a different name: renaming onto it
+	// must fail rather than silently "succeed" as a no-op rename.
+	tests := []struct {
+		name string
+		op   func(v *Vault) (string, error)
+	}{
+		{"rename", func(v *Vault) (string, error) { return v.Rename("a.md", "b") }},
+		{"move", func(v *Vault) (string, error) { return v.Move("a.md", "Work") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := openVault(t)
+			mkfiles(t, v.Root, "a.md", "Work/")
+			for _, l := range []string{"b.md", "Work/a.md"} {
+				if err := os.Link(v.Abs("a.md"), v.Abs(l)); err != nil {
+					t.Skipf("hard links unsupported: %v", err)
+				}
+			}
+			if _, err := tt.op(v); !errors.Is(err, ErrExists) {
+				t.Errorf("err = %v, want ErrExists", err)
+			}
+			if !exists(v, "a.md") {
+				t.Error("a.md vanished")
+			}
+		})
 	}
 }
 

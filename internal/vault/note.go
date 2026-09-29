@@ -215,7 +215,7 @@ func (v *Vault) Move(rel, destFolder string) (string, error) {
 	if src == "" {
 		return "", fmt.Errorf("vault: move vault root: %w", ErrInvalidPath)
 	}
-	if dest == src || strings.HasPrefix(dest, src+"/") {
+	if within(dest, src) {
 		return "", fmt.Errorf("vault: move %q into itself (%q): %w", src, dest, ErrInvalidPath)
 	}
 	if inReserved(dest) || reserved(dest, path.Base(src)) {
@@ -229,8 +229,8 @@ func (v *Vault) Move(rel, destFolder string) (string, error) {
 
 // move renames the clean vault-relative path oldRel to newRel, creating
 // newRel's parent folders. It refuses to replace an existing entry, except
-// when both paths name the same file (a case-only rename on a
-// case-insensitive filesystem). It is the single point where entries change
+// for a case-only rename on a case-insensitive filesystem (paths equal
+// ignoring case and naming the same file; a hard link is not exempt). It is the single point where entries change
 // path, so link rewriting can hook in here. It does not check reserved
 // names, so internal callers (such as trash) may target hidden folders.
 func (v *Vault) move(oldRel, newRel string) (string, error) {
@@ -246,7 +246,7 @@ func (v *Vault) move(oldRel, newRel string) (string, error) {
 		return "", fmt.Errorf("vault: move %q: %w", oldRel, err)
 	}
 	if dstInfo, err := os.Lstat(newAbs); err == nil {
-		if !os.SameFile(srcInfo, dstInfo) {
+		if !strings.EqualFold(oldRel, newRel) || !os.SameFile(srcInfo, dstInfo) {
 			return "", fmt.Errorf("vault: move %q to %q: %w", oldRel, newRel, ErrExists)
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -259,4 +259,13 @@ func (v *Vault) move(oldRel, newRel string) (string, error) {
 		return "", fmt.Errorf("vault: move %q to %q: %w", oldRel, newRel, err)
 	}
 	return newRel, nil
+}
+
+// within reports whether the clean path p is base or lies inside it,
+// ignoring case so the check also holds on case-insensitive filesystems.
+func within(p, base string) bool {
+	if len(p) < len(base) || !strings.EqualFold(p[:len(base)], base) {
+		return false
+	}
+	return len(p) == len(base) || p[len(base)] == '/'
 }
