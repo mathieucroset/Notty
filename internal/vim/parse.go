@@ -74,6 +74,7 @@ var singleMotions = map[string]bool{
 	"h": true, "j": true, "k": true, "l": true, "0": true, "^": true, "$": true,
 	"w": true, "b": true, "e": true, "W": true, "B": true, "E": true,
 	"{": true, "}": true, "%": true, "G": true, ";": true, ",": true,
+	"n": true, "N": true,
 	"+": true, "-": true, "_": true,
 	"<left>": true, "<right>": true, "<up>": true, "<down>": true,
 	"<home>": true, "<end>": true, "<bs>": true, "<cr>": true,
@@ -122,10 +123,11 @@ var normalActions = map[string]bool{
 	"x": true, "X": true, "<del>": true, "s": true, "S": true, "J": true,
 	"p": true, "P": true, "D": true, "C": true, "Y": true, "~": true,
 	"u": true, "<c-r>": true, "v": true, "V": true, ".": true,
+	"/": true, "?": true, ":": true, "<tab>": true,
 }
 
 // argActions take one more key as argument.
-var argActions = map[string]bool{"r": true}
+var argActions = map[string]bool{"r": true, "<c-w>": true}
 
 // operators take a motion or text object; doubled they act on lines.
 var operators = map[string]bool{"d": true, "c": true, "y": true, ">": true, "<": true}

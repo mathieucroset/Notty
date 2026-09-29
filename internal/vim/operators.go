@@ -29,6 +29,7 @@ func (m *Machine) Register() (string, bool) { return m.unnamed.text, m.unnamed.l
 // that undoing the change puts the cursor back where it was.
 func (m *Machine) beginChange(b *buffer.Buffer) {
 	b.BeginGroup()
+	m.groupBuf = b
 	m.chgCursor = b.Cursor()
 	m.chgVersion = b.Version()
 }

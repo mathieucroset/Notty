@@ -18,7 +18,7 @@ func init() {
 	for k := range visualEdits {
 		visualActions[k] = true
 	}
-	for _, k := range []string{"y", "Y", "o", "O", "v", "V"} {
+	for _, k := range []string{"y", "Y", "o", "O", "v", "V", "/", "?"} {
 		visualActions[k] = true
 	}
 }

@@ -88,6 +88,14 @@ type Machine struct {
 	chgCursor        buffer.Pos
 	chgVersion       uint64
 
+	groupBuf *buffer.Buffer // buffer of the open change group
+
+	// command line and search
+	cmdPrefix, cmdText string
+	cmdPrev            Mode
+	lastSearch         string
+	lastSearchFwd      bool
+
 	// dot-repeat
 	last      *lastChange
 	recording bool // the insert session belongs to m.last
@@ -183,6 +191,11 @@ func (m *Machine) normalToken(b *buffer.Buffer, tok string) {
 	c, st := parse(m.pending, m.isVisual())
 	switch st {
 	case parseMore:
+		if m.readOnly && !m.isVisual() && blockedHead(m.pending) {
+			// Flag an edit as soon as its key is typed (the d of dw); the
+			// complete command is refused by exec.
+			m.eff.Blocked = true
+		}
 		return
 	case parseBad:
 		m.pending = nil
@@ -203,6 +216,10 @@ func (m *Machine) exec(b *buffer.Buffer, c cmd) {
 	}
 	if c.op == "" && isMotion(c.name) {
 		m.moveCursor(b, c)
+		return
+	}
+	if m.readOnly && (isChange(c) || roBlocked[c.name]) {
+		m.eff.Blocked = true
 		return
 	}
 	if isChange(c) {
@@ -232,6 +249,25 @@ func isChange(c cmd) bool {
 	}
 	return changeActions[c.name]
 }
+
+// blockedHead reports whether the command being typed starts with an
+// editing key (after any register and count), so read-only mode can refuse
+// it right away.
+func blockedHead(toks []string) bool {
+	i := 0
+	if toks[0] == `"` {
+		i = 2
+	}
+	_, i = parseCount(toks, i)
+	if i >= len(toks) {
+		return false
+	}
+	h := toks[i]
+	return (operators[h] && h != "y") || changeActions[h] || roBlocked[h]
+}
+
+// roBlocked are further commands refused in read-only mode.
+var roBlocked = map[string]bool{"u": true, "<c-r>": true, ".": true}
 
 // changeActions are the normal-mode commands that modify the buffer.
 var changeActions = map[string]bool{
@@ -308,6 +344,17 @@ func (m *Machine) execOther(b *buffer.Buffer, c cmd) {
 		m.enterVisual(b, VisualLine)
 	case ".":
 		m.repeat(b, c)
+	case "/", "?", ":":
+		m.startCmdline(c.name)
+	case "<tab>":
+		m.eff.FocusSidebar = true
+	case "<c-w>":
+		switch c.arg {
+		case "h", "<c-h>", "<left>":
+			m.eff.FocusSidebar = true
+		case "l", "<c-l>", "<right>":
+			m.eff.FocusMain = true
+		}
 	}
 }
 
@@ -334,19 +381,22 @@ func normalCol(b *buffer.Buffer, l, col int) int {
 	return max(0, min(col, b.LineLen(l)-1))
 }
 
-// Stubs filled in by later features.
-
-// execVisualSpecial handles visual commands added by later features.
-func (m *Machine) execVisualSpecial(b *buffer.Buffer, c cmd) bool { return false }
-
-func (m *Machine) commandKey(b *buffer.Buffer, k Key) { m.mode = Normal }
+// execVisualSpecial handles visual commands that are not operators.
+func (m *Machine) execVisualSpecial(b *buffer.Buffer, c cmd) bool {
+	switch c.name {
+	case "/", "?":
+		m.startCmdline(c.name)
+		return true
+	}
+	return false
+}
 
 // PasteClipboard pastes text the UI read from the system clipboard after a
 // NeedClipboard effect: at the cursor in insert mode, otherwise like p / P
 // (linewise if text ends with a newline).
 func (m *Machine) PasteClipboard(b *buffer.Buffer, text string, before bool) {
 	defer func() { m.lastPos = b.Cursor() }()
-	if text == "" {
+	if text == "" || m.readOnly {
 		return
 	}
 	if m.mode == Insert {
@@ -361,12 +411,15 @@ func (m *Machine) PasteClipboard(b *buffer.Buffer, text string, before bool) {
 	m.clampNormal(b)
 }
 
-// SetReadOnly toggles read-only mode.
-func (m *Machine) SetReadOnly(ro bool) { m.readOnly = ro }
-
-func (m *Machine) searchMotion(b *buffer.Buffer, p buffer.Pos, reverse bool, n int) motionRes {
-	return motionRes{}
+// SetReadOnly toggles read-only mode (conflicted notes). Only motions,
+// search, yanks, visual selection and focus keys work; edits return
+// Effect.Blocked. Turning it on in insert mode ends the insert session.
+func (m *Machine) SetReadOnly(ro bool) {
+	m.readOnly = ro
+	if ro && m.mode == Insert && m.groupBuf != nil {
+		m.leaveInsert(m.groupBuf)
+	}
+	if ro {
+		m.pending = nil
+	}
 }
-
-// CommandLine returns the command line while in command mode.
-func (m *Machine) CommandLine() string { return "" }
