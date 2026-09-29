@@ -96,6 +96,7 @@ func (m *Model) applyFilter() {
 func (m *Model) togglePin(p string) tea.Cmd {
 	m.opts.Pins.Toggle(p)
 	m.sidebar.SetPins(m.opts.Pins.Pins)
+	m.noteChanged(pinsPath)
 	return m.savePinsCmd()
 }
 

@@ -146,6 +146,12 @@ func TestNormalStartup(t *testing.T) {
 	if o.ConfigPath != f.configPath {
 		t.Errorf("ConfigPath = %q, want %q", o.ConfigPath, f.configPath)
 	}
+	if o.NewSyncer == nil || o.GitMissing {
+		t.Errorf("NewSyncer set = %v, GitMissing = %v; want a syncer factory with git", o.NewSyncer != nil, o.GitMissing)
+	}
+	if o.StateDir != filepath.Join(f.dir, "state") || o.LockWait != 300*time.Millisecond {
+		t.Errorf("StateDir = %q, LockWait = %v", o.StateDir, o.LockWait)
+	}
 	if o.Watcher == nil {
 		t.Fatal("no vault watcher")
 	}
@@ -199,6 +205,10 @@ func TestWizardDecision(t *testing.T) {
 			}
 			if f.got.WizardNeeded != tt.wantWizard {
 				t.Errorf("WizardNeeded = %v, want %v", f.got.WizardNeeded, tt.wantWizard)
+			}
+			if f.got.GitMissing == tt.git || (f.got.NewSyncer != nil) != tt.git {
+				t.Errorf("GitMissing = %v, NewSyncer set = %v with git found = %v",
+					f.got.GitMissing, f.got.NewSyncer != nil, tt.git)
 			}
 			if tt.wantWizard {
 				if f.got.Vault != nil {

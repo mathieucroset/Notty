@@ -43,7 +43,15 @@ type configEditedMsg struct{ err error }
 
 // openPalette opens the command palette (ctrl+k).
 func (m *Model) openPalette() {
-	p := palette.New(palette.DefaultCommands(), m.opts.Styles).
+	cmds := palette.DefaultCommands()
+	if len(m.trashWarnings) > 0 {
+		cmds = append(cmds, palette.Command{
+			ID:   "restore-deleted-remotely",
+			Name: "Restore last deleted-remotely note",
+			Msg:  func() tea.Msg { return restoreDeletedRemotelyMsg{} },
+		})
+	}
+	p := palette.New(cmds, m.opts.Styles).
 		WithCurrentTheme(m.opts.Palette.Name).
 		SetSize(m.width, m.height)
 	m.openOverlay(&overlayState{kind: overlayPalette, palette: p, paletteTheme: m.opts.Palette.Name})
@@ -205,12 +213,6 @@ func (m *Model) toggleLineNumbers() tea.Cmd {
 		m.pushToast(msgs.ToastInfo, "Line numbers "+onOff(m.opts.Config.LineNumbers)))
 }
 
-// syncNow asks the syncer for an immediate cycle.
-// TODO(syncer pass, Task 32): hand off to the syncer.
-func (m *Model) syncNow() tea.Cmd {
-	return m.pushToast(msgs.ToastInfo, "Sync is not set up yet")
-}
-
 // setupSync opens the sync setup wizard.
 // TODO(wizard pass, Task 33): open the wizard in "set up sync" mode.
 func (m *Model) setupSync() tea.Cmd {
@@ -227,12 +229,14 @@ func (m *Model) openResolver(p string) tea.Cmd {
 
 // openConfig opens config.toml in $EDITOR.
 func (m *Model) openConfig() tea.Cmd {
+	m.beginExec()
 	return execProcess(m.editorCommand(m.configPath()), func(err error) tea.Msg {
 		return configEditedMsg{err: err}
 	})
 }
 
 func (m *Model) handleConfigEdited(msg configEditedMsg) tea.Cmd {
+	m.endExec()
 	ready := m.afterExec()
 	if msg.err != nil {
 		return tea.Batch(ready, m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err)))
@@ -265,8 +269,8 @@ func (m *Model) handleUnusedAttachments(msg unusedAttachmentsMsg) tea.Cmd {
 	return nil
 }
 
-// deleteFilesCmd deletes vault files, carrying on past failures.
-// TODO(syncer pass): commit the deletion through the syncer.
+// deleteFilesCmd deletes vault files, carrying on past failures. The
+// syncer commits the deletion (handleAttachmentsCleaned tells it).
 func deleteFilesCmd(v *vault.Vault, files []string) tea.Cmd {
 	return func() tea.Msg {
 		n := 0
@@ -283,6 +287,9 @@ func deleteFilesCmd(v *vault.Vault, files []string) tea.Cmd {
 }
 
 func (m *Model) handleAttachmentsCleaned(msg attachmentsCleanedMsg) tea.Cmd {
+	if msg.n > 0 {
+		m.noteChanged("attachments")
+	}
 	text := fmt.Sprintf("Deleted %d unused attachment", msg.n)
 	if msg.n != 1 {
 		text += "s"

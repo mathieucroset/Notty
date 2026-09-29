@@ -17,10 +17,12 @@ import (
 
 	"github.com/mathieucroset/notty/internal/buffer"
 	"github.com/mathieucroset/notty/internal/config"
+	"github.com/mathieucroset/notty/internal/gitsync"
 	"github.com/mathieucroset/notty/internal/imgrender"
 	"github.com/mathieucroset/notty/internal/index"
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
+	"github.com/mathieucroset/notty/internal/syncer"
 	"github.com/mathieucroset/notty/internal/ui/dialog"
 	"github.com/mathieucroset/notty/internal/ui/editor"
 	"github.com/mathieucroset/notty/internal/ui/history"
@@ -65,6 +67,18 @@ type Options struct {
 	// InitialNote, if set, is the vault-relative note opened at start in
 	// place of the last open note (notty new, spec §11).
 	InitialNote string
+	// NewSyncer creates the syncer for a git vault (DefaultSyncFactory in
+	// main); nil disables sync.
+	NewSyncer SyncFactory
+	// GitMissing reports that git is not installed: a one-time notice says
+	// sync and history are disabled.
+	GitMissing bool
+	// StateDir is where per-vault local state lives, for the vault opened
+	// when the first-run wizard finishes (config.StateDir() when empty).
+	StateDir string
+	// LockWait is how long the wizard's vault opening waits for a lock held
+	// by another process (spec §9: 10s).
+	LockWait time.Duration
 }
 
 // Focus is the pane with keyboard focus.
@@ -190,6 +204,35 @@ type Model struct {
 	// deferred are commands produced by helpers that cannot return one
 	// (a resize, a theme change); Update batches them with its result.
 	deferred []tea.Cmd
+
+	// host bridges the syncer's Host calls into Update.
+	host *syncHost
+	// syncSvc is the syncer and repo the git repository it runs on; both
+	// nil without git or outside a repository.
+	syncSvc *syncer.Syncer
+	repo    *gitsync.Repo
+	// syncStatus is the syncer's last status.
+	syncStatus syncer.Status
+	// conflicted holds the paths with unresolved merge conflicts.
+	conflicted map[string]bool
+	// mutLocked is set during the locked merge section; file-changing
+	// messages wait in mutQueue until it ends.
+	mutLocked bool
+	mutQueue  []tea.Msg
+	// trashWarnings are the notes deleted on another computer but edited
+	// here, newest last; trashWarnText is the newest one's toast text.
+	trashWarnings []syncer.TrashWarning
+	trashWarnText string
+	// authShown is set once the auth failure dialog was shown for the
+	// current Error state.
+	authShown      bool
+	gitNoticeShown bool
+	// quitting is set once the quit sequence runs; quitStatus is the status
+	// bar text meanwhile.
+	quitting   bool
+	quitStatus string
+	// releaseLock frees the vault lock taken when the wizard finished.
+	releaseLock func()
 }
 
 // New builds the root model.
@@ -215,6 +258,8 @@ func New(opts Options) *Model {
 		preview:        preview.New(opts.Styles, opts.Palette, opts.Caps, vaultRoot(opts)),
 	}
 	m.editor = newEditor(opts, m.mapEditorMsg)
+	m.host = newSyncHost(opts.Watcher)
+	m.attachSyncer()
 	m.sidebar.SetExpanded(opts.Local.Expanded)
 	m.sidebar.SetPins(opts.Pins.Pins)
 	m.sidebar.SetFocused(true)
@@ -251,7 +296,7 @@ func (m *Model) Init() tea.Cmd {
 	}
 	m.indexing = true
 	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault), m.startupTrashCmd(),
-		listenWatcherCmd(m.opts.Watcher), m.reopenLastNoteCmd(), m.readyTickCmd())
+		listenWatcherCmd(m.opts.Watcher), m.reopenLastNoteCmd(), m.readyTickCmd(), m.startSyncCmds())
 }
 
 // reopenLastNoteCmd reopens the note open when the app last quit, at its
@@ -284,6 +329,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.mutLocked && isMutation(msg) {
+		// The locked merge section is short: run it right after (spec §7).
+		m.mutQueue = append(m.mutQueue, msg)
+		return m, nil
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -375,6 +425,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case msgs.SyncStatusMsg:
 		m.sync = msg
+	case syncUpdateMsg:
+		return m, m.handleSyncUpdate(msg.u)
+	case hostMsg:
+		return m, m.handleHostMsg(msg.msg)
+	case restoreDeletedRemotelyMsg:
+		return m, m.restoreDeletedRemotely()
+	case pinsReloadedMsg:
+		m.opts.Pins.Pins = msg.pins
+		m.sidebar.SetPins(msg.pins)
 	case msgs.ToastMsg:
 		return m, m.pushToast(msg.Level, msg.Text)
 	case indexBuiltMsg:
@@ -462,6 +521,9 @@ type quitSavedMsg struct{ saved savedMsg }
 // first, and a failed save cancels the quit (quitting again discards the
 // edits); then finishQuit ends the program.
 func (m *Model) quit() tea.Cmd {
+	if m.quitting {
+		return tea.Quit // a second ctrl+q while syncing before exit
+	}
 	if !m.discardOnQuit && m.note.path != "" && m.editor.Dirty() {
 		if save := m.saveEditorCmd(); save != nil {
 			return func() tea.Msg {
@@ -485,11 +547,11 @@ func (m *Model) handleQuitSaved(msg quitSavedMsg) tea.Cmd {
 }
 
 // finishQuit stops the watcher, saves the local state (with the open
-// note's cursor), deletes the Kitty images the preview transmitted, and
-// ends the program. The state is written synchronously: nothing runs
-// after tea.Quit.
-// TODO(syncer pass, plan amendment A7): flush the syncer before quitting.
+// note's cursor), syncs before exit (plan amendment A7), deletes the Kitty
+// images the preview transmitted, and ends the program. The state is
+// written synchronously: nothing runs after tea.Quit.
 func (m *Model) finishQuit() tea.Cmd {
+	m.quitting = true
 	m.waitSaves()
 	m.closeWatcher()
 	if m.opts.LocalPath != "" && !m.opts.WizardNeeded {
@@ -499,10 +561,18 @@ func (m *Model) finishQuit() tea.Cmd {
 		// Nowhere left to report an error.
 		_ = m.localSaver.save(m.localSaver.ticket(), func() error { return local.Save(path) })
 	}
-	if cleanup := m.preview.KittyCleanup(); cleanup != "" {
-		return tea.Sequence(tea.Raw(cleanup), tea.Quit)
+	var steps []tea.Cmd
+	if m.syncSvc != nil {
+		m.quitStatus = textQuitSyncing
+		steps = append(steps, syncQuitCmd(m.syncSvc))
 	}
-	return tea.Quit
+	if cleanup := m.preview.KittyCleanup(); cleanup != "" {
+		steps = append(steps, tea.Raw(cleanup))
+	}
+	if len(steps) == 0 {
+		return tea.Quit
+	}
+	return tea.Sequence(append(steps, tea.Quit)...)
 }
 
 // showNote loads a note read from disk into the editor and moves focus to

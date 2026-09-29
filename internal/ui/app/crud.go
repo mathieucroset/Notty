@@ -288,6 +288,7 @@ func (m *Model) handleFileOp(msg fileOpMsg) tea.Cmd {
 		return m.pushToast(msgs.ToastError, friendlyError(msg.op, msg.err))
 	}
 	m.queueReindex(msg.old, msg.path)
+	m.noteChanged(msg.path)
 	var cmds []tea.Cmd
 	if msg.err != nil {
 		cmds = append(cmds, m.pushToast(msgs.ToastWarn,
@@ -370,6 +371,7 @@ func (m *Model) openExternal(rel string) tea.Cmd {
 	if m.opts.Vault == nil || rel == "" {
 		return nil
 	}
+	m.beginExec()
 	return execProcess(m.editorCommand(m.opts.Vault.Abs(rel)), func(err error) tea.Msg {
 		return externalDoneMsg{path: rel, err: err}
 	})
@@ -380,6 +382,11 @@ func (m *Model) openExternal(rel string) tea.Cmd {
 // editor exits.
 func (m *Model) editExternal(rel string) tea.Cmd {
 	if m.opts.Vault == nil || rel == "" {
+		return nil
+	}
+	if m.mutLocked {
+		// Never hand a file to $EDITOR while a merge rewrites the vault.
+		m.mutQueue = append(m.mutQueue, msgs.OpenFileExternalMsg{Path: rel})
 		return nil
 	}
 	if rel != m.editor.Path() || !m.editor.Dirty() {
@@ -407,10 +414,12 @@ func (m *Model) handleExternalSaved(msg externalSavedMsg) tea.Cmd {
 
 // handleExternalDone re-reads a file edited in $EDITOR.
 func (m *Model) handleExternalDone(msg externalDoneMsg) tea.Cmd {
+	m.endExec()
 	ready := m.afterExec()
 	if msg.err != nil {
 		return tea.Batch(ready, m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err)))
 	}
 	m.queueReindex(msg.path)
+	m.noteChanged(msg.path)
 	return tea.Batch(ready, reindexCmd(m.opts.Vault, m.ix, []string{msg.path}), loadTreeCmd(m.opts.Vault), m.reloadNoteIf(msg.path))
 }

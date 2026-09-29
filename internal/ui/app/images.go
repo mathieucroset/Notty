@@ -136,6 +136,7 @@ func (m *Model) handleImageImported(msg imageImportedMsg) tea.Cmd {
 	if msg.note != m.editor.Path() {
 		return m.pushToast(msgs.ToastWarn, fmt.Sprintf("Image saved, but %s is no longer open: link it with %s", msg.note, msg.link))
 	}
+	m.noteChanged(msg.link)
 	var cmd tea.Cmd
 	m.editor, cmd = m.editor.InsertText(msg.link)
 	return cmd
@@ -156,6 +157,7 @@ func (m *Model) openImageViewer(msg msgs.OpenImageViewerMsg) tea.Cmd {
 		return nil
 	}
 	v := imageviewer.New(msg.Paths, msg.Index, m.opts.Caps)
+	m.beginExec()
 	return execCommand(v, func(err error) tea.Msg {
 		return imageViewerDoneMsg{err: err, quit: v.QuitRequested}
 	})
@@ -163,6 +165,7 @@ func (m *Model) openImageViewer(msg msgs.OpenImageViewerMsg) tea.Cmd {
 
 // handleImageViewerDone restores the preview's images after the viewer.
 func (m *Model) handleImageViewerDone(msg imageViewerDoneMsg) tea.Cmd {
+	m.endExec()
 	ready := m.afterExec()
 	if msg.quit {
 		return m.quit()

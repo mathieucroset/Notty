@@ -56,7 +56,10 @@ func isTick(name string) bool {
 	return strings.Contains(name, "bubbletea/v2.Tick.func") || strings.Contains(name, "bubbletea/v2.Every.func")
 }
 
-func isListener(name string) bool { return strings.Contains(name, "listenWatcherCmd.func") }
+func isListener(name string) bool {
+	return strings.Contains(name, "listenWatcherCmd.func") || strings.Contains(name, "listenSyncCmd.func") ||
+		strings.Contains(name, "listenHostCmd.func")
+}
 
 func startBackground(m *Model, cmd tea.Cmd, tick bool) {
 	b := &bgCmd{ch: make(chan tea.Msg, 1), tick: tick}

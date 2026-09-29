@@ -68,7 +68,11 @@ func runProgram(opts app.Options) error {
 	if p, force := colorProfileFor(opts.Caps); force {
 		progOpts = append(progOpts, tea.WithColorProfile(p))
 	}
-	_, err := tea.NewProgram(app.New(opts), progOpts...).Run()
+	m := app.New(opts)
+	_, err := tea.NewProgram(m, progOpts...).Run()
+	// Once the program is done the syncer's host fails fast (amendment A7)
+	// and a lock taken after the wizard is released.
+	m.Shutdown()
 	return err
 }
 
@@ -210,6 +214,14 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 		Palette:      p,
 		Caps:         caps,
 		WizardNeeded: wizard,
+		StateDir:     e.stateDir,
+		LockWait:     e.lockWait,
+	}
+	// Sync and history need git (spec §7): without it the app says so once.
+	if _, err := e.lookPath("git"); err != nil {
+		opts.GitMissing = true
+	} else {
+		opts.NewSyncer = app.DefaultSyncFactory
 	}
 
 	// 3-4. The wizard runs without the lock and without opening the vault;

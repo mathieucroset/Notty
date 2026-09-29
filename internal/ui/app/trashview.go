@@ -169,6 +169,7 @@ func (m *Model) handleRestored(msg restoredMsg) tea.Cmd {
 			loadTrashCmd(m.opts.Vault))
 	}
 	m.queueReindex(msg.path)
+	m.noteChanged(msg.path)
 	cmds := []tea.Cmd{
 		m.pushToast(msgs.ToastInfo, "Restored to "+msg.path),
 		loadTreeCmd(m.opts.Vault),
@@ -225,6 +226,9 @@ func (m *Model) handleTrashOp(msg trashOpMsg) tea.Cmd {
 		text = "Emptied the trash"
 	default:
 		text = "Deleted '" + msg.name + "' forever"
+	}
+	if msg.err == nil {
+		m.noteChanged(".trash")
 	}
 	return tea.Batch(m.pushToast(level, text), loadTrashCmd(m.opts.Vault))
 }

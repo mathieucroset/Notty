@@ -52,6 +52,9 @@ func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	if m.opts.WizardNeeded {
 		return nil // TODO(Task 33): route keys to the wizard.
 	}
+	if k.String() == "R" && m.trashWarningNewest() && restoreKeyContext(m.keyContext()) {
+		return m.restoreDeletedRemotely()
+	}
 	if m.overlayOpen() {
 		return m.updateOverlay(k)
 	}
@@ -128,4 +131,15 @@ func (m *Model) handleAction(a keys.Action) tea.Cmd {
 		return m.editExternal(m.note.path)
 	}
 	return nil
+}
+
+// restoreKeyContext reports whether R on a trash warning toast restores its
+// note in ctx: everywhere keys are not typed or taken by vim (R is vim's
+// replace mode, so the editor keeps it; the palette entry works there).
+func restoreKeyContext(ctx keys.Context) bool {
+	switch ctx {
+	case keys.Sidebar, keys.Preview, keys.TasksView, keys.TrashView, keys.EditorReadOnly:
+		return true
+	}
+	return false
 }

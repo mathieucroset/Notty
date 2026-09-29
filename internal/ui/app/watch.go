@@ -68,6 +68,7 @@ func listenWatcherCmd(w *watcher.Watcher) tea.Cmd {
 // reloads the open note if it changed, then keeps listening.
 func (m *Model) handleWatchEvent(msg watchEventMsg) tea.Cmd {
 	m.queueReindex(msg.paths...)
+	m.noteChanged(msg.paths...)
 	return tea.Batch(
 		reindexCmd(m.opts.Vault, m.ix, msg.paths),
 		loadTreeCmd(m.opts.Vault),
@@ -179,8 +180,18 @@ func (m *Model) saveNoteCmd(p, content string, version uint64) tea.Cmd {
 	}
 }
 
-// handleSaved follows a finished save.
+// handleSaved follows a finished save and tells the syncer.
 func (m *Model) handleSaved(msg savedMsg) tea.Cmd {
+	cmd := m.applySaved(msg)
+	if !msg.stale && msg.err == nil {
+		m.noteChanged(msg.path)
+	}
+	return cmd
+}
+
+// applySaved brings the editor, the sidebar and the index views up to date
+// after a save.
+func (m *Model) applySaved(msg savedMsg) tea.Cmd {
 	if msg.stale {
 		return nil // a newer snapshot was written
 	}

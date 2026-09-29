@@ -297,6 +297,9 @@ func (m *Model) statusRow() string {
 	if m.indexing {
 		status.Busy = "indexing…"
 	}
+	if m.quitStatus != "" {
+		status.Busy = m.quitStatus
+	}
 	status.Words = m.note.words
 	status.Sync = m.sync
 	return status.View()

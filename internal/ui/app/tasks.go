@@ -29,11 +29,21 @@ func (m *Model) now() time.Time {
 	return time.Now()
 }
 
-// isConflicted reports whether p has an unresolved merge conflict, which
-// makes it read-only.
-// TODO(resolver pass, Task 34): answer from the syncer's conflict set.
+// isConflicted reports whether p (or, for a folder, anything inside it) has
+// an unresolved merge conflict, which makes it read-only and protects it
+// on every write path (spec §7).
 func (m *Model) isConflicted(p string) bool {
-	_ = p
+	if p == "" || len(m.conflicted) == 0 {
+		return false
+	}
+	if m.conflicted[p] {
+		return true
+	}
+	for c := range m.conflicted {
+		if isUnder(c, p) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -73,7 +83,7 @@ func (m *Model) refreshTasks() {
 
 // updateCounts shows the Tasks and Trash counts on the sidebar entries.
 func (m *Model) updateCounts() {
-	m.sidebar.SetCounts(m.openTasks, 0, m.trashCount)
+	m.sidebar.SetCounts(m.openTasks, len(m.conflicted), m.trashCount)
 }
 
 // toggleTask toggles a task from outside the editor (spec §5): in the
@@ -136,6 +146,7 @@ func (m *Model) handleTaskToggled(msg taskToggledMsg) tea.Cmd {
 		return m.pushToast(msgs.ToastWarn, "That task changed in "+msg.path+"; it was not toggled")
 	}
 	m.queueReindex(msg.path)
+	m.noteChanged(msg.path)
 	m.refreshIndexViews()
 	return m.reloadNoteIf(msg.path)
 }
