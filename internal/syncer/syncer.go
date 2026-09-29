@@ -71,10 +71,15 @@ const (
 var backoff = []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 5 * time.Minute}
 
 // job is one unit of work for the worker. Only quit jobs run after Quit.
+// drop, if set, is called instead of fn when the worker has stopped.
 type job struct {
 	fn   func()
+	drop func()
 	quit bool
 }
+
+// errStopped is returned by Quit and RunSetup once Start's context is done.
+var errStopped = errors.New("syncer: stopped")
 
 // timerSlot holds one named timer. gen invalidates callbacks of timers that
 // were stopped or replaced but fired anyway.
@@ -218,10 +223,13 @@ func (s *Syncer) ExternalEditDone() {
 func (s *Syncer) RunSetup(setup func(*gitsync.Repo) error) <-chan error {
 	errc := make(chan error, 1)
 	s.ensureWorker(context.Background())
-	s.enqueue(job{fn: func() {
-		errc <- setup(s.raw)
-		s.startLogic()
-	}})
+	s.enqueue(job{
+		fn: func() {
+			errc <- setup(s.raw)
+			s.startLogic()
+		},
+		drop: func() { errc <- errStopped },
+	})
 	return errc
 }
 
@@ -231,16 +239,16 @@ func (s *Syncer) RunSetup(setup func(*gitsync.Repo) error) <-chan error {
 // merge is still in progress with conflicts left, it stays in Conflict.
 func (s *Syncer) ConflictResolved() {
 	s.enqueue(job{fn: func() {
+		wasConflict := s.Status().State == Conflict
 		if s.repo.MergeInProgress() {
 			if !s.concludeMerge() {
 				return
 			}
-		} else {
+		} else if wasConflict {
 			s.emitTrashWarnings()
 		}
-		s.mu.Lock()
-		s.status = Status{State: Idle}
-		s.mu.Unlock()
+		// Leave Conflict visibly even if the cycle below is deferred.
+		s.setState(Idle)
 		s.armFetch()
 		s.cycle()
 	}})
@@ -261,7 +269,11 @@ func (s *Syncer) Quit(ctx context.Context, skipFlush bool) error {
 	s.netCancel()
 
 	done := make(chan error, 1)
-	s.enqueue(job{quit: true, fn: func() { done <- s.quitJob(ctx, skipFlush) }})
+	s.enqueue(job{
+		quit: true,
+		fn:   func() { done <- s.quitJob(ctx, skipFlush) },
+		drop: func() { done <- errStopped },
+	})
 	select {
 	case err := <-done:
 		return err
@@ -319,6 +331,13 @@ func (s *Syncer) ensureWorker(ctx context.Context) {
 
 func (s *Syncer) enqueue(j job) {
 	s.qmu.Lock()
+	if s.stopped {
+		s.qmu.Unlock()
+		if j.drop != nil {
+			j.drop()
+		}
+		return
+	}
 	s.queue = append(s.queue, j)
 	s.qcond.Broadcast()
 	s.qmu.Unlock()
@@ -332,9 +351,15 @@ func (s *Syncer) work(ctx context.Context) {
 		}
 		if ctx.Err() != nil {
 			s.stopped = true
+			dropped := s.queue
 			s.queue = nil
 			s.qcond.Broadcast()
 			s.qmu.Unlock()
+			for _, j := range dropped {
+				if j.drop != nil {
+					j.drop()
+				}
+			}
 			return
 		}
 		j := s.queue[0]
@@ -485,11 +510,9 @@ func (s *Syncer) startLogic() {
 	if s.repo.MergeInProgress() && !s.concludeMerge() {
 		return
 	}
-	s.mu.Lock()
-	if s.status.State == Conflict { // left over from before a RunSetup
-		s.status = Status{State: Idle}
+	if s.Status().State == Conflict { // left over from before a RunSetup
+		s.setState(Idle)
 	}
-	s.mu.Unlock()
 	if localOnly {
 		s.setState(LocalOnly)
 		return
@@ -651,7 +674,12 @@ func (s *Syncer) fetchTick() {
 
 // afterFetch runs steps 3 and 4 of the full cycle: merge when behind, push
 // when ahead.
-func (s *Syncer) afterFetch() {
+func (s *Syncer) afterFetch() { s.mergeAndPush(true) }
+
+// mergeAndPush merges when behind and pushes when ahead. A push rejected for
+// another reason than the network or authentication (the remote moved since
+// the fetch) is retried once after fetching and merging again.
+func (s *Syncer) mergeAndPush(mayRetry bool) {
 	_, behind, err := s.repo.AheadBehind()
 	if err != nil {
 		s.fail(err)
@@ -670,6 +698,15 @@ func (s *Syncer) afterFetch() {
 	if s.needsPush() {
 		s.setState(Pushing)
 		if err := s.repo.Push(s.netCtx, !s.repo.HasUpstream()); err != nil {
+			if mayRetry && !errors.Is(err, gitsync.ErrNetwork) && !errors.Is(err, gitsync.ErrAuth) && !s.isQuitting() {
+				s.setState(Pulling)
+				if ferr := s.repo.Fetch(s.netCtx); ferr != nil {
+					s.fail(ferr)
+					return
+				}
+				s.mergeAndPush(false)
+				return
+			}
 			s.fail(err)
 			return
 		}

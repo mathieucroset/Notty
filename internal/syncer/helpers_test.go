@@ -189,6 +189,7 @@ type spyRepo struct {
 	*gitsync.Repo
 	host      *fakeHost
 	beforeMrg func(n int) // called with the 1-based merge count
+	beforePsh func(n int) // called with the 1-based push count
 	merges    atomic.Int32
 	fetches   atomic.Int32
 	pushes    atomic.Int32
@@ -221,8 +222,11 @@ func (r *spyRepo) Fetch(ctx context.Context) error {
 }
 
 func (r *spyRepo) Push(ctx context.Context, setUpstream bool) error {
-	r.pushes.Add(1)
+	n := int(r.pushes.Add(1))
 	r.host.record("Push")
+	if r.beforePsh != nil {
+		r.beforePsh(n)
+	}
 	return r.Repo.Push(ctx, setUpstream)
 }
 

@@ -258,6 +258,33 @@ func TestMergeRefusedTwiceIsError(t *testing.T) {
 	}
 }
 
+func TestPushRejectedAfterRemoteMovedRetriesOnce(t *testing.T) {
+	env := gittest.New(t)
+	h := newHarness(t, env.Laptop)
+	h.start()
+	// The desktop pushes between our fetch and our push.
+	h.repo.beforePsh = func(n int) {
+		if n == 1 {
+			deskPush(t, env, func(r *gitsync.Repo) { gittest.Write(t, r, "race.md", "desktop\n") })
+		}
+	}
+	gittest.Write(t, env.Laptop, "mine.md", "laptop\n")
+	h.rec.reset()
+	h.s.SyncNow()
+	h.s.waitIdle()
+
+	h.wantState(Synced)
+	if got := h.repo.pushes.Load(); got != 2 {
+		t.Fatalf("pushes = %d, want 2 (rejected, then retried after merging)", got)
+	}
+	if !remoteHas(t, env, "mine.md") || !remoteHas(t, env, "race.md") {
+		t.Fatalf("remote misses mine.md or race.md")
+	}
+	if got := h.rec.reindexed(); !slices.Contains(got, "race.md") {
+		t.Fatalf("Reindex = %v, want race.md", got)
+	}
+}
+
 func TestLocalOnlyCommitsWithoutPush(t *testing.T) {
 	gittest.Isolate(t)
 	repo, err := gitsync.Init(filepath.Join(t.TempDir(), "vault"), "main")

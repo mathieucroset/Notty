@@ -182,6 +182,49 @@ func TestStartWithResolvedMergeCommitsIt(t *testing.T) {
 	}
 }
 
+func TestConflictResolvedWhileExternalEditing(t *testing.T) {
+	env, h := conflictHarness(t)
+	gittest.Write(t, env.Laptop, "note.md", "resolved\n")
+	if err := env.Laptop.Add("note.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Laptop.CommitMerge("Merge · laptop"); err != nil {
+		t.Fatal(err)
+	}
+	h.host.editing.Store(true)
+	h.s.ConflictResolved()
+	h.s.waitIdle()
+	// The cycle is deferred, but the UI must not keep showing the conflict.
+	h.wantState(Idle)
+	h.host.editing.Store(false)
+	h.s.ExternalEditDone()
+	h.s.waitIdle()
+	h.wantState(Synced)
+	if got := remoteSubject(t, env); got != "Merge · laptop" {
+		t.Fatalf("remote subject = %q", got)
+	}
+}
+
+func TestQuitAfterWorkerStoppedReturns(t *testing.T) {
+	env := gittest.New(t)
+	h := newHarness(t, env.Laptop)
+	ctx, cancel := context.WithCancel(context.Background())
+	h.s.Start(ctx)
+	h.s.waitIdle()
+	cancel()
+	h.s.qmu.Lock()
+	for !h.s.stopped {
+		h.s.qcond.Wait()
+	}
+	h.s.qmu.Unlock()
+	if err := h.s.Quit(context.Background(), true); err == nil {
+		t.Fatalf("Quit on a stopped syncer returned nil")
+	}
+	if err := <-h.s.RunSetup(func(*gitsync.Repo) error { return nil }); err == nil {
+		t.Fatalf("RunSetup on a stopped syncer returned nil")
+	}
+}
+
 func TestConflictResolvedPushesAndResumes(t *testing.T) {
 	env, h := conflictHarness(t)
 
