@@ -41,6 +41,17 @@ const (
 	modeDiff
 )
 
+// contentCacheKey identifies one rendering of the right pane: the loaded
+// revision, the view mode, the content column's width, and the palette in
+// use. The expensive part of showing a revision (a Glamour render or a
+// merge.Unified diff) is recomputed only when this key changes.
+type contentCacheKey struct {
+	rev     string
+	mode    mode
+	width   int
+	palette string
+}
+
 // Model is the History view.
 type Model struct {
 	styles  theme.Styles
@@ -49,8 +60,9 @@ type Model struct {
 	notePath       string
 	currentContent string
 
-	entries []gitsync.LogEntry
-	selRev  string // Rev of the explicitly selected entry, "" if none
+	entries  []gitsync.LogEntry
+	selRev   string // Rev of the explicitly selected entry, "" if none
+	pendingG bool   // a "g" was just pressed, waiting for a second ("gg")
 
 	loadedRev     string // Rev the loaded version belongs to
 	loadedContent string
@@ -59,6 +71,19 @@ type Model struct {
 	scroll int
 
 	width, height int
+
+	// contentCache holds the last computed right-pane content (unscrolled),
+	// refreshed only by refreshContent (called from SetVersion, SetSize, and
+	// the tab key). rightContent, maxScroll, and scrolledContent read it
+	// instead of recomputing on every keystroke or frame.
+	contentCache      string
+	contentCacheKey   contentCacheKey
+	contentCacheValid bool
+
+	// onRender, when set, is called each time refreshContent actually
+	// recomputes the right-pane content (a cache miss). It exists so tests
+	// can prove the cache is doing its job; production code leaves it nil.
+	onRender func()
 }
 
 // New returns a History view for notePath, whose current (possibly unsaved)
@@ -91,14 +116,14 @@ func (m Model) SetEntries(entries []gitsync.LogEntry) Model {
 func (m Model) SetVersion(rev, content string) Model {
 	m.loadedRev = rev
 	m.loadedContent = content
-	return m
+	return m.refreshContent()
 }
 
 // SetSize sets the view's size in columns and rows. It is the whole screen:
 // the History view draws its own header and footer.
 func (m Model) SetSize(w, h int) Model {
 	m.width, m.height = w, h
-	return m
+	return m.refreshContent()
 }
 
 func (m Model) selected() (gitsync.LogEntry, bool) {
@@ -147,13 +172,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	switch k.String() {
+	s := k.String()
+	// "gg" is a two-key chord, like the preview's top/bottom keys (spec
+	// §4.4). Any key other than a second "g" cancels a pending one.
+	wasPendingG := m.pendingG
+	m.pendingG = false
+
+	switch s {
 	case "j", "down":
 		return m.moveTo(m.selectedIndex() + 1)
 	case "k", "up":
 		return m.moveTo(m.selectedIndex() - 1)
 	case "g":
-		return m.moveTo(0)
+		if wasPendingG {
+			return m.moveTo(0)
+		}
+		m.pendingG = true
 	case "G":
 		return m.moveTo(len(m.entries) - 1)
 	case "pgdown", "ctrl+d":
@@ -167,6 +201,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.mode = modeRendered
 		}
 		m.scroll = 0
+		m = m.refreshContent()
 	case "enter":
 		if m.versionLoaded() {
 			return m, emit(RestoreVersionMsg{Path: m.notePath, Rev: m.loadedRev, Content: m.loadedContent})
@@ -354,9 +389,11 @@ func (m Model) scrolledContent(bodyH int) string {
 	return strings.Join(lines[s:end], "\n")
 }
 
-// rightContent renders the selected revision, unscrolled: either rendered
-// markdown or a diff against the current content, depending on m.mode. It
-// reports a loading placeholder while the version hasn't arrived yet.
+// rightContent returns the selected revision's unscrolled content: either
+// rendered markdown or a diff against the current content, depending on
+// m.mode. It reports a loading placeholder while the version hasn't arrived
+// yet, and otherwise always reads contentCache rather than recomputing —
+// the cache is refreshed only by refreshContent.
 func (m Model) rightContent() string {
 	if _, ok := m.selected(); !ok {
 		return ""
@@ -364,11 +401,38 @@ func (m Model) rightContent() string {
 	if !m.versionLoaded() {
 		return m.styles.Muted.Render("loading…")
 	}
-	w := m.contentWidth()
+	return m.contentCache
+}
+
+// refreshContent recomputes the right pane's content when its cache key —
+// the loaded revision, the view mode, the content width, and the palette —
+// has changed. It is called explicitly from SetVersion, SetSize, and the
+// tab key; View, scrolling, and moving the selection never call it, so
+// neither Glamour nor the differ runs on every frame or keystroke.
+func (m Model) refreshContent() Model {
+	key := contentCacheKey{rev: m.loadedRev, mode: m.mode, width: m.contentWidth(), palette: m.palette.Name}
+	if m.contentCacheValid && m.contentCacheKey == key {
+		return m
+	}
+	if m.onRender != nil {
+		m.onRender()
+	}
+	m.contentCacheKey = key
+	m.contentCache = m.computeContent()
+	m.contentCacheValid = true
+	return m
+}
+
+// computeContent is the expensive part of rightContent: it runs Glamour or
+// the differ. Call it only through refreshContent, which caches the result.
+func (m Model) computeContent() string {
+	if m.loadedRev == "" {
+		return ""
+	}
 	if m.mode == modeDiff {
 		return m.renderDiff()
 	}
-	out, err := renderMarkdown(m.loadedContent, m.palette, w)
+	out, err := renderMarkdown(m.loadedContent, m.palette, m.contentWidth())
 	if err != nil {
 		return m.loadedContent
 	}
@@ -399,8 +463,8 @@ func (m Model) renderDiff() string {
 			lines = append(lines, m.styles.Success.Render("+ "+dl.Text))
 		case dl.Kind == merge.Delete:
 			lines = append(lines, m.styles.Error.Render("- "+dl.Text))
-		default:
-			lines = append(lines, "  "+dl.Text)
+		default: // unchanged context line
+			lines = append(lines, m.styles.Muted.Render("  "+dl.Text))
 		}
 	}
 	return strings.Join(lines, "\n")

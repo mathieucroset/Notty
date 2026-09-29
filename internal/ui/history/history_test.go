@@ -1,6 +1,7 @@
 package history
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -114,20 +115,39 @@ func TestUpdateKeyMessages(t *testing.T) {
 	}
 }
 
-func TestGAndGJumpToEnds(t *testing.T) {
+func TestGGAndGJumpToEnds(t *testing.T) {
 	m := newTest(t)
 	m, got := send(m, "G")
 	if got != (SelectionChangedMsg{Rev: "c1"}) {
 		t.Errorf("G: msg = %#v, want select c1", got)
 	}
-	m, got = send(m, "g")
-	if got != (SelectionChangedMsg{Rev: "c3"}) {
-		t.Errorf("g: msg = %#v, want select c3", got)
-	}
-	// g at the top emits nothing.
+
+	// A lone "g" is only the first half of the "gg" chord: it moves nothing.
 	m, got = send(m, "g")
 	if got != nil {
-		t.Errorf("g at the top emitted %#v, want nil", got)
+		t.Errorf("single g: msg = %#v, want nil (waiting for a second g)", got)
+	}
+	m, got = send(m, "g")
+	if got != (SelectionChangedMsg{Rev: "c3"}) {
+		t.Errorf("gg: msg = %#v, want select c3", got)
+	}
+	// Now at the top (c3): gg again emits nothing (no change).
+	m, _ = send(m, "g")
+	m, got = send(m, "g")
+	if got != nil {
+		t.Errorf("gg at the top emitted %#v, want nil", got)
+	}
+
+	// Move back down, then show a pending "g" is cancelled by any other
+	// key: "gj" moves down by one (to c2), not a jump to the top.
+	m, got = send(m, "j")
+	if got != (SelectionChangedMsg{Rev: "c2"}) {
+		t.Fatalf("j: msg = %#v, want select c2", got)
+	}
+	m, _ = send(m, "g")
+	m, got = send(m, "j")
+	if got != (SelectionChangedMsg{Rev: "c1"}) {
+		t.Errorf("gj: msg = %#v, want plain j (select c1), not a gg jump", got)
 	}
 }
 
@@ -172,6 +192,75 @@ func TestTabTogglesMode(t *testing.T) {
 	}
 }
 
+// TestRightContentCachedAcrossScrollAndView proves the right pane's content
+// (a Glamour render, here) is computed once for a loaded revision and then
+// only read from the cache: ten pgdown presses plus ten View() calls must
+// not trigger a second render.
+func TestRightContentCachedAcrossScrollAndView(t *testing.T) {
+	m := newTest(t)
+	e, _ := m.selected()
+	var lines []string
+	for i := 0; i < 50; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	content := strings.Join(lines, "\n")
+
+	count := 0
+	m.onRender = func() { count++ }
+
+	m = m.SetVersion(e.Rev, content)
+	if count != 1 {
+		t.Fatalf("SetVersion (a cache miss) rendered %d times, want 1", count)
+	}
+
+	for i := 0; i < 10; i++ {
+		m, _ = m.Update(key("pgdown"))
+	}
+	for i := 0; i < 10; i++ {
+		_ = m.View()
+	}
+	if count != 1 {
+		t.Errorf("pgdown ×10 + View ×10 rendered %d times in total, want 1 (all cache hits after the initial load)", count)
+	}
+
+	// Re-setting the very same revision and content is also a cache hit.
+	m = m.SetVersion(e.Rev, content)
+	if count != 1 {
+		t.Errorf("SetVersion with an unchanged key re-rendered: total = %d, want 1", count)
+	}
+}
+
+// TestRightContentRecomputesOnCacheKeyChange proves the cache key really
+// does invalidate the cache: a mode toggle or a width change must trigger
+// exactly one recompute, and re-applying an unchanged size must not.
+func TestRightContentRecomputesOnCacheKeyChange(t *testing.T) {
+	m := newTest(t)
+	e, _ := m.selected()
+	m = m.SetVersion(e.Rev, "line one\nline two\n")
+
+	count := 0
+	m.onRender = func() { count++ }
+
+	m, _ = m.Update(key("tab")) // rendered -> diff: a mode change
+	if count != 1 {
+		t.Errorf("tab (mode change) rendered %d times, want 1", count)
+	}
+	m, _ = m.Update(key("tab")) // diff -> rendered: a mode change back
+	if count != 2 {
+		t.Errorf("tab back (mode change) total renders = %d, want 2", count)
+	}
+
+	m = m.SetSize(m.width*2, m.height) // a width change
+	if count != 3 {
+		t.Errorf("SetSize (width change) total renders = %d, want 3", count)
+	}
+
+	m = m.SetSize(m.width, m.height) // the same size again: a cache hit
+	if count != 3 {
+		t.Errorf("SetSize with an unchanged size re-rendered: total = %d, want 3", count)
+	}
+}
+
 func TestNoOpKeysReturnNil(t *testing.T) {
 	m := newTest(t)
 	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'z', Text: "z"}); cmd != nil {
@@ -182,19 +271,34 @@ func TestNoOpKeysReturnNil(t *testing.T) {
 	}
 }
 
+// wideRuneEntries exercises CJK (double-width) and emoji (often
+// double-width, sometimes built from several runes) characters in the
+// subject/host fields that end up in the rendered list rows.
+func wideRuneEntries() []gitsync.LogEntry {
+	return []gitsync.LogEntry{
+		{Rev: "w3", Date: baseDate, Subject: "更新笔记 · 笔记本💻", Host: "笔记本💻", Added: 3, Deleted: 1},
+		{Rev: "w2", Date: baseDate.Add(-24 * time.Hour), Subject: "emoji party 🎉😀🚀", Host: "desktop🖥️", Added: 5, Deleted: 0},
+		{Rev: "w1", Date: baseDate.Add(-72 * time.Hour), Subject: "Create a.md", Host: "laptop", Added: 10, Deleted: 0},
+	}
+}
+
 func TestViewExactBounds(t *testing.T) {
 	sizes := [][2]int{{80, 24}, {60, 10}, {40, 5}, {30, 2}, {30, 1}}
-	for _, sz := range sizes {
-		m := newTest(t)
-		m = m.SetSize(sz[0], sz[1])
-		v := m.View()
-		lines := strings.Split(v, "\n")
-		if len(lines) != sz[1] {
-			t.Errorf("size %v: got %d lines, want %d", sz, len(lines), sz[1])
-		}
-		for i, l := range lines {
-			if w := ansi.StringWidth(l); w != sz[0] {
-				t.Errorf("size %v: line %d width = %d, want %d (%q)", sz, i, w, sz[0], l)
+	datasets := [][]gitsync.LogEntry{threeEntries(), wideRuneEntries()}
+	for _, entries := range datasets {
+		for _, sz := range sizes {
+			m := newTest(t)
+			m = m.SetEntries(entries)
+			m = m.SetSize(sz[0], sz[1])
+			v := m.View()
+			lines := strings.Split(v, "\n")
+			if len(lines) != sz[1] {
+				t.Errorf("size %v: got %d lines, want %d", sz, len(lines), sz[1])
+			}
+			for i, l := range lines {
+				if w := ansi.StringWidth(l); w != sz[0] {
+					t.Errorf("size %v: line %d width = %d, want %d (%q)", sz, i, w, sz[0], l)
+				}
 			}
 		}
 	}
