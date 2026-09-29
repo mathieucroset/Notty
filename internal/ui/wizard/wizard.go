@@ -218,6 +218,9 @@ type Model struct {
 	remote        remoteCheck
 	cancelRemote  context.CancelFunc
 
+	// Identity form and setup run.
+	run runState
+
 	spinner  spinner.Model
 	spinning bool
 }
@@ -240,6 +243,7 @@ func New(mode Mode, defaultVault string, currentTheme string, env Env, styles th
 	m.vaultInput = newInput("~/Notes")
 	m.vaultInput.SetValue(defaultVault)
 	m.vaultInput.CursorEnd()
+	m.run = newRunState()
 	m.repoInput = newInput("notes")
 	m.repoInput.SetValue("notes")
 	m.repoInput.CursorEnd()
@@ -283,7 +287,7 @@ func (m *Model) applyStyles() {
 }
 
 func (m *Model) inputs() []*textinput.Model {
-	return []*textinput.Model{&m.vaultInput, &m.repoInput, &m.urlInput}
+	return []*textinput.Model{&m.vaultInput, &m.repoInput, &m.urlInput, &m.run.nameInput, &m.run.emailInput}
 }
 
 // activeInput returns the text input that has focus, or nil.
@@ -301,6 +305,14 @@ func (m *Model) activeInput() *textinput.Model {
 		case subURL:
 			return &m.urlInput
 		}
+	case StageIdentity:
+		if m.run.settingIdentity {
+			return nil
+		}
+		if m.run.identityField == 1 {
+			return &m.run.emailInput
+		}
+		return &m.run.nameInput
 	}
 	return nil
 }
@@ -404,7 +416,13 @@ func emit(msg tea.Msg) tea.Cmd { return func() tea.Msg { return msg } }
 
 // busy reports whether something is running that shows the spinner.
 func (m Model) busy() bool {
-	return m.remote.busy
+	switch {
+	case m.remote.busy, m.run.settingIdentity:
+		return true
+	case m.stage == StageRun:
+		return m.run.phase == phaseChecking || m.run.phase == phasePreparing || m.run.phase == phaseRunning
+	}
+	return false
 }
 
 // spin starts the spinner loop unless it is already running.
@@ -418,6 +436,9 @@ func (m *Model) spin() tea.Cmd {
 
 // Update handles a message.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	if m, cmd, ok := m.updateRun(msg); ok {
+		return m, cmd
+	}
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
@@ -516,6 +537,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.vaultKey(msg)
 	case StageSync:
 		return m.syncKey(msg)
+	case StageIdentity:
+		return m.identityKey(msg)
+	case StageRun:
+		return m.runKey(msg)
 	}
 	return m, nil
 }
@@ -649,11 +674,9 @@ func (m Model) confirmURL() (Model, tea.Cmd) {
 	return m, tea.Batch(m.remoteCmd(ctx, m.remoteSeq, url), m.spin())
 }
 
-// startSetup leaves the sync step and runs the setup.
-func (m Model) startSetup() (Model, tea.Cmd) {
-	m.stage = StageRun
-	m.focus()
-	return m, nil
+// enterTheme follows a successful first-run setup.
+func (m Model) enterTheme() (Model, tea.Cmd) {
+	return m, emit(m.done(m.currentTheme))
 }
 
 // remoteError maps a remote failure to the text shown to the user.

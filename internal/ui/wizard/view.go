@@ -46,7 +46,7 @@ func (m Model) View() string {
 	b.WriteString("\n\n")
 	b.WriteString(m.wrap(m.styles.Muted, m.footer(), inner))
 
-	content := fitWidth(b.String(), inner)
+	content := padLines(fitWidth(b.String(), inner), inner)
 	card := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(m.styles.PaneBorder.GetBorderTopForeground()).
@@ -93,8 +93,71 @@ func (m Model) body(w int) string {
 		return m.vaultView(w)
 	case StageSync:
 		return m.syncView(w)
+	case StageIdentity:
+		return m.identityView(w)
+	case StageRun:
+		return m.runView(w)
 	}
 	return ""
+}
+
+func (m Model) identityView(w int) string {
+	lines := []string{
+		m.wrap(m.styles.StatusText, textIdentity, w), "",
+		m.styles.StatusText.Render("Name"), m.run.nameInput.View(),
+		m.styles.StatusText.Render("Email"), m.run.emailInput.View(),
+	}
+	switch {
+	case m.run.settingIdentity:
+		lines = append(lines, "", "  "+m.spinner.View()+" "+m.styles.Muted.Render("Saving…"))
+	case m.run.identityErr != "":
+		lines = append(lines, "", m.note(m.styles.Error, m.run.identityErr, w))
+	default:
+		lines = append(lines, "", m.note(m.styles.Muted, "Saved in your global git config (user.name, user.email).", w))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// maxErrorLines caps the raw error text shown after a failed run.
+const maxErrorLines = 4
+
+func (m Model) runView(w int) string {
+	var lines []string
+	title := "Setting up your vault"
+	if m.mode == SetupSync {
+		title = "Setting up sync"
+	}
+	lines = append(lines, m.styles.StatusText.Render(title), "")
+	if len(m.run.steps) == 0 && (m.run.phase == phaseChecking || m.run.phase == phasePreparing) {
+		lines = append(lines, m.spinner.View()+" "+m.styles.Muted.Render("Getting ready…"))
+	}
+	for i, s := range m.run.steps {
+		var marker, text string
+		switch {
+		case i == m.run.failed:
+			marker, text = m.styles.Error.Render("✗"), m.styles.Error.Render(s.Desc)
+		case i < m.run.current || m.run.phase == phaseDone:
+			marker, text = m.styles.Success.Render("✓"), m.styles.StatusText.Render(s.Desc)
+		case i == m.run.current && m.run.phase == phaseRunning:
+			marker, text = m.spinner.View(), m.styles.Accent.Render(s.Desc)
+		default:
+			marker, text = m.styles.Muted.Render("○"), m.styles.Muted.Render(s.Desc)
+		}
+		lines = append(lines, marker+" "+ansi.Truncate(text, max(1, w-2), "…"))
+	}
+	if m.run.phase == phaseFailed && m.run.runErr != nil {
+		headline, hint, detail := runErrorLines(m.run.runErr)
+		lines = append(lines, "", m.wrap(m.styles.Error.Bold(true), headline, w))
+		if hint != "" {
+			lines = append(lines, m.wrap(m.styles.Error, hint, w))
+		}
+		d := strings.Split(ansi.Wrap(strings.TrimSpace(detail), w, ""), "\n")
+		if len(d) > maxErrorLines {
+			d = append(d[:maxErrorLines-1], "…")
+		}
+		lines = append(lines, m.styles.Muted.Render(strings.Join(d, "\n")))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) footer() string {
@@ -113,6 +176,13 @@ func (m Model) footer() string {
 			return "↑/↓ choose · enter select · " + back
 		}
 		return "enter continue · " + back
+	case StageIdentity:
+		return "tab next field · enter continue · esc back"
+	case StageRun:
+		if m.run.phase == phaseFailed {
+			return "r retry · esc back"
+		}
+		return "working…"
 	}
 	return ""
 }
@@ -242,6 +312,18 @@ func fitWidth(s string, w int) string {
 	for i, l := range lines {
 		if ansi.StringWidth(l) > w {
 			lines[i] = ansi.Truncate(l, w, "…")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// padLines pads every line of s with spaces to w columns, so the card keeps
+// the same width from step to step.
+func padLines(s string, w int) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if lw := ansi.StringWidth(l); lw < w {
+			lines[i] = l + strings.Repeat(" ", w-lw)
 		}
 	}
 	return strings.Join(lines, "\n")
