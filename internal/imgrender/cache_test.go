@@ -151,7 +151,9 @@ func TestDecode(t *testing.T) {
 			if err := enc(f); err != nil {
 				t.Fatal(err)
 			}
-			f.Close()
+			if err := f.Close(); err != nil {
+				t.Fatal(err)
+			}
 			img, err := Decode(p)
 			if err != nil {
 				t.Fatalf("Decode: %v", err)

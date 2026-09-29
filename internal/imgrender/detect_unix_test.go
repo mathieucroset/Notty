@@ -40,8 +40,8 @@ func TestDetectLeavesNoPendingRead(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer r.Close()
-			defer w.Close()
+			defer func() { _ = r.Close() }()
+			defer func() { _ = w.Close() }()
 
 			start := time.Now()
 			got := Detect("auto", envMap(), tt.wrap(r), noRun(t))
@@ -81,8 +81,8 @@ func TestDetectBlockingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
-	defer w.Close()
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
 	_ = r.Fd() // switches r to blocking mode
 	done := make(chan Caps, 1)
 	start := time.Now()
@@ -96,7 +96,7 @@ func TestDetectBlockingFile(t *testing.T) {
 			t.Errorf("got %+v", got)
 		}
 	case <-time.After(2 * time.Second):
-		w.Close() // unblock the stuck Read
+		_ = w.Close() // unblock the stuck Read
 		t.Fatal("Detect blocked on a file whose read deadline has no effect")
 	}
 }
@@ -108,8 +108,8 @@ func TestDetectBlockingFileReadsReplies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
-	defer w.Close()
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
 	_ = r.Fd()
 	if _, err := w.WriteString(replyKittyOK + replyCell + replyDA1Six); err != nil {
 		t.Fatal(err)
@@ -126,8 +126,8 @@ func TestDetectPollReadsReplies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
-	defer w.Close()
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
 	if _, err := w.WriteString(replyKittyOK + replyCell + replyDA1Six); err != nil {
 		t.Fatal(err)
 	}
