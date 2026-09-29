@@ -218,6 +218,21 @@ func TestPasteClipboardLeavesVisual(t *testing.T) {
 	}
 }
 
+func TestPasteClipboardUpdatesDesiredColumn(t *testing.T) {
+	m, b, _ := run(t, "|a\nabcdefgh", `"+p`)
+	m.PasteClipboard(b, "XYZ", false)
+	feed(m, b, "j")
+	if got := show(b); got != "aXYZ\nabc|defgh" {
+		t.Errorf("vim: %q", got)
+	}
+	p, b, _ := runPlain(t, "|a\nabcdefgh", "<c-v>")
+	p.PasteClipboard(b, "XYZ", false)
+	feed(p, b, "<down>")
+	if got := show(b); got != "XYZa\nabc|defgh" {
+		t.Errorf("plain: %q", got)
+	}
+}
+
 func TestPasteClipboardUndo(t *testing.T) {
 	m, b, _ := run(t, "a|b", `"+p`)
 	m.PasteClipboard(b, "XY\n", false)

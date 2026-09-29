@@ -357,7 +357,7 @@ func (p *Plain) shiftLines(b *buffer.Buffer, indent bool) {
 // selection, as one undo step.
 func (p *Plain) PasteClipboard(b *buffer.Buffer, text string, before bool) {
 	p.attach(b)
-	defer func() { p.lastPos = b.Cursor() }()
+	defer func() { p.lastPos, p.curswant = b.Cursor(), cursorCell(b) }()
 	if p.readOnly || text == "" {
 		return
 	}

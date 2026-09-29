@@ -417,7 +417,7 @@ func (m *Machine) execVisualSpecial(b *buffer.Buffer, c cmd) bool {
 // (linewise if text ends with a newline).
 func (m *Machine) PasteClipboard(b *buffer.Buffer, text string, before bool) {
 	m.attach(b)
-	defer func() { m.lastPos = b.Cursor() }()
+	defer func() { m.lastPos, m.curswant = b.Cursor(), cursorCell(b) }()
 	if text == "" || m.readOnly {
 		return
 	}
