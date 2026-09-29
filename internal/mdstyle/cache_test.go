@@ -2,6 +2,7 @@ package mdstyle
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"testing"
 )
 
@@ -44,6 +45,78 @@ func TestCacheFenceLangToggleIsLazy(t *testing.T) {
 	}
 	if s := c.Spans(10); len(s) == 0 || s[0].Lang != "python" {
 		t.Errorf("spans after toggle = %+v, want python code spans", s)
+	}
+}
+
+// fullTokenize tokenizes lines from scratch, independently of Cache.
+func fullTokenize(lines []string) [][]Span {
+	out := make([][]Span, len(lines))
+	st := State{}
+	for i, l := range lines {
+		out[i], st = TokenizeLine(l, st)
+	}
+	return out
+}
+
+func TestCacheMatchesFullRetokenizeRandomEdits(t *testing.T) {
+	pool := []string{
+		"", "```", "```go", "```python", "~~~", "````", "   ```", "# heading #tag",
+		"para *it* and **bold**", "- [ ] task", "- [x] done", "> quote", "---",
+		"func main() {}", "`code` [l](u)", "x := 1 // ```", "``` not closer",
+	}
+	rng := rand.New(rand.NewPCG(7, 11))
+	pick := func() string { return pool[rng.IntN(len(pool))] }
+
+	for doc := range 50 {
+		lines := make([]string, rng.IntN(30))
+		for i := range lines {
+			lines[i] = pick()
+		}
+		c := NewCache()
+		c.Update(lines, 0)
+		for step := range 40 {
+			// Render a random subset so some spans are memoized.
+			for range rng.IntN(len(lines) + 1) {
+				c.Spans(rng.IntN(len(lines) + 1))
+			}
+			k := 0
+			if len(lines) > 0 {
+				k = rng.IntN(len(lines) + 1)
+			}
+			next := append([]string(nil), lines[:k]...)
+			switch op := rng.IntN(4); {
+			case op == 0 && k < len(lines): // replace one line
+				next = append(next, pick())
+				next = append(next, lines[k+1:]...)
+			case op == 1: // insert 1-3 lines
+				for range 1 + rng.IntN(3) {
+					next = append(next, pick())
+				}
+				next = append(next, lines[k:]...)
+			case op == 2 && k < len(lines): // delete 1-3 lines
+				next = append(next, lines[min(len(lines), k+1+rng.IntN(3)):]...)
+			default: // replace a range with a different number of lines
+				end := min(len(lines), k+rng.IntN(4))
+				for range rng.IntN(4) {
+					next = append(next, pick())
+				}
+				next = append(next, lines[end:]...)
+			}
+			lines = next
+			c.Update(lines, k)
+
+			want := fullTokenize(lines)
+			for i := range lines {
+				got := fmtSpans(describe(lines[i], c.Spans(i)))
+				exp := fmtSpans(describe(lines[i], want[i]))
+				if got != exp {
+					t.Fatalf("doc %d step %d line %d %q:\n got: %s\nwant: %s", doc, step, i, lines[i], got, exp)
+				}
+			}
+			if c.Spans(len(lines)) != nil {
+				t.Fatalf("doc %d step %d: stale spans past end", doc, step)
+			}
+		}
 	}
 }
 
