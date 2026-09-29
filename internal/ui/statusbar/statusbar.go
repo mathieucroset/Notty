@@ -132,20 +132,30 @@ func (m Model) View() string {
 	}
 
 	// Drop the help hint, then the sync text, until at least a short path
-	// (or, with no path, a one-column gap) fits.
+	// (or, with no path, a one-column gap) fits. Conflict and error states
+	// need attention, so their text stays and the path gives way instead.
+	urgent := m.Sync.State == msgs.SyncConflict || m.Sync.State == msgs.SyncError
 	minMiddle := 1
 	if m.Path != "" {
 		minMiddle = min(ansi.StringWidth(m.Path), 8) + 1
 	}
-	r, rw := right()
-	for leftW+rw+minMiddle > m.width && (showHelp || showSync) {
-		if showHelp {
-			showHelp = false
+	var r string
+	var rw int
+	fits := func() bool {
+		r, rw = right()
+		return leftW+rw+minMiddle <= m.width
+	}
+	if !fits() {
+		showHelp = false
+	}
+	if !fits() {
+		if urgent {
+			minMiddle = 0
 		} else {
 			showSync = false
 		}
-		r, rw = right()
 	}
+	fits()
 
 	// Middle: path and word count, shortened to fit. A one-column gap
 	// always separates it from the right segment.

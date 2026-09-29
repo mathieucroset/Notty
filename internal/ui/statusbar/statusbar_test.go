@@ -98,6 +98,36 @@ func TestViewNoPath(t *testing.T) {
 	}
 }
 
+func TestViewKeepsUrgentSyncText(t *testing.T) {
+	long := "Projects/Clients/Acme Corporation/Quarterly planning/Meeting notes 2026.md"
+	tests := []struct {
+		st    msgs.SyncStatusMsg
+		width int
+	}{
+		{msgs.SyncStatusMsg{State: msgs.SyncConflict, Conflicts: 2}, 30},
+		{msgs.SyncStatusMsg{State: msgs.SyncConflict, Conflicts: 2}, 24},
+		{msgs.SyncStatusMsg{State: msgs.SyncError}, 30},
+		{msgs.SyncStatusMsg{State: msgs.SyncError}, 22},
+	}
+	for _, tt := range tests {
+		m := New(styles(t))
+		m.SetSize(tt.width)
+		m.Mode = "NORMAL"
+		m.Path = long
+		m.Words = 7
+		m.Sync = tt.st
+		got := ansi.Strip(m.View())
+		if w := ansi.StringWidth(got); w != tt.width {
+			t.Errorf("width %d: rendered width %d: %q", tt.width, w, got)
+		}
+		for _, want := range []string{"NORMAL", SyncText(tt.st)} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s at width %d: %q missing %q", tt.st.State, tt.width, got, want)
+			}
+		}
+	}
+}
+
 func TestViewTruncation(t *testing.T) {
 	long := "Projects/Clients/Acme Corporation/Quarterly planning/Meeting notes 2026.md"
 	tests := []struct {
