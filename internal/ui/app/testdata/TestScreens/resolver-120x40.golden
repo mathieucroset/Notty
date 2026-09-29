@@ -1,0 +1,40 @@
+Resolve conflicts  0 of 1 files resolved                                                                                
+ Files                      │ README.md  0 of 1 conflicts resolved                                                      
+ ● ≡ README.md              │ Yours                        │ Theirs                       │ Result                      
+                            │  # Notes                     │  # Notes                     │  # Notes                    
+                            │▌                             │▌                             │▌ ⟨unresolved: o/t/b/e⟩      
+                            │▌ laptop line                 │▌ desktop line                │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                              │                              │                             
+                            │                                                                                           
+]c/[c next/prev · o yours · t theirs · b both · u unset · e edit · enter resolve · j/k files · esc close                
