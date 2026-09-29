@@ -154,6 +154,25 @@ func TestRunKitty(t *testing.T) {
 	}
 }
 
+func TestRunKittyClampsTo297Cells(t *testing.T) {
+	dir := t.TempDir()
+	a := writePNG(t, dir, "a.png", 40, 20)
+	for _, tmux := range []bool{false, true} {
+		v, out := newTestViewer([]string{a}, imgrender.ProtoKitty, strings.NewReader("q"))
+		v.Caps.TmuxPassthrough = tmux
+		v.Size = func() (int, int, error) { return 1000, 400, nil }
+		runViewer(t, v)
+		s := out.String()
+		// 297 columns keep the 4:1 cell aspect: 74 rows, centered.
+		if !strings.Contains(s, "c=297,r=74") {
+			t.Errorf("tmux=%v: placement not clamped to 297x74 cells: %q", tmux, abbreviate(s))
+		}
+		if !strings.Contains(s, cup((399-74)/2+1, (1000-297)/2+1)) {
+			t.Errorf("tmux=%v: clamped image not centered", tmux)
+		}
+	}
+}
+
 func TestRunKittyTmuxUsesPlaceholders(t *testing.T) {
 	dir := t.TempDir()
 	a := writePNG(t, dir, "a.png", 40, 20)

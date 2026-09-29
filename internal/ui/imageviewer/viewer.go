@@ -1,15 +1,11 @@
 package imageviewer
 
 import (
-	"bytes"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"image"
-	"image/png"
 	"io"
 	"io/fs"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +16,6 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/ansi/kitty"
 	"github.com/charmbracelet/x/term"
 
 	"github.com/mathieucroset/notty/internal/imgrender"
@@ -33,10 +28,17 @@ const (
 	seqClear = "\x1b[0m\x1b[H\x1b[2J"
 )
 
-// kittyID is the Kitty image id used by the viewer. The viewer runs on its
-// own alternate screen, whose image store is wiped on entry, so it cannot
-// collide with the preview's images.
-const kittyID uint32 = 0xFFFFFE
+// kittyID is the Kitty image id used by the viewer. It lies in imgrender's
+// reserved range, which the preview's dynamic ids never use. That matters
+// under tmux: every pane and window shares the outer terminal's screen and
+// its image store, so the viewer must not replace or delete a preview image
+// shown elsewhere.
+const kittyID = imgrender.ViewerKittyID
+
+// maxKittyCells is the size of the Kitty diacritic table: placeholder
+// placements (used under tmux) cannot be larger. Direct placements are
+// clamped too, so both paths lay the image out the same way.
+const maxKittyCells = 297
 
 const hints = "n next · p prev · o open · q close"
 
@@ -289,7 +291,11 @@ func (s *session) draw() {
 // image draws the current image centered in cols x area cells.
 func (s *session) image(b *strings.Builder, cols, area int) {
 	cw, ch := s.cellSize()
-	c, r := imgrender.FitCells(s.imgW, s.imgH, cols, area, cw, ch)
+	maxCols, maxRows := cols, area
+	if s.v.Caps.Viewer == imgrender.ProtoKitty {
+		maxCols, maxRows = min(maxCols, maxKittyCells), min(maxRows, maxKittyCells)
+	}
+	c, r := imgrender.FitCells(s.imgW, s.imgH, maxCols, maxRows, cw, ch)
 	top, left := (area-r)/2+1, (cols-c)/2+1
 	switch s.v.Caps.Viewer {
 	case imgrender.ProtoKitty:
@@ -301,7 +307,7 @@ func (s *session) image(b *strings.Builder, cols, area int) {
 				b.WriteString(cup(top+i, left) + line)
 			}
 		} else {
-			b.WriteString(cup(top, left) + kittyDirect(s.img, kittyID, c, r, c*cw, r*ch))
+			b.WriteString(cup(top, left) + imgrender.KittyDirect(s.img, kittyID, c, r))
 		}
 		s.kittyVisible = true
 	case imgrender.ProtoSixel:
@@ -361,44 +367,6 @@ func errorMessage(err error) string {
 // cup moves the cursor to the 1-based row and column.
 func cup(row, col int) string {
 	return "\x1b[" + strconv.Itoa(row) + ";" + strconv.Itoa(col) + "H"
-}
-
-// kittyDirect transmits img as PNG and places it at the cursor over cols x
-// rows cells without moving the cursor (a=T,C=1). The image is downscaled to
-// at most pxW x pxH pixels; Kitty scales it to the cells.
-func kittyDirect(img image.Image, id uint32, cols, rows, pxW, pxH int) string {
-	if img == nil || cols <= 0 || rows <= 0 {
-		return ""
-	}
-	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
-	if w > pxW || h > pxH {
-		r := math.Min(float64(pxW)/float64(w), float64(pxH)/float64(h))
-		w, h = max(int(math.Round(float64(w)*r)), 1), max(int(math.Round(float64(h)*r)), 1)
-	}
-	var data bytes.Buffer
-	if err := png.Encode(&data, imgrender.Scale(img, w, h)); err != nil {
-		return ""
-	}
-	control := "a=T,f=100,q=2,C=1,i=" + strconv.FormatUint(uint64(id), 10) +
-		",c=" + strconv.Itoa(cols) + ",r=" + strconv.Itoa(rows)
-	payload := base64.StdEncoding.EncodeToString(data.Bytes())
-	if len(payload) <= kitty.MaxChunkSize {
-		return "\x1b_G" + control + ";" + payload + "\x1b\\"
-	}
-	var out strings.Builder
-	for i := 0; i < len(payload); i += kitty.MaxChunkSize {
-		end := min(i+kitty.MaxChunkSize, len(payload))
-		ctrl, m := "q=2", ",m=1;"
-		if i == 0 {
-			ctrl = control
-		}
-		if end == len(payload) {
-			m = ",m=0;"
-		}
-		out.WriteString("\x1b_G" + ctrl + m + payload[i:end] + "\x1b\\")
-	}
-	return out.String()
 }
 
 // defaultSize returns a Size function reading the size of the first of
