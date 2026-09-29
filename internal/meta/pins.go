@@ -84,10 +84,10 @@ func (s *State) Save(vaultRoot string) error {
 		return fmt.Errorf("meta: create temp state file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op once the rename below succeeds
+	defer func() { _ = os.Remove(tmpPath) }() // no-op once the rename below succeeds
 
 	if _, err := tmp.Write(s.Marshal()); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("meta: write temp state file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

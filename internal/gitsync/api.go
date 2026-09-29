@@ -49,8 +49,22 @@ func Init(dir, branch string) (*Repo, error) {
 // Clone clones url into dir (created with its parents if missing; it must be
 // empty if it exists).
 func Clone(ctx context.Context, url, dir string) (*Repo, error) {
+	return CloneBranch(ctx, url, dir, "")
+}
+
+// CloneBranch is Clone checking out branch instead of the remote's HEAD
+// (which may point to a branch that does not exist). An empty branch means
+// the remote's HEAD.
+func CloneBranch(ctx context.Context, url, dir, branch string) (*Repo, error) {
 	if err := checkArg("url", url); err != nil {
 		return nil, err
+	}
+	args := []string{"clone", "-q"}
+	if branch != "" {
+		if err := checkArg("branch", branch); err != nil {
+			return nil, err
+		}
+		args = append(args, "-b", branch)
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -61,7 +75,7 @@ func Clone(ctx context.Context, url, dir string) (*Repo, error) {
 		return nil, fmt.Errorf("gitsync: clone: %w", err)
 	}
 	run := newExecRunner(configuredSSHCommand(""))
-	if _, err := runGit(ctx, run, parent, true, "clone", "-q", "--", url, abs); err != nil {
+	if _, err := runGit(ctx, run, parent, true, append(args, "--", url, abs)...); err != nil {
 		return nil, fmt.Errorf("gitsync: clone %s: %w", url, err)
 	}
 	return Open(abs), nil
@@ -143,6 +157,65 @@ func (r *Repo) HasRemote() bool {
 	return err == nil
 }
 
+// CheckIdentity reports whether git can author and commit in dir: it runs
+// `git var GIT_AUTHOR_IDENT` and `GIT_COMMITTER_IDENT` there when dir is a
+// repository, else outside any repository (the global identity). It returns
+// an error wrapping ErrNoIdentity when git has no usable name or email.
+func CheckIdentity(ctx context.Context, dir string) error {
+	if dir == "" || !Open(dir).IsRepo() {
+		dir = os.TempDir()
+	}
+	for _, v := range []string{"GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"} {
+		if _, err := runGit(ctx, execRunner, dir, false, "var", v); err != nil {
+			return fmt.Errorf("gitsync: check identity: %w", err)
+		}
+	}
+	return nil
+}
+
+// SetGlobalIdentity sets user.name and user.email in the global git config.
+func SetGlobalIdentity(ctx context.Context, name, email string) error {
+	if strings.TrimSpace(name) == "" || strings.TrimSpace(email) == "" {
+		return errors.New("gitsync: set identity: name and email are required")
+	}
+	for _, kv := range [][2]string{{"user.name", name}, {"user.email", email}} {
+		if _, err := runGit(ctx, execRunner, os.TempDir(), false, "config", "--global", kv[0], kv[1]); err != nil {
+			return fmt.Errorf("gitsync: set identity: %w", err)
+		}
+	}
+	return nil
+}
+
+// RemoteURL returns the configured URL of origin, or an error wrapping
+// ErrNoRemote when origin is not configured.
+func (r *Repo) RemoteURL() (string, error) {
+	res, err := r.git("config", "--get", "remote."+remoteName+".url")
+	if exitCode(err) == 1 {
+		return "", fmt.Errorf("gitsync: remote url: %w", ErrNoRemote)
+	}
+	if err != nil {
+		return "", fmt.Errorf("gitsync: remote url: %w", err)
+	}
+	return strings.TrimSpace(string(res.Stdout)), nil
+}
+
+// GitPath returns the absolute path of p inside the repository's git
+// directory (`git rev-parse --git-path`), e.g. "info/exclude".
+func (r *Repo) GitPath(p string) (string, error) {
+	if err := checkArg("git path", p); err != nil {
+		return "", err
+	}
+	res, err := r.git("rev-parse", "--git-path", p)
+	if err != nil {
+		return "", fmt.Errorf("gitsync: git path %s: %w", p, err)
+	}
+	out := strings.TrimSpace(string(res.Stdout))
+	if !filepath.IsAbs(out) {
+		out = filepath.Join(r.Dir, out)
+	}
+	return out, nil
+}
+
 // CurrentBranch returns the checked-out branch name (also for an unborn
 // branch). It fails on a detached HEAD.
 func (r *Repo) CurrentBranch() (string, error) {
@@ -153,12 +226,13 @@ func (r *Repo) CurrentBranch() (string, error) {
 	return strings.TrimSpace(string(res.Stdout)), nil
 }
 
-// RenameBranch renames the current branch (`git branch -M <name>`).
+// RenameBranch renames the current branch (`git branch -m <name>`). It
+// fails, changing nothing, if a branch with that name already exists.
 func (r *Repo) RenameBranch(name string) error {
 	if err := checkArg("branch", name); err != nil {
 		return err
 	}
-	if _, err := r.git("branch", "-M", name); err != nil {
+	if _, err := r.git("branch", "-m", name); err != nil {
 		return fmt.Errorf("gitsync: rename branch to %s: %w", name, err)
 	}
 	return nil
@@ -375,6 +449,12 @@ func (r *Repo) hasCommit(rev string) bool {
 // ErrLocalChanges when git refused to start because uncommitted changes would
 // be overwritten.
 func (r *Repo) Merge(ref string, allowUnrelated bool) error {
+	return r.MergeWithMessage(ref, allowUnrelated, "")
+}
+
+// MergeWithMessage is Merge with msg as the merge commit message (also left
+// in MERGE_MSG when the merge conflicts). An empty msg means git's default.
+func (r *Repo) MergeWithMessage(ref string, allowUnrelated bool, msg string) error {
 	if err := checkArg("ref", ref); err != nil {
 		return err
 	}
@@ -384,6 +464,9 @@ func (r *Repo) Merge(ref string, allowUnrelated bool) error {
 	args := []string{"merge", "--no-edit", "--ff", "--no-autostash", "-Xfind-renames"}
 	if allowUnrelated {
 		args = append(args, "--allow-unrelated-histories")
+	}
+	if msg != "" {
+		args = append(args, "-m", msg)
 	}
 	args = append(args, ref)
 	res, err := r.git(noHooks(args...)...)
@@ -669,6 +752,21 @@ func (r *Repo) ShowAt(rev, path string) ([]byte, error) {
 		return nil, err
 	}
 	return r.catBlob(rev + ":" + path)
+}
+
+// LastCommitAdding returns the newest non-merge commit reachable from HEAD
+// that added path, or "" if there is none. Rename detection is off, so moving
+// a file (such as into .trash/) counts as adding its destination.
+func (r *Repo) LastCommitAdding(path string) (string, error) {
+	if err := checkPaths([]string{path}); err != nil {
+		return "", err
+	}
+	res, err := r.git("log", "-1", "--no-merges", "--no-renames", "--diff-filter=A",
+		"--no-show-signature", "--format=%H", "HEAD", "--", path)
+	if err != nil {
+		return "", fmt.Errorf("gitsync: last commit adding %s: %w", path, err)
+	}
+	return strings.TrimSpace(string(res.Stdout)), nil
 }
 
 // LastCommitHostFor returns the host of the newest commit that touched path

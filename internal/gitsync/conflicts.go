@@ -165,7 +165,7 @@ func (r *Repo) IsBinary(path string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	buf := make([]byte, 8000)
 	n, _ := f.Read(buf)
 	return looksBinary(buf[:n])

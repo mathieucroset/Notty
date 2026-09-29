@@ -8,6 +8,58 @@ import (
 	"github.com/charmbracelet/x/ansi/kitty"
 )
 
+func TestKittyDirect(t *testing.T) {
+	img := solidImage(4, 4, color.RGBA{255, 0, 0, 255})
+	cmds := parseKitty(t, KittyDirect(img, 9, 3, 2))
+	if len(cmds) != 1 {
+		t.Fatalf("got %d commands, want 1", len(cmds))
+	}
+	c := cmds[0]
+	want := map[string]string{"a": "T", "f": "100", "q": "2", "C": "1", "i": "9", "c": "3", "r": "2"}
+	for k, v := range want {
+		if c.opts[k] != v {
+			t.Errorf("opt %s = %q, want %q (all: %v)", k, c.opts[k], v, c.opts)
+		}
+	}
+	if _, ok := c.opts["U"]; ok {
+		t.Errorf("direct placement must not be virtual (U=1): %v", c.opts)
+	}
+	assertPNG(t, c.payload, 4, 4)
+}
+
+func TestKittyDirectChunksAndDownscales(t *testing.T) {
+	img := noiseImage(600, 300)
+	cmds := parseKitty(t, KittyDirect(img, 5, 10, 4)) // budget 200x160 px
+	if len(cmds) < 2 {
+		t.Fatalf("got %d chunks, want several", len(cmds))
+	}
+	var all strings.Builder
+	for i, c := range cmds {
+		if i > 0 && len(c.opts) != 2 {
+			t.Errorf("chunk %d: only q and m allowed after the first, got %v", i, c.opts)
+		}
+		all.WriteString(c.payload)
+	}
+	if cmds[0].opts["C"] != "1" || cmds[len(cmds)-1].opts["m"] != "0" {
+		t.Errorf("first chunk %v, last chunk %v", cmds[0].opts, cmds[len(cmds)-1].opts)
+	}
+	assertPNG(t, all.String(), 200, 100)
+}
+
+func TestKittyDirectInvalid(t *testing.T) {
+	img := solidImage(4, 4, color.RGBA{1, 2, 3, 255})
+	for _, got := range []string{
+		KittyDirect(nil, 1, 2, 2),
+		KittyDirect(img, 0, 2, 2),
+		KittyDirect(img, 1, 0, 2),
+		KittyDirect(img, 1, 2, 0),
+	} {
+		if got != "" {
+			t.Errorf("got %q, want empty", trunc(got))
+		}
+	}
+}
+
 func TestKittyIDZero(t *testing.T) {
 	img := solidImage(4, 4, color.RGBA{1, 2, 3, 255})
 	if got := KittyTransmit(img, 0, 2, 2); got != "" {

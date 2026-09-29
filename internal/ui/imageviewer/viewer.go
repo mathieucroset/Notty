@@ -1,0 +1,445 @@
+package imageviewer
+
+import (
+	"errors"
+	"fmt"
+	"image"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/term"
+
+	"github.com/mathieucroset/notty/internal/imgrender"
+)
+
+// Terminal sequences written by the viewer.
+const (
+	seqEnter = "\x1b[?1049h\x1b[?25l"
+	seqLeave = "\x1b[0m\x1b[?25h\x1b[?1049l"
+	seqClear = "\x1b[0m\x1b[H\x1b[2J"
+)
+
+// kittyID is the Kitty image id used by the viewer. It lies in imgrender's
+// reserved range, which the preview's dynamic ids never use. That matters
+// under tmux: every pane and window shares the outer terminal's screen and
+// its image store, so the viewer must not replace or delete a preview image
+// shown elsewhere.
+const kittyID = imgrender.ViewerKittyID
+
+// maxKittyCells is the size of the Kitty diacritic table: placeholder
+// placements (used under tmux) cannot be larger. Direct placements are
+// clamped too, so both paths lay the image out the same way.
+const maxKittyCells = 297
+
+const hints = "n next · p prev · o open · q close"
+
+// fallbackCols and fallbackRows are used when the terminal size is unknown.
+const (
+	fallbackCols = 80
+	fallbackRows = 24
+)
+
+// Viewer is the full-screen image viewer. It implements tea.ExecCommand, so
+// the UI runs it with tea.Exec: Bubble Tea releases the terminal, calls the
+// Set* methods with its own input and output, and then calls Run.
+type Viewer struct {
+	// Paths are the images of the note; Index is the one shown first (0
+	// when out of range). Run updates Index as the user navigates.
+	Paths []string
+	Index int
+	// Caps.Viewer picks the protocol; CellW and CellH size the image.
+	Caps imgrender.Caps
+
+	// Size returns the terminal size. Default: term.GetSize on stdout (or
+	// stdin when stdout is not a terminal).
+	Size func() (cols, rows int, err error)
+	// Open opens path with the system image viewer. Default: xdg-open
+	// (open on macOS, ShellExecute on Windows), without waiting for it.
+	Open func(path string) error
+
+	// QuitRequested reports that the viewer was closed with ctrl+q, which
+	// quits Notty from every context (spec §4.4). Bubble Tea cannot see
+	// that key while the viewer owns the terminal, so the app's tea.Exec
+	// callback must check it and turn it into a tea.QuitMsg (tea.Quit).
+	// Run resets it on entry.
+	QuitRequested bool
+
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
+
+	// escWait overrides defaultEscWait (test hook).
+	escWait time.Duration
+	// watch reports terminal resizes until stop is called (test hook).
+	watch func(size func() (int, int, error)) (resized <-chan struct{}, stop func())
+}
+
+// New returns a viewer for paths starting at index.
+func New(paths []string, index int, caps imgrender.Caps) *Viewer {
+	return &Viewer{Paths: paths, Index: index, Caps: caps}
+}
+
+// SetStdin sets the terminal input (tea.ExecCommand).
+func (v *Viewer) SetStdin(r io.Reader) { v.stdin = r }
+
+// SetStdout sets the terminal output (tea.ExecCommand).
+func (v *Viewer) SetStdout(w io.Writer) { v.stdout = w }
+
+// SetStderr sets the error output (tea.ExecCommand). The viewer does not
+// write to it; it is kept for the interface.
+func (v *Viewer) SetStderr(w io.Writer) { v.stderr = w }
+
+// fder is a file with a descriptor, such as *os.File.
+type fder interface{ Fd() uintptr }
+
+// Run takes over the terminal and shows the images until the user closes
+// the viewer (q, esc, ctrl+c, or ctrl+q, which also sets QuitRequested) or
+// the input ends. The terminal state (raw mode,
+// alternate screen, cursor, Kitty images) is restored on every exit path,
+// including panics.
+func (v *Viewer) Run() (err error) {
+	if len(v.Paths) == 0 {
+		return errors.New("image viewer: no images")
+	}
+	v.QuitRequested = false
+	in, out := v.stdin, v.stdout
+	if in == nil {
+		in = os.Stdin
+	}
+	if out == nil {
+		out = os.Stdout
+	}
+	s := &session{v: v, out: out, size: v.Size, index: clampIndex(v.Index, len(v.Paths))}
+	if s.size == nil {
+		s.size = defaultSize(out, in)
+	}
+
+	if f, ok := in.(fder); ok && term.IsTerminal(f.Fd()) {
+		state, rawErr := term.MakeRaw(f.Fd())
+		if rawErr != nil {
+			return fmt.Errorf("image viewer: raw mode: %w", rawErr)
+		}
+		defer func() { _ = term.Restore(f.Fd(), state) }()
+	}
+	defer enableVT(out)()
+
+	s.write(seqEnter)
+	defer func() {
+		// Always attempt the restore, even after a failed write: a
+		// transient error must not leave the terminal on our screen.
+		tail := seqLeave
+		if s.kittyVisible {
+			tail = s.wrap(imgrender.KittyDelete(kittyID)) + tail
+			s.kittyVisible = false
+		}
+		_, werr := io.WriteString(out, tail)
+		if s.err == nil {
+			s.err = werr
+		}
+		if err == nil && s.err != nil {
+			err = fmt.Errorf("image viewer: write: %w", s.err)
+		}
+	}()
+
+	keys := startKeyReader(in, v.escWait)
+	defer keys.stop()
+	watch := v.watch
+	if watch == nil {
+		watch = watchResize
+	}
+	resized, stopWatch := watch(s.size)
+	defer stopWatch()
+
+	s.draw()
+	for {
+		select {
+		case batch := <-keys.keys:
+			if s.handle(batch) {
+				return nil
+			}
+		case <-keys.done:
+			return nil // input closed
+		case <-resized:
+			s.draw()
+		}
+	}
+}
+
+func clampIndex(i, n int) int {
+	if i < 0 || i >= n {
+		return 0
+	}
+	return i
+}
+
+// session is the state of one Run.
+type session struct {
+	v     *Viewer
+	out   io.Writer
+	size  func() (int, int, error)
+	err   error // first write error
+	index int
+
+	// The decoded current image (or the error), loaded lazily per index.
+	loaded       int // index+1 of the loaded image; 0 when none
+	img          image.Image
+	imgErr       error
+	imgW, imgH   int
+	status       string // replaces the hints in the footer
+	cols, rows   int    // size of the last draw
+	kittyVisible bool
+}
+
+// handle applies a batch of keys and reports whether the viewer should
+// close. All moves of the batch are applied first and the screen is drawn
+// once at the end (keys pile up in one read when the terminal is slow to
+// draw large images); nothing is drawn when the batch closes the viewer.
+func (s *session) handle(batch []Key) bool {
+	n := len(s.v.Paths)
+	start, status := s.index, s.status
+	for _, k := range batch {
+		switch k {
+		case Quit:
+			return true
+		case QuitApp:
+			s.v.QuitRequested = true
+			return true
+		case Next:
+			s.index = (s.index + 1) % n
+			s.status = ""
+		case Prev:
+			s.index = (s.index + n - 1) % n
+			s.status = ""
+		case Open:
+			s.status = ""
+			path := s.v.Paths[s.index]
+			if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+				s.status = "file not found"
+			} else if err := s.open(path); err != nil {
+				s.status = "open failed: " + err.Error()
+			}
+		case Unknown:
+		}
+	}
+	s.v.Index = s.index
+	switch {
+	case s.index != start:
+		s.draw()
+	case s.status != status:
+		var b strings.Builder
+		s.footer(&b)
+		s.write(b.String())
+	}
+	return false
+}
+
+func (s *session) open(path string) error {
+	if s.v.Open != nil {
+		return s.v.Open(path)
+	}
+	return openWithSystem(path)
+}
+
+func (s *session) write(str string) {
+	if s.err != nil || str == "" {
+		return
+	}
+	_, s.err = io.WriteString(s.out, str)
+}
+
+// wrap wraps a graphics sequence for tmux passthrough when needed.
+func (s *session) wrap(seq string) string {
+	if s.v.Caps.TmuxPassthrough && seq != "" {
+		return imgrender.WrapTmux(seq)
+	}
+	return seq
+}
+
+func (s *session) deleteKitty() {
+	if s.kittyVisible {
+		s.write(s.wrap(imgrender.KittyDelete(kittyID)))
+		s.kittyVisible = false
+	}
+}
+
+func (s *session) cellSize() (w, h int) {
+	w, h = s.v.Caps.CellW, s.v.Caps.CellH
+	if w <= 0 || h <= 0 {
+		return 8, 16
+	}
+	return w, h
+}
+
+// load decodes the current image once per index.
+func (s *session) load() {
+	if s.loaded == s.index+1 {
+		return
+	}
+	path := s.v.Paths[s.index]
+	s.loaded = s.index + 1
+	if s.v.Caps.Viewer == imgrender.ProtoOff {
+		// Nothing to draw: read the size for the footer only.
+		var err error
+		s.img, s.imgErr = nil, nil
+		s.imgW, s.imgH, err = imgrender.Dimensions(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			s.imgErr = err
+		}
+		return
+	}
+	s.img, s.imgErr = imgrender.Decode(path)
+	if s.imgErr == nil {
+		b := s.img.Bounds()
+		s.imgW, s.imgH = b.Dx(), b.Dy()
+		return
+	}
+	s.img = nil
+	// Dimensions still reports the size of an oversized image.
+	s.imgW, s.imgH, _ = imgrender.Dimensions(path)
+}
+
+// draw clears the screen and draws the current image and the footer.
+func (s *session) draw() {
+	cols, rows, err := s.size()
+	if err != nil || cols <= 0 || rows <= 0 {
+		cols, rows = fallbackCols, fallbackRows
+	}
+	s.cols, s.rows = cols, rows
+	s.deleteKitty()
+	s.load()
+
+	var b strings.Builder
+	b.WriteString(seqClear)
+	area := max(rows-1, 1) // the last row is the footer
+	switch {
+	case s.imgErr != nil:
+		centered(&b, errorMessage(s.imgErr), cols, area)
+	case s.v.Caps.Viewer == imgrender.ProtoOff:
+		centered(&b, "images are disabled", cols, area)
+	default:
+		s.image(&b, cols, area)
+	}
+	s.footer(&b)
+	s.write(b.String())
+}
+
+// centered writes msg, truncated to cols, in the middle of cols x area.
+func centered(b *strings.Builder, msg string, cols, area int) {
+	msg = ansi.Truncate(msg, cols, "…")
+	b.WriteString(cup(area/2+1, (cols-ansi.StringWidth(msg))/2+1) + msg)
+}
+
+// image draws the current image centered in cols x area cells.
+func (s *session) image(b *strings.Builder, cols, area int) {
+	cw, ch := s.cellSize()
+	proto := s.v.Caps.Viewer
+	pixels := proto == imgrender.ProtoSixel || proto == imgrender.ProtoITerm
+	if pixels && (s.v.Caps.CellW <= 0 || s.v.Caps.CellH <= 0) {
+		// The image is sized in pixels from a guessed 8x16 cell; when the
+		// real cells are shorter it runs taller than planned. Keep a spare
+		// row so it cannot reach the footer and scroll the screen.
+		area = max(area-1, 1)
+	}
+	maxCols, maxRows := cols, area
+	if proto == imgrender.ProtoKitty {
+		maxCols, maxRows = min(maxCols, maxKittyCells), min(maxRows, maxKittyCells)
+	}
+	c, r := imgrender.FitCells(s.imgW, s.imgH, maxCols, maxRows, cw, ch)
+	top, left := (area-r)/2+1, (cols-c)/2+1
+	switch proto {
+	case imgrender.ProtoKitty:
+		if s.v.Caps.TmuxPassthrough {
+			// tmux does not track where a direct placement lands; unicode
+			// placeholders are plain text that tmux positions itself.
+			b.WriteString(s.wrap(imgrender.KittyTransmit(s.img, kittyID, c, r)))
+			for i, line := range imgrender.KittyPlaceholders(kittyID, c, r) {
+				b.WriteString(cup(top+i, left) + line)
+			}
+		} else {
+			b.WriteString(cup(top, left) + imgrender.KittyDirect(s.img, kittyID, c, r))
+		}
+		s.kittyVisible = true
+	case imgrender.ProtoSixel:
+		// Sixel rows are drawn in bands of 6 pixels: a height that is not a
+		// multiple of 6 would spill a partial band into the next cell row.
+		pxH := max(r*ch/6*6, 6)
+		b.WriteString(cup(top, left) + s.wrap(imgrender.Sixel(s.img, c*cw, pxH)))
+	case imgrender.ProtoITerm:
+		b.WriteString(cup(top, left) + s.wrap(imgrender.ITerm(s.img, c*cw, r*ch)))
+	default: // ProtoHalfBlocks, ProtoOff
+		for i, line := range imgrender.HalfBlocks(s.img, c, r) {
+			b.WriteString(cup(top+i, left) + line)
+		}
+	}
+}
+
+// footer writes the footer on the last row, padded to one column less than
+// the width so the terminal never scrolls.
+func (s *session) footer(b *strings.Builder) {
+	name := sanitize(filepath.Base(s.v.Paths[s.index]))
+	left := name
+	if s.imgW > 0 && s.imgH > 0 {
+		left += "  " + strconv.Itoa(s.imgW) + "x" + strconv.Itoa(s.imgH)
+	}
+	left += "  " + strconv.Itoa(s.index+1) + "/" + strconv.Itoa(len(s.v.Paths))
+	right := hints
+	if s.status != "" {
+		right = sanitize(s.status)
+	}
+	width := max(s.cols-1, 1)
+	b.WriteString(cup(s.rows, 1) + "\x1b[7m" + padRight(left+"    "+right, width) + "\x1b[0m")
+}
+
+// padRight truncates or pads text to exactly width columns.
+func padRight(text string, width int) string {
+	text = ansi.Truncate(text, width, "…")
+	return text + strings.Repeat(" ", max(width-ansi.StringWidth(text), 0))
+}
+
+// sanitize replaces control characters so names cannot inject sequences.
+func sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || (r >= 0x7f && r < 0xa0) {
+			return '?'
+		}
+		return r
+	}, s)
+}
+
+func errorMessage(err error) string {
+	switch {
+	case errors.Is(err, imgrender.ErrImageTooLarge):
+		return "image too large"
+	case errors.Is(err, fs.ErrNotExist):
+		return "image not found"
+	}
+	return sanitize("cannot display image: " + err.Error())
+}
+
+// cup moves the cursor to the 1-based row and column.
+func cup(row, col int) string {
+	return "\x1b[" + strconv.Itoa(row) + ";" + strconv.Itoa(col) + "H"
+}
+
+// defaultSize returns a Size function reading the size of the first of
+// files that is a terminal.
+func defaultSize(files ...any) func() (int, int, error) {
+	return func() (int, int, error) {
+		for _, f := range files {
+			if f, ok := f.(fder); ok && term.IsTerminal(f.Fd()) {
+				w, h, err := term.GetSize(f.Fd())
+				if err != nil {
+					return 0, 0, fmt.Errorf("terminal size: %w", err)
+				}
+				return w, h, nil
+			}
+		}
+		return 0, 0, errors.New("terminal size: not a terminal")
+	}
+}
