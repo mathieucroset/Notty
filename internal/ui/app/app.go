@@ -36,8 +36,7 @@ import (
 	"github.com/mathieucroset/notty/internal/watcher"
 )
 
-// Options configures the app. Later tasks add fields (capabilities, the
-// syncer, the watcher).
+// Options configures the app. The syncer pass adds its fields.
 type Options struct {
 	Config    config.Config
 	Styles    theme.Styles

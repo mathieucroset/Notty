@@ -73,8 +73,8 @@ func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	return m.handleMainKey(k)
 }
 
-// handleMainKey handles keys for the main pane. The editor, preview, Tasks
-// and Trash components take these over in later tasks.
+// handleMainKey sends a key to the main pane: the Tasks or Trash view, the
+// editor (editor and split views) or the preview (preview view).
 func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
 	var cmd tea.Cmd
 	switch m.mainView {
