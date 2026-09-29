@@ -1,0 +1,411 @@
+// Package index keeps an in-memory index of every note in a vault (spec §8):
+// path, title, content, modification time, tags and tasks. It is built at
+// startup by reading all notes in parallel, updated one note at a time on
+// saves, watcher events and merges, and never written to disk. The fuzzy
+// finder, full-text search, tag sidebar and Tasks view all query it.
+//
+// Notes stored in the index are immutable: every change replaces the *Note,
+// so snapshots returned by Notes, Get and friends are safe to read
+// concurrently with updates. Callers must not modify them.
+package index
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/mathieucroset/notty/internal/tags"
+	"github.com/mathieucroset/notty/internal/tasks"
+	"github.com/mathieucroset/notty/internal/vault"
+)
+
+// ErrInvalidUTF8 is recorded as a problem for notes whose content is not
+// valid UTF-8. Such notes are still indexed.
+var ErrInvalidUTF8 = errors.New("invalid UTF-8")
+
+// Note is one indexed note. Path is vault-relative with "/" separators.
+type Note struct {
+	Path, Title, Content string
+	ModTime              time.Time
+	Tags                 []string
+	Tasks                []tasks.Task
+}
+
+// TagCount is a tag with the number of notes carrying it.
+type TagCount struct {
+	Tag   string
+	Count int
+}
+
+// TaskRef is a task together with the note it belongs to.
+type TaskRef struct {
+	Path, Title string
+	Task        tasks.Task
+}
+
+// Index is a concurrency-safe in-memory index of notes keyed by path.
+type Index struct {
+	mu       sync.RWMutex
+	notes    map[string]*Note
+	problems map[string]error // per-file problems, keyed by path
+}
+
+// New returns an empty index.
+func New() *Index {
+	return &Index{notes: map[string]*Note{}, problems: map[string]error{}}
+}
+
+// Build indexes every note in v, reading files in parallel. Hidden
+// locations (.git, .notty, .trash, attachments, dotfiles) and non-note files
+// are skipped. Only an unreadable vault root is an error; per-file problems
+// (unreadable files, invalid UTF-8) are available from Problems, and
+// unreadable files are left out of the index.
+func Build(v *vault.Vault) (*Index, error) {
+	root, err := v.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("index: build: %w", err)
+	}
+	var rels []string
+	collect(root, &rels)
+
+	type result struct {
+		note *Note
+		err  error
+	}
+	results := make([]result, len(rels))
+	var g errgroup.Group
+	g.SetLimit(runtime.GOMAXPROCS(0))
+	for i, rel := range rels {
+		g.Go(func() error {
+			n, err := load(v, rel)
+			results[i] = result{n, err}
+			return nil // per-file problems are not fatal
+		})
+	}
+	_ = g.Wait() // workers never return errors
+
+	ix := New()
+	for i, r := range results {
+		if r.note != nil {
+			ix.notes[rels[i]] = r.note
+		}
+		if r.err != nil {
+			ix.problems[rels[i]] = r.err
+		}
+	}
+	return ix, nil
+}
+
+// collect appends the paths of all notes below n.
+func collect(n *vault.Node, out *[]string) {
+	if n.IsNote {
+		*out = append(*out, n.Path)
+	}
+	for _, c := range n.Children {
+		collect(c, out)
+	}
+}
+
+// load reads the note at rel. A nil note means the file could not be read
+// (err says why) or is not a regular file (err is nil). A non-nil note may
+// come with a problem such as ErrInvalidUTF8.
+func load(v *vault.Vault, rel string) (*Note, error) {
+	fi, err := os.Lstat(v.Abs(rel))
+	if err != nil {
+		return nil, fmt.Errorf("index: stat %q: %w", rel, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, nil
+	}
+	content, err := v.Read(rel)
+	if err != nil {
+		return nil, fmt.Errorf("index: %w", err)
+	}
+	n := newNote(rel, content, fi.ModTime())
+	if !utf8.ValidString(content) {
+		return n, fmt.Errorf("index: %q: %w", rel, ErrInvalidUTF8)
+	}
+	return n, nil
+}
+
+func newNote(rel, content string, mod time.Time) *Note {
+	return &Note{
+		Path:    rel,
+		Title:   vault.Title(content, rel),
+		Content: content,
+		ModTime: mod,
+		Tags:    tags.Parse(content),
+		Tasks:   tasks.Parse(content),
+	}
+}
+
+// Update re-reads the file at rel. The entry is removed when the file is
+// missing, is not a regular .md file, or lies in a hidden location; a folder
+// path only drops an entry with that exact path, never its children. Other
+// read errors are returned (and recorded in Problems), leaving any existing
+// entry untouched.
+func (ix *Index) Update(v *vault.Vault, rel string) error {
+	rel = clean(rel)
+	if !isNotePath(rel) {
+		ix.mu.Lock()
+		delete(ix.notes, rel)
+		delete(ix.problems, rel)
+		ix.mu.Unlock()
+		return nil
+	}
+	n, err := load(v, rel)
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	switch {
+	case errors.Is(err, fs.ErrNotExist) || (n == nil && err == nil):
+		delete(ix.notes, rel)
+		delete(ix.problems, rel)
+		return nil
+	case n == nil:
+		ix.problems[rel] = err
+		return err
+	}
+	ix.notes[rel] = n
+	if err != nil {
+		ix.problems[rel] = err
+	} else {
+		delete(ix.problems, rel)
+	}
+	return nil
+}
+
+// UpdateContent indexes content (typically the editor buffer) as the note
+// at rel, with ModTime set to now. Paths that are not notes, or that lie in
+// hidden locations, are ignored.
+func (ix *Index) UpdateContent(rel, content string) {
+	rel = clean(rel)
+	if !isNotePath(rel) {
+		return
+	}
+	n := newNote(rel, content, time.Now())
+	ix.mu.Lock()
+	ix.notes[rel] = n
+	delete(ix.problems, rel)
+	ix.mu.Unlock()
+}
+
+// Remove drops the note at rel, or every note inside rel when it is a
+// folder. Removing the vault root ("") is a no-op.
+func (ix *Index) Remove(rel string) {
+	rel = clean(rel)
+	if rel == "" {
+		return
+	}
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	for p := range ix.notes {
+		if within(p, rel) {
+			delete(ix.notes, p)
+		}
+	}
+	for p := range ix.problems {
+		if within(p, rel) {
+			delete(ix.problems, p)
+		}
+	}
+}
+
+// Rename moves the note at oldRel, or every note inside the folder oldRel,
+// to newRel. Titles are recomputed, since they may fall back to the file
+// name. Notes whose new path is not a note or lies in a hidden location
+// (such as .trash) are dropped. Renaming the vault root is a no-op.
+func (ix *Index) Rename(oldRel, newRel string) {
+	oldRel, newRel = clean(oldRel), clean(newRel)
+	if oldRel == "" || newRel == "" || oldRel == newRel {
+		return
+	}
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	moved := map[string]*Note{}
+	for p, n := range ix.notes {
+		if !within(p, oldRel) {
+			continue
+		}
+		delete(ix.notes, p)
+		delete(ix.problems, p)
+		np := newRel + p[len(oldRel):]
+		if !isNotePath(np) {
+			continue
+		}
+		cp := *n
+		cp.Path = np
+		cp.Title = vault.Title(n.Content, np)
+		moved[np] = &cp
+	}
+	for p, n := range moved {
+		ix.notes[p] = n
+	}
+}
+
+// Notes returns a snapshot of all notes sorted by path.
+func (ix *Index) Notes() []*Note {
+	ix.mu.RLock()
+	out := make([]*Note, 0, len(ix.notes))
+	for _, n := range ix.notes {
+		out = append(out, n)
+	}
+	ix.mu.RUnlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+// Get returns the note at rel.
+func (ix *Index) Get(rel string) (*Note, bool) {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	n, ok := ix.notes[clean(rel)]
+	return n, ok
+}
+
+// Len returns the number of indexed notes.
+func (ix *Index) Len() int {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	return len(ix.notes)
+}
+
+// Problems returns the current per-file problems (from Build and later
+// updates), sorted by path.
+func (ix *Index) Problems() []error {
+	ix.mu.RLock()
+	ps := make([]string, 0, len(ix.problems))
+	for p := range ix.problems {
+		ps = append(ps, p)
+	}
+	sort.Strings(ps)
+	out := make([]error, len(ps))
+	for i, p := range ps {
+		out[i] = ix.problems[p]
+	}
+	ix.mu.RUnlock()
+	return out
+}
+
+// TagCounts returns how many notes carry each tag. Tags are grouped
+// case-insensitively and shown with the spelling of the first note (by
+// path) that uses them. Nested tags count separately (#work/client does not
+// count toward #work). The result is sorted by count descending, then by
+// name ignoring case.
+func (ix *Index) TagCounts() []TagCount {
+	counts := map[string]*TagCount{}
+	for _, n := range ix.Notes() {
+		for _, t := range n.Tags {
+			key := strings.ToLower(t)
+			if c, ok := counts[key]; ok {
+				c.Count++
+			} else {
+				counts[key] = &TagCount{Tag: t, Count: 1}
+			}
+		}
+	}
+	out := make([]TagCount, 0, len(counts))
+	for _, c := range counts {
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Count != b.Count {
+			return a.Count > b.Count
+		}
+		la, lb := strings.ToLower(a.Tag), strings.ToLower(b.Tag)
+		if la != lb {
+			return la < lb
+		}
+		return a.Tag < b.Tag
+	})
+	return out
+}
+
+// NotesWithTag returns the paths, sorted, of notes tagged tag (a leading
+// '#' is optional). Matching ignores case and includes nested tags: "work"
+// matches notes tagged work or work/anything.
+func (ix *Index) NotesWithTag(tag string) []string {
+	var out []string
+	for _, n := range ix.Notes() {
+		if HasTag(n, tag) {
+			out = append(out, n.Path)
+		}
+	}
+	return out
+}
+
+// HasTag reports whether n carries tag with NotesWithTag semantics. An
+// empty tag matches nothing.
+func HasTag(n *Note, tag string) bool {
+	want := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(tag, "#"), "/"))
+	if want == "" {
+		return false
+	}
+	for _, t := range n.Tags {
+		lt := strings.ToLower(t)
+		if lt == want || strings.HasPrefix(lt, want+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// OpenTasks returns every task across all notes, done ones included (the
+// Tasks view filters them), sorted by path then line.
+func (ix *Index) OpenTasks() []TaskRef {
+	var out []TaskRef
+	for _, n := range ix.Notes() { // already sorted by path
+		for _, t := range n.Tasks { // already in line order
+			out = append(out, TaskRef{Path: n.Path, Title: n.Title, Task: t})
+		}
+	}
+	return out
+}
+
+// clean normalizes a vault-relative path to a "/"-separated path with no
+// leading or trailing slash; the vault root is "".
+func clean(rel string) string {
+	return strings.TrimPrefix(path.Clean("/"+filepath.ToSlash(rel)), "/")
+}
+
+// within reports whether the clean path p is base or lies inside it.
+func within(p, base string) bool {
+	return p == base || strings.HasPrefix(p, base+"/")
+}
+
+// hiddenTopLevel mirrors the vault-root entries vault.Tree hides.
+var hiddenTopLevel = map[string]bool{
+	".git":        true,
+	".notty":      true,
+	".trash":      true,
+	"attachments": true,
+}
+
+// isNotePath reports whether the clean path rel names a note Build would
+// index: a ".md" file (any case) outside hidden locations, matching the
+// rules of vault.Tree.
+func isNotePath(rel string) bool {
+	if rel == "" || !strings.EqualFold(path.Ext(rel), ".md") {
+		return false
+	}
+	for i, seg := range strings.Split(rel, "/") {
+		if strings.HasPrefix(seg, ".") || strings.HasSuffix(seg, ".notty-tmp") {
+			return false
+		}
+		if i == 0 && hiddenTopLevel[seg] {
+			return false
+		}
+	}
+	return true
+}
