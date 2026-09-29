@@ -161,21 +161,24 @@ type CycleNoteViewMsg struct{}
 // ToggleSidebarMsg shows or hides the sidebar.
 type ToggleSidebarMsg struct{}
 
-// Sync states reported in SyncStatusMsg.State (spec §4.3).
+// SyncState is the syncer's state as shown in the status bar (spec §4.3).
+type SyncState string
+
+// Sync states. SyncUnknown means no sync status has been reported yet.
 const (
-	SyncSynced    = "synced"
-	SyncSyncing   = "syncing"
-	SyncOffline   = "offline"
-	SyncConflict  = "conflict"
-	SyncError     = "error"
-	SyncLocalOnly = "local"
+	SyncUnknown   SyncState = ""
+	SyncSynced    SyncState = "synced"
+	SyncSyncing   SyncState = "syncing"
+	SyncOffline   SyncState = "offline"
+	SyncConflict  SyncState = "conflict"
+	SyncError     SyncState = "error"
+	SyncLocalOnly SyncState = "local"
 )
 
 // SyncStatusMsg reports the syncer's state for the status bar. It is a
-// placeholder until the syncer exists. State is one of the Sync* constants,
-// or "" when sync status is unknown.
+// placeholder until the syncer exists.
 type SyncStatusMsg struct {
-	State     string
+	State     SyncState
 	Pending   int
 	Conflicts int
 }

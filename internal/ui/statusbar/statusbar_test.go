@@ -41,8 +41,8 @@ func TestSyncText(t *testing.T) {
 }
 
 func TestViewPerSyncState(t *testing.T) {
-	for _, state := range []string{msgs.SyncSynced, msgs.SyncSyncing, msgs.SyncOffline, msgs.SyncConflict, msgs.SyncError, msgs.SyncLocalOnly} {
-		t.Run(state, func(t *testing.T) {
+	for _, state := range []msgs.SyncState{msgs.SyncSynced, msgs.SyncSyncing, msgs.SyncOffline, msgs.SyncConflict, msgs.SyncError, msgs.SyncLocalOnly} {
+		t.Run(string(state), func(t *testing.T) {
 			m := New(styles(t))
 			m.SetSize(80)
 			m.Mode = "NORMAL"
