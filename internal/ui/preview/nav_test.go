@@ -167,6 +167,28 @@ func TestTaskMappingWrappedAndDuplicateTasks(t *testing.T) {
 	}
 }
 
+func TestSpaceIgnoredWhileRenderIsStale(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	m, _ = setContent(t, m, "n.md", "- [ ] one\n- [ ] two")
+	m, _ = press(m, "]", "t")
+	edited := "- [ ] zero\n- [ ] one\n- [ ] two"
+	m, cmd := m.SetContent("n.md", edited)
+	if _, out := press(m, "space"); len(out) != 0 {
+		t.Fatalf("space on a stale render emitted %v", out)
+	}
+	m, _, _ = run(m, cmd)
+	_, out := press(m, "space")
+	want := msgs.ToggleTaskMsg{Path: "n.md", Line: 0, Text: "- [ ] zero"}
+	if len(out) != 1 || out[0] != want {
+		t.Fatalf("space after the re-render emitted %v, want %v", out, want)
+	}
+	// A pending resize does not block the toggle.
+	m = m.SetSize(50, 20)
+	if _, out := press(m, "space"); len(out) != 1 {
+		t.Fatalf("space during a pending resize emitted %v", out)
+	}
+}
+
 func TestSpaceWithoutTaskDoesNothing(t *testing.T) {
 	m := newTest(t, imgrender.ProtoOff, t.TempDir())
 	m, _ = setContent(t, m, "n.md", "no tasks")

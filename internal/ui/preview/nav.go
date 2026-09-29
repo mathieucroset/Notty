@@ -136,9 +136,16 @@ func (m *Model) moveImage(dir int) {
 }
 
 // toggleTask asks the app to toggle the highlighted task, identified by its
-// line in the rendered content and the raw line text.
+// line in the rendered content and the raw line text. While the rendered
+// document lags behind the buffer (a re-render is pending) the key is
+// ignored: the highlight may point at a task that moved. A pending
+// re-render for a new size or theme keeps the same lines and does not
+// block it.
 func (m Model) toggleTask() tea.Cmd {
 	if m.doc == nil || m.taskIdx < 0 || m.taskIdx >= len(m.doc.tasks) {
+		return nil
+	}
+	if m.doc.content != m.content || m.doc.notePath != m.notePath {
 		return nil
 	}
 	t := m.doc.tasks[m.taskIdx]
