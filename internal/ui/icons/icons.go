@@ -126,7 +126,7 @@ var ascii = Set{
 	Dirty:            "*",
 	TaskOpen:         "[ ]",
 	TaskDone:         "[x]",
-	ProgressFull:     "#",
+	ProgressFull:     "=",
 	ProgressEmpty:    "-",
 	Synced:           "+",
 	Syncing:          "~",

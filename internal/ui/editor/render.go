@@ -16,6 +16,7 @@ import (
 	"github.com/mathieucroset/notty/internal/links"
 	"github.com/mathieucroset/notty/internal/mdstyle"
 	"github.com/mathieucroset/notty/internal/tasks"
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -268,11 +269,12 @@ func (a *aux) forgetMissing() {
 	}
 }
 
-// progressBar renders a 5-cell bar for done/total, like "▰▰▰▱▱ 3/5".
-func progressBar(done, total int) string {
+// progressBar renders a 5-cell bar for done/total in set's glyphs, like
+// "▰▰▰▱▱ 3/5".
+func progressBar(set icons.Set, done, total int) string {
 	const width = 5
 	filled := (done*width + total/2) / total
-	return strings.Repeat("▰", filled) + strings.Repeat("▱", width-filled) + fmt.Sprintf(" %d/%d", done, total)
+	return strings.Repeat(set.ProgressFull, filled) + strings.Repeat(set.ProgressEmpty, width-filled) + fmt.Sprintf(" %d/%d", done, total)
 }
 
 // rawUnits returns line i as typed, styled by its mdstyle spans.
@@ -361,7 +363,7 @@ func (m Model) displayUnits(i int, raw bool) []unit {
 			inner[k].Start += q
 			inner[k].End += q
 		}
-		units = taskGlyph(units, line, inner, true)
+		units = taskGlyph(m.opts.Styles.Icons, units, line, inner, true)
 		sp := spans[0]
 		bar := "▎"
 		if sp.End-sp.Start > 1 && strings.HasSuffix(line[sp.Start:sp.End], " ") {
@@ -371,29 +373,29 @@ func (m Model) displayUnits(i int, raw bool) []unit {
 		return splice(units, from, to, textUnits(bar, from, to, sty{role: roleQuoteBar}))
 	}
 
-	units = taskGlyph(units, line, spans, false)
+	units = taskGlyph(m.opts.Styles.Icons, units, line, spans, false)
 
 	if spans[0].Kind == mdstyle.Markup && strings.HasPrefix(strings.TrimLeft(line, " "), "#") {
 		if done, total := m.aux.progress(m.buf, i); total > 0 {
-			units = append(units, textUnits(" "+progressBar(done, total), n, n, sty{role: roleProgress})...)
+			units = append(units, textUnits(" "+progressBar(m.opts.Styles.Icons, done, total), n, n, sty{role: roleProgress})...)
 		}
 	}
 	return units
 }
 
 // taskGlyph replaces the checkbox of a task line (and a bullet marker
-// before it) with ☐ or ☑. Units are still one per source column, so span
+// before it) with set's checkbox. Units are still one per source column, so span
 // columns index them directly. restyle marks the text of a done task as
 // done (for tasks inside a quote, which the tokenizer styles as quote text).
-func taskGlyph(units []unit, line string, spans []mdstyle.Span, restyle bool) []unit {
+func taskGlyph(set icons.Set, units []unit, line string, spans []mdstyle.Span, restyle bool) []unit {
 	col := func(off int) int { return buffer.ByteToCol(line, off) }
 	for k, sp := range spans {
 		if sp.Kind != mdstyle.TaskOpen && sp.Kind != mdstyle.TaskDone {
 			continue
 		}
-		glyph, r := "☐", roleTaskGlyph
+		glyph, r := set.TaskOpen, roleTaskGlyph
 		if sp.Kind == mdstyle.TaskDone {
-			glyph, r = "☑", roleTaskDoneGlyph
+			glyph, r = set.TaskDone, roleTaskDoneGlyph
 			if restyle {
 				for c := col(sp.End); c < len(units); c++ {
 					units[c].st = sty{kind: mdstyle.TaskDoneText}
@@ -425,18 +427,19 @@ func (m Model) chips(line string) []unit {
 			out = append(out, textUnits(" ", src, src, sty{})...)
 		}
 		name := path.Base(img.Target)
-		text, r := " 🖼️ "+name+" ", roleChip
+		icon := m.opts.Styles.Icons.Image
+		text, r := " "+icon+" "+name+" ", roleChip
 		rel, external := links.Resolve(img.Target, m.path)
 		switch {
 		case external:
 		case rel == "":
-			text, r = " 🖼️ "+name+"  missing ", roleChipMissing
+			text, r = " "+icon+" "+name+"  missing ", roleChipMissing
 		default:
 			d := m.aux.dimensions(filepath.Join(m.opts.VaultRoot, filepath.FromSlash(rel)))
 			if d.ok {
-				text = fmt.Sprintf(" 🖼️ %s  %d×%d ", name, d.w, d.h)
+				text = fmt.Sprintf(" %s %s  %d×%d ", icon, name, d.w, d.h)
 			} else {
-				text, r = " 🖼️ "+name+"  missing ", roleChipMissing
+				text, r = " "+icon+" "+name+"  missing ", roleChipMissing
 			}
 		}
 		out = append(out, textUnits(text, src, end, sty{role: r})...)
