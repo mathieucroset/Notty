@@ -31,6 +31,7 @@ const (
 	roleProgress
 	roleQuoteBar
 	roleRule
+	roleControl
 )
 
 // sty identifies the style of one cell. It is comparable, so runs of equal
@@ -101,7 +102,7 @@ func (r *styler) base(k sty) lipgloss.Style {
 	switch k.role {
 	case roleTaskGlyph:
 		return fg(st, p.Accent)
-	case roleTaskDoneGlyph, roleQuoteBar, roleRule:
+	case roleTaskDoneGlyph, roleQuoteBar, roleRule, roleControl:
 		return fg(st, p.Muted)
 	case roleChip:
 		return bg(fg(st, p.Accent2), p.Surface)
@@ -247,7 +248,11 @@ func (m Model) rawUnits(i int) []unit {
 		if j < len(spans) && spans[j].Start <= off {
 			st = sty{kind: spans[j].Kind, tok: spans[j].Token}
 		}
-		units[c] = unit{g: g, src: c, st: st}
+		if glyph, ok := controlGlyph(g); ok {
+			units[c] = unit{g: glyph, src: c, st: sty{role: roleControl}}
+		} else {
+			units[c] = unit{g: g, src: c, st: st}
+		}
 		off += len(g)
 	}
 	return units
@@ -258,6 +263,9 @@ func textUnits(s string, src int, st sty) []unit {
 	gs := buffer.Graphemes(s)
 	out := make([]unit, len(gs))
 	for i, g := range gs {
+		if glyph, ok := controlGlyph(g); ok {
+			g = glyph // e.g. an escape character in an image name
+		}
 		out[i] = unit{g: g, src: src, st: st}
 	}
 	return out

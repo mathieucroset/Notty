@@ -186,3 +186,31 @@ func TestGutterGrowsWithLineCount(t *testing.T) {
 	}
 	checkSize(t, m, 12, 5)
 }
+
+func TestControlCharsArePlaceholders(t *testing.T) {
+	doc := "bad \x1b]52;c;aGk=\x07 and \x1b[2J x\nnext\x08\x08\r\u009b\x7f"
+	for _, ro := range []bool{false, true} {
+		m := newModel(t, testOptions(t), doc, buffer.Pos{Line: 1, Col: 5}, 30, 4)
+		if ro {
+			m = m.SetReadOnly(true, "")
+		}
+		v := m.View()
+		for _, bad := range []string{"\x1b]", "\x1b[2J", "\x07", "\x08", "\r", "\u009b", "\x7f"} {
+			if strings.Contains(v, bad) {
+				t.Errorf("view contains %q", bad)
+			}
+		}
+		checkSize(t, m, 30, 4)
+		rows := plainView(m)
+		if !slices.Contains(rows, " next␈␈␍\ufffd␡") {
+			t.Errorf("placeholders missing: %q", rows)
+		}
+		if !ro {
+			// The cursor after "next" and one ␈ sits on the second ␈.
+			c := m.CursorPosition()
+			if c == nil || c.X != 6 {
+				t.Errorf("cursor = %+v, want x=6", c)
+			}
+		}
+	}
+}

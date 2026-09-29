@@ -1,6 +1,8 @@
 package editor
 
 import (
+	"unicode/utf8"
+
 	"github.com/mathieucroset/notty/internal/buffer"
 	"github.com/mathieucroset/notty/internal/vim"
 )
@@ -15,7 +17,8 @@ import (
 // end of a row instead of starting the next one.
 
 // cellWidth is the number of cells grapheme g takes when it starts at cell x
-// of a row wrapped at width.
+// of a row wrapped at width. Control characters show as a one-cell
+// placeholder (controlGlyph).
 func cellWidth(g string, x, width int) int {
 	if g == "\t" {
 		w := vim.TabWidth - x%vim.TabWidth
@@ -24,7 +27,32 @@ func cellWidth(g string, x, width int) int {
 		}
 		return w
 	}
+	if _, ok := controlGlyph(g); ok {
+		return 1
+	}
 	return buffer.DisplayWidth(g)
+}
+
+// controlGlyph returns the visible one-cell placeholder for a control
+// character (C0 except tab, DEL, C1): the Unicode control pictures ("␛" for
+// ESC) or "�" for C1. Control characters are never written to the terminal,
+// so a note cannot inject escape sequences.
+func controlGlyph(g string) (string, bool) {
+	r, size := utf8.DecodeRuneInString(g)
+	if size == 0 {
+		return "", false
+	}
+	switch {
+	case r == '\t':
+		return "", false
+	case r < 0x20:
+		return string(rune(0x2400 + r)), true
+	case r == 0x7f:
+		return "\u2421", true
+	case r >= 0x80 && r <= 0x9f:
+		return "\ufffd", true
+	}
+	return "", false
 }
 
 // wrapGraphemes returns the index of the first grapheme of each screen row.
