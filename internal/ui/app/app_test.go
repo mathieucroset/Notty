@@ -297,6 +297,24 @@ func TestQuit(t *testing.T) {
 	}
 }
 
+func TestQuitSavesLocalState(t *testing.T) {
+	for _, quitMsg := range []tea.Msg{keyMsg("ctrl+q"), msgs.QuitMsg{}} {
+		opts := testOptions(t)
+		m := start(t, opts, 120, 30)
+		opts.Local.Touch("ideas.md") // changed but not saved yet
+		if !hasQuit(run(t, m, quitMsg)) {
+			t.Fatalf("%#v did not quit", quitMsg)
+		}
+		saved, err := localstate.Load(opts.LocalPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if saved.LastNote != "ideas.md" {
+			t.Errorf("%#v: saved LastNote = %q, want the state saved on quit", quitMsg, saved.LastNote)
+		}
+	}
+}
+
 func TestGlobalActionsEmitMessages(t *testing.T) {
 	tests := []struct {
 		key  string

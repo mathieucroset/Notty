@@ -324,11 +324,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// quit stops the watcher and ends the program.
+// quit stops the watcher, saves the local state and ends the program.
+// Both happen synchronously: nothing runs after tea.Quit.
 // TODO(syncer pass): the full quit sequence (buffer save, kitty cleanup,
 // syncer flush; plan amendment A7).
 func (m *Model) quit() tea.Cmd {
 	m.closeWatcher()
+	if m.opts.LocalPath != "" && !m.opts.WizardNeeded {
+		m.syncExpandedState()
+		_ = m.opts.Local.Save(m.opts.LocalPath) // nowhere left to report it
+	}
 	return tea.Quit
 }
 
