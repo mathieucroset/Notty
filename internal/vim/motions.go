@@ -192,7 +192,7 @@ func (m *Machine) findMotion(t *text, p buffer.Pos, n int, f findState, repeat b
 		dir = -1
 	}
 	col := p.Col
-	stop := !(repeat && f.till && n == 1)
+	stop := !repeat || !f.till || n != 1
 	for ; n > 0; n-- {
 		for {
 			col += dir
