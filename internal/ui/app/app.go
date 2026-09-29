@@ -55,6 +55,9 @@ type Options struct {
 	// ConfigPath is the local config.toml that palette settings are
 	// written to (config.ConfigPath() when empty).
 	ConfigPath string
+	// InitialNote, if set, is the vault-relative note opened at start in
+	// place of the last open note (notty new, spec §11).
+	InitialNote string
 }
 
 // Focus is the pane with keyboard focus.
@@ -202,8 +205,11 @@ func (m *Model) Init() tea.Cmd {
 }
 
 // reopenLastNoteCmd reopens the note open when the app last quit, at its
-// saved cursor, if it still exists.
+// saved cursor, if it still exists. Options.InitialNote takes precedence.
 func (m *Model) reopenLastNoteCmd() tea.Cmd {
+	if p := m.opts.InitialNote; p != "" {
+		return func() tea.Msg { return msgs.OpenNoteMsg{Path: p, Line: 2} }
+	}
 	last := m.opts.Local.LastNote
 	if last == "" {
 		return nil

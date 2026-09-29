@@ -147,8 +147,7 @@ func run(args []string, e env) int {
 		return 2
 	}
 	if flags.NArg() > 0 {
-		_, _ = fmt.Fprintf(e.stderr, "notty: unknown argument %q\n", flags.Arg(0))
-		return 2
+		return runSubcommand(flags.Args(), *vaultFlag, e)
 	}
 	if *showVersion {
 		_, _ = fmt.Fprintln(e.stdout, "notty "+version)
