@@ -113,6 +113,15 @@ func (m Model) Dismiss() Model {
 	return m
 }
 
+// Newest returns the text of the newest toast still shown, or ok false when
+// none is.
+func (m Model) Newest() (text string, ok bool) {
+	if len(m.active) == 0 {
+		return "", false
+	}
+	return m.active[len(m.active)-1].text, true
+}
+
 // Visible reports whether any toast is currently shown.
 func (m Model) Visible() bool { return len(m.active) > 0 }
 

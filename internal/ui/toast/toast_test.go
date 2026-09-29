@@ -243,3 +243,19 @@ func TestSetStylesRethemes(t *testing.T) {
 		t.Error("SetStyles changed the content")
 	}
 }
+
+func TestNewestIsTheLastShownToast(t *testing.T) {
+	m := New(testStyles(t))
+	if _, ok := m.Newest(); ok {
+		t.Fatal("an empty stack has no newest toast")
+	}
+	m, _ = m.Push(msgs.ToastWarn, "first")
+	m, _ = m.Push(msgs.ToastInfo, "second")
+	if got, ok := m.Newest(); !ok || got != "second" {
+		t.Fatalf("Newest = %q, %v; want second", got, ok)
+	}
+	m, _ = m.Update(expireMsg{id: m.active[1].id})
+	if got, _ := m.Newest(); got != "first" {
+		t.Fatalf("after expiry Newest = %q, want first", got)
+	}
+}
