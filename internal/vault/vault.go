@@ -87,6 +87,11 @@ func (v *Vault) Abs(rel string) string {
 // .trash and attachments at the top level, dotfiles anywhere, and in-flight
 // save temp files) are omitted. Directories come first, then files, each
 // sorted alphabetically ignoring case.
+//
+// Only an unreadable vault root is an error; an unreadable subfolder is
+// shown with no children. Symlinks are never followed: they appear as
+// non-note files (IsDir and IsNote false), even when they point to a folder
+// or a .md file, which also rules out symlink cycles.
 func (v *Vault) Tree() (*Node, error) {
 	root := &Node{Name: filepath.Base(v.Root), Path: "", IsDir: true}
 	if err := v.fill(root); err != nil {
@@ -95,6 +100,8 @@ func (v *Vault) Tree() (*Node, error) {
 	return root, nil
 }
 
+// fill reads dir's entries into dir.Children, recursing into subfolders. It
+// returns an error only if dir itself cannot be read.
 func (v *Vault) fill(dir *Node) error {
 	entries, err := os.ReadDir(v.Abs(dir.Path))
 	if err != nil {
@@ -109,9 +116,7 @@ func (v *Vault) fill(dir *Node) error {
 		switch {
 		case e.IsDir():
 			n.IsDir = true
-			if err := v.fill(n); err != nil {
-				return err
-			}
+			_ = v.fill(n) // unreadable subfolder: keep it, without children
 		case e.Type().IsRegular() && isNoteName(name):
 			n.IsNote = true
 		}

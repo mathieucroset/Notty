@@ -86,6 +86,29 @@ func TestSavePreservesMode(t *testing.T) {
 	}
 }
 
+func TestSaveReplacesSymlink(t *testing.T) {
+	v := openVault(t)
+	if err := os.WriteFile(v.Abs("target.md"), []byte("orig"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target.md", v.Abs("link.md")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if err := v.Save("link.md", "new"); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	fi, err := os.Lstat(v.Abs("link.md"))
+	if err != nil || !fi.Mode().IsRegular() {
+		t.Errorf("link.md should now be a regular file: %v %v", fi, err)
+	}
+	if got := readFile(t, v, "target.md"); got != "orig" {
+		t.Errorf("target changed to %q", got)
+	}
+	if got := readFile(t, v, "link.md"); got != "new" {
+		t.Errorf("link.md = %q, want new", got)
+	}
+}
+
 func TestSaveErrors(t *testing.T) {
 	v := openVault(t)
 	mkfiles(t, v.Root, "dir/")

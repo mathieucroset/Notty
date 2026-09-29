@@ -27,6 +27,8 @@ func (v *Vault) Read(rel string) (string, error) {
 // Save writes content to rel atomically: it writes <file>.notty-tmp in the
 // same directory, fsyncs it and renames it into place (spec §9). Missing
 // parent directories are created. An existing file's permissions are kept.
+// If rel is a symlink, the rename replaces the link itself with a regular
+// file (atomically); the link's former target is left untouched.
 func (v *Vault) Save(rel, content string) error {
 	c := clean(rel)
 	if c == "" {
@@ -240,9 +242,10 @@ func (v *Vault) Move(rel, destFolder string) (string, error) {
 // move renames the clean vault-relative path oldRel to newRel, creating
 // newRel's parent folders. It refuses to replace an existing entry, except
 // for a case-only rename on a case-insensitive filesystem (paths equal
-// ignoring case and naming the same file; a hard link is not exempt). It is the single point where entries change
-// path, so link rewriting can hook in here. It does not check reserved
-// names, so internal callers (such as trash) may target hidden folders.
+// ignoring case and naming the same file; a hard link is not exempt). It is
+// the single point where entries change path, so link rewriting can hook in
+// here. It does not check reserved names, so internal callers (such as
+// trash) may target hidden folders.
 func (v *Vault) move(oldRel, newRel string) (string, error) {
 	if oldRel == newRel {
 		if _, err := os.Lstat(v.Abs(oldRel)); err != nil {

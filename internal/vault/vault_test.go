@@ -149,6 +149,68 @@ func TestTree(t *testing.T) {
 	}
 }
 
+func TestTreeUnreadableSubdir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	v := openVault(t)
+	mkfiles(t, v.Root, "Locked/secret.md", "ok.md")
+	locked := v.Abs("Locked")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	root, err := v.Tree()
+	if err != nil {
+		t.Fatalf("Tree: %v", err)
+	}
+	var got []flatNode
+	flatten(root, &got)
+	want := []flatNode{{"Locked", true, false}, {"ok.md", false, true}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("tree = %v, want %v", got, want)
+	}
+}
+
+func TestTreeUnreadableRootFails(t *testing.T) {
+	v := &Vault{Root: filepath.Join(t.TempDir(), "missing")}
+	if _, err := v.Tree(); err == nil {
+		t.Error("Tree on missing root: want error")
+	}
+}
+
+func TestTreeSymlinks(t *testing.T) {
+	v := openVault(t)
+	mkfiles(t, v.Root, "real/n.md", "target.md")
+	for link, target := range map[string]string{"dirlink": "real", "link.md": "target.md"} {
+		if err := os.Symlink(target, v.Abs(link)); err != nil {
+			t.Skipf("symlinks unsupported: %v", err)
+		}
+	}
+	root, err := v.Tree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []flatNode
+	flatten(root, &got)
+	want := []flatNode{
+		{"real", true, false},
+		{"real/n.md", false, true},
+		{"dirlink", false, false},
+		{"link.md", false, false},
+		{"target.md", false, true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("tree = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("node %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestAbs(t *testing.T) {
 	v := openVault(t)
 	tests := []struct {
