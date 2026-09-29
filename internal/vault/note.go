@@ -194,7 +194,8 @@ func (v *Vault) claim(dir, base, ext string, create func(abs string) error) (str
 // is sanitized like a title and must not be a reserved name
 // (ErrInvalidName). Notes always end in ".md": a user-typed ".md" in any
 // case is normalized, and it is appended if omitted. It fails with
-// ErrExists if the target is taken.
+// ErrExists if the target is taken. Relative image links are rewritten as
+// for Move.
 func (v *Vault) Rename(rel, newName string) (string, error) {
 	src := clean(rel)
 	if src == "" {
@@ -214,7 +215,22 @@ func (v *Vault) Rename(rel, newName string) (string, error) {
 	if name == "" || reserved(dir, name) {
 		return "", fmt.Errorf("vault: rename %q to %q: %w", src, newName, ErrInvalidName)
 	}
-	return v.move(src, path.Join(dir, name))
+	return v.moveAndRewrite(src, path.Join(dir, name))
+}
+
+// moveAndRewrite moves oldRel to newRel, then rewrites the relative image
+// links of the moved note or of the notes inside the moved folder (see
+// rewriteLinks). If only the rewrite fails, the entry has moved: the new
+// path is returned together with the error.
+func (v *Vault) moveAndRewrite(oldRel, newRel string) (string, error) {
+	rel, err := v.move(oldRel, newRel)
+	if err != nil {
+		return "", err
+	}
+	if rel == oldRel {
+		return rel, nil
+	}
+	return rel, v.rewriteLinks(oldRel, rel)
 }
 
 // Move moves the note, folder or file at rel into destFolder ("" for the
@@ -222,6 +238,10 @@ func (v *Vault) Rename(rel, newName string) (string, error) {
 // target is taken, and with ErrInvalidPath if destFolder is rel itself, lies
 // inside rel, is not a folder, or is (inside) a reserved location such as
 // .trash or attachments, or if the moved name is reserved there.
+//
+// A moved note's note-relative image links, or those of every note inside
+// a moved folder, are rewritten so they keep pointing at the same files.
+// If only that rewrite fails, the new path is returned with the error.
 func (v *Vault) Move(rel, destFolder string) (string, error) {
 	src, dest := clean(rel), clean(destFolder)
 	if src == "" {
@@ -236,15 +256,16 @@ func (v *Vault) Move(rel, destFolder string) (string, error) {
 	if fi, err := os.Stat(v.Abs(dest)); err == nil && !fi.IsDir() {
 		return "", fmt.Errorf("vault: move %q: destination %q is not a folder: %w", src, dest, ErrInvalidPath)
 	}
-	return v.move(src, path.Join(dest, path.Base(src)))
+	return v.moveAndRewrite(src, path.Join(dest, path.Base(src)))
 }
 
 // move renames the clean vault-relative path oldRel to newRel, creating
 // newRel's parent folders. It refuses to replace an existing entry, except
 // for a case-only rename on a case-insensitive filesystem (paths equal
 // ignoring case and naming the same file; a hard link is not exempt). It is
-// the single point where entries change path, so link rewriting can hook in
-// here. It does not check reserved names, so internal callers (such as
+// the single point where entries change path. It neither rewrites links
+// (user moves go through moveAndRewrite; trash and restore keep content
+// byte-identical) nor checks reserved names, so internal callers (such as
 // trash) may target hidden folders.
 func (v *Vault) move(oldRel, newRel string) (string, error) {
 	if oldRel == newRel {
