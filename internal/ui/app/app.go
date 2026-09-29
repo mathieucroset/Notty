@@ -165,8 +165,9 @@ type Model struct {
 	// extConflict is the open note while the "changed on disk" dialog
 	// waits for an answer; its saves are held until then.
 	extConflict string
-	// discardOnQuit is set when saving on quit failed: the next quit
-	// leaves without saving.
+	// discardOnQuit is set when saving on quit failed: the very next quit
+	// leaves without saving. Any buffer change or successful save clears
+	// it.
 	discardOnQuit bool
 
 	// deferred are commands produced by helpers that cannot return one

@@ -157,6 +157,7 @@ func (m *Model) handleSaved(msg savedMsg) tea.Cmd {
 		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s: %v", msg.path, msg.err))
 	}
 	m.queueReindex(msg.path)
+	m.discardOnQuit = false // a later quit must save again
 	m.editor = m.editor.MarkSaved(msg.path, msg.version)
 	m.sidebar.SetDirty(m.dirtyPath())
 	m.refreshIndexViews()

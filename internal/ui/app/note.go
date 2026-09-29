@@ -123,6 +123,8 @@ func (m *Model) handleEditorChanged(msg editor.ChangedMsg) tea.Cmd {
 	if msg.Path == "" || msg.Path != m.editor.Path() {
 		return nil
 	}
+	// New edits after a failed quit: the next quit must try to save them.
+	m.discardOnQuit = false
 	content := m.editor.Content()
 	if m.ix != nil {
 		m.ix.UpdateContent(msg.Path, content)

@@ -71,6 +71,47 @@ func TestQuitWithFailedSaveAsksAgain(t *testing.T) {
 	}
 }
 
+func TestFailedQuitThenEditSavesAgain(t *testing.T) {
+	opts := testOptions(t)
+	m := openNote(t, opts, "ideas.md")
+	insertText(t, m, "first ")
+	root := opts.Vault.Root
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	if hasQuit(run(t, m, keyMsg("ctrl+q"))) {
+		t.Fatal("quit although the save failed")
+	}
+	if !m.discardOnQuit {
+		t.Fatal("failed quit did not arm the discard")
+	}
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	insertText(t, m, "second ")
+	if m.discardOnQuit {
+		t.Error("an edit did not disarm the discard")
+	}
+	if !hasQuit(run(t, m, keyMsg("ctrl+q"))) {
+		t.Fatal("did not quit")
+	}
+	if got := readFile(t, opts.Vault, "ideas.md"); !strings.Contains(got, "first") || !strings.Contains(got, "second") {
+		t.Errorf("quit after the fix did not save: %q", got)
+	}
+}
+
+func TestSuccessfulSaveDisarmsDiscard(t *testing.T) {
+	opts := testOptions(t)
+	m := openNote(t, opts, "ideas.md")
+	insertText(t, m, "x")
+	m.discardOnQuit = true
+	run(t, m, keyMsg("ctrl+s"))
+	if m.discardOnQuit {
+		t.Error("a successful save did not disarm the discard")
+	}
+}
+
 func TestQuitCleanBufferDoesNotWrite(t *testing.T) {
 	opts := testOptions(t)
 	m := openNote(t, opts, "ideas.md")
