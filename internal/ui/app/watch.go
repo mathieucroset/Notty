@@ -33,6 +33,9 @@ type savedMsg struct {
 	content string
 	version int
 	err     error
+	// restoredFrom is the short revision when the save restores a
+	// history version, so the toast waits for the save to succeed.
+	restoredFrom string
 }
 
 // listenWatcherCmd waits for the next watcher event or error. It returns
@@ -159,6 +162,9 @@ func (m *Model) handleSaved(msg savedMsg) tea.Cmd {
 		m.note.dirty = false
 	}
 	m.refreshIndexViews()
+	if msg.restoredFrom != "" {
+		return m.pushToast(msgs.ToastInfo, fmt.Sprintf("Restored %s from %s", displayName(msg.path), msg.restoredFrom))
+	}
 	return nil
 }
 

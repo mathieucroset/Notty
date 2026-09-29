@@ -98,8 +98,15 @@ func (m *Model) restoreVersion(msg history.RestoreVersionMsg) tea.Cmd {
 	if len(rev) > 7 {
 		rev = rev[:7]
 	}
-	return tea.Batch(m.saveNoteCmd(msg.Path, msg.Content, 0),
-		m.pushToast(msgs.ToastInfo, fmt.Sprintf("Restored %s from %s", displayName(msg.Path), rev)))
+	save := m.saveNoteCmd(msg.Path, msg.Content, 0)
+	if save == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		res, _ := save().(savedMsg)
+		res.restoredFrom = rev
+		return res
+	}
 }
 
 // updateHistoryMsg handles the History view's messages.

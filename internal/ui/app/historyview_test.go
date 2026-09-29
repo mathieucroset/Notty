@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mathieucroset/notty/internal/gitsync/gittest"
+	"github.com/mathieucroset/notty/internal/ui/history"
 	"github.com/mathieucroset/notty/internal/ui/keys"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/vault"
@@ -79,6 +80,18 @@ func TestHistoryCloses(t *testing.T) {
 	}
 	if !strings.Contains(screen(m), "NOTES") {
 		t.Errorf("main screen not back:\n%s", screen(m))
+	}
+}
+
+func TestHistoryRestoreToastWaitsForTheSave(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	// Saving over a folder fails.
+	run(t, m, history.RestoreVersionMsg{Path: "Work", Rev: "0123456789abcdef", Content: "old"})
+	if hasToast(m, msgs.ToastInfo, "Restored") {
+		t.Errorf("restore toast shown although the save failed: %v", toastTexts(m))
+	}
+	if !hasToast(m, msgs.ToastError, "Could not save Work") {
+		t.Errorf("toasts = %v, want the save error", toastTexts(m))
 	}
 }
 
