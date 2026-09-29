@@ -233,7 +233,7 @@ func (m *Machine) exec(b *buffer.Buffer, c cmd) {
 		m.moveCursor(b, c)
 		return
 	}
-	if m.readOnly && (isChange(c) || roBlocked[c.name]) {
+	if m.readOnly && isEdit(c) {
 		m.eff.Blocked = true
 		return
 	}
@@ -258,12 +258,24 @@ func (m *Machine) exec(b *buffer.Buffer, c cmd) {
 	m.execOther(b, c)
 }
 
-// isChange reports whether c modifies the buffer (or enters insert mode).
+// isChange reports whether c modifies the buffer (or enters insert mode)
+// inside one undo group.
 func isChange(c cmd) bool {
 	if c.op != "" {
 		return c.op != "y"
 	}
-	return changeActions[c.name]
+	k, _ := actionOf(c.name)
+	return k == actChange
+}
+
+// isEdit reports whether c modifies the buffer in any way (refused in
+// read-only mode).
+func isEdit(c cmd) bool {
+	if c.op != "" {
+		return c.op != "y"
+	}
+	k, _ := actionOf(c.name)
+	return k != actOther
 }
 
 // blockedHead reports whether the command being typed starts with an
@@ -279,18 +291,11 @@ func blockedHead(toks []string) bool {
 		return false
 	}
 	h := toks[i]
-	return (operators[h] && h != "y") || changeActions[h] || roBlocked[h]
-}
-
-// roBlocked are further commands refused in read-only mode.
-var roBlocked = map[string]bool{"u": true, "<c-r>": true, ".": true}
-
-// changeActions are the normal-mode commands that modify the buffer.
-var changeActions = map[string]bool{
-	"i": true, "a": true, "I": true, "A": true, "o": true, "O": true,
-	"x": true, "X": true, "<del>": true, "s": true, "S": true, "J": true,
-	"p": true, "P": true, "D": true, "C": true, "~": true, "r": true,
-	"<space>": true,
+	if operators[h] {
+		return h != "y"
+	}
+	k, _ := actionOf(h)
+	return k != actOther
 }
 
 // execChange runs a buffer-modifying command inside an undo group.

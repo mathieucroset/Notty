@@ -7,22 +7,6 @@ import (
 	"github.com/mathieucroset/notty/internal/buffer"
 )
 
-// visualEdits are the visual-mode commands that modify the buffer.
-var visualEdits = map[string]bool{
-	"d": true, "x": true, "<del>": true, "X": true, "D": true,
-	"c": true, "s": true, "S": true, "C": true, "R": true,
-	">": true, "<": true, "J": true, "~": true, "u": true, "U": true,
-}
-
-func init() {
-	for k := range visualEdits {
-		visualActions[k] = true
-	}
-	for _, k := range []string{"y", "Y", "o", "O", "v", "V", "/", "?"} {
-		visualActions[k] = true
-	}
-}
-
 // enterVisual starts a visual selection at the cursor.
 func (m *Machine) enterVisual(b *buffer.Buffer, mode Mode) {
 	m.mode = mode
@@ -100,7 +84,7 @@ func (m *Machine) execVisual(b *buffer.Buffer, c cmd) {
 	if m.execVisualSpecial(b, c) {
 		return
 	}
-	if visualEdits[c.name] {
+	if visualActions[c.name] {
 		if m.readOnly {
 			m.eff.Blocked = true
 			return

@@ -218,6 +218,30 @@ func TestPasteClipboardLeavesVisual(t *testing.T) {
 	}
 }
 
+// TestActionTableDrivesReadOnly checks that every editing action in the
+// table is refused in read-only mode and every other one is not.
+func TestActionTableDrivesReadOnly(t *testing.T) {
+	check := func(keys string, edit bool) {
+		t.Helper()
+		m := New()
+		m.SetReadOnly(true)
+		b := newBuf("|- [ ] ab\ncd")
+		eff := feed(m, b, keys)
+		if eff.Blocked != edit {
+			t.Errorf("%q: Blocked = %v, want %v", keys, eff.Blocked, edit)
+		}
+		if b.Dirty() {
+			t.Errorf("%q modified the buffer", keys)
+		}
+	}
+	for name, kind := range normalActions { // names are in key notation
+		check(name, kind != actOther)
+	}
+	for name, kind := range argActions {
+		check(name+"x", kind != actOther)
+	}
+}
+
 func TestPasteClipboardUpdatesDesiredColumn(t *testing.T) {
 	m, b, _ := run(t, "|a\nabcdefgh", `"+p`)
 	m.PasteClipboard(b, "XYZ", false)

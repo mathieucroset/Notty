@@ -117,17 +117,41 @@ func parseMotion(toks []string, i int) (name, arg string, st parseStatus) {
 	return "", "", parseBad
 }
 
-// normalActions are the non-motion normal-mode commands of one key.
-var normalActions = map[string]bool{
-	"i": true, "a": true, "I": true, "A": true, "o": true, "O": true,
-	"x": true, "X": true, "<del>": true, "s": true, "S": true, "J": true,
-	"p": true, "P": true, "D": true, "C": true, "Y": true, "~": true,
-	"u": true, "<c-r>": true, "v": true, "V": true, ".": true,
-	"/": true, "?": true, ":": true, "<tab>": true, "<space>": true,
+// actionKind classifies a normal-mode command for undo grouping and
+// read-only mode.
+type actionKind int
+
+const (
+	actOther   actionKind = iota // does not modify the buffer
+	actChange                    // modifies the buffer inside one undo group
+	actHistory                   // modifies the buffer through history (u, <c-r>, .)
+)
+
+// normalActions are the non-motion normal-mode commands of one key; this
+// table is the single source for parsing, undo grouping and read-only mode.
+var normalActions = map[string]actionKind{
+	"i": actChange, "a": actChange, "I": actChange, "A": actChange,
+	"o": actChange, "O": actChange,
+	"x": actChange, "X": actChange, "<del>": actChange, "s": actChange,
+	"S": actChange, "J": actChange, "p": actChange, "P": actChange,
+	"D": actChange, "C": actChange, "~": actChange, "<space>": actChange,
+	"u": actHistory, "<c-r>": actHistory, ".": actHistory,
+	"Y": actOther, "v": actOther, "V": actOther,
+	"/": actOther, "?": actOther, ":": actOther, "<tab>": actOther,
 }
 
 // argActions take one more key as argument.
-var argActions = map[string]bool{"r": true, "<c-w>": true}
+var argActions = map[string]actionKind{"r": actChange, "<c-w>": actOther}
+
+// actionOf returns the kind of a normal-mode command name and whether it is
+// an action at all.
+func actionOf(name string) (actionKind, bool) {
+	if k, ok := normalActions[name]; ok {
+		return k, true
+	}
+	k, ok := argActions[name]
+	return k, ok
+}
 
 // operators take a motion or text object; doubled they act on lines.
 var operators = map[string]bool{"d": true, "c": true, "y": true, ">": true, "<": true}
@@ -161,18 +185,18 @@ func parse(toks []string, visual bool) (cmd, parseStatus) {
 	if visual && (t == "i" || t == "a") {
 		return parseTextObject(toks, i, c)
 	}
-	if visual && visualActions[t] {
+	if _, ok := visualActions[t]; visual && ok {
 		c.name = t
 		return c, parseOK
 	}
-	if argActions[t] {
+	if _, ok := argActions[t]; ok {
 		if i+1 >= len(toks) {
 			return c, parseMore
 		}
 		c.name, c.arg = t, toks[i+1]
 		return c, parseOK
 	}
-	if !visual && normalActions[t] {
+	if _, ok := normalActions[t]; !visual && ok {
 		c.name = t
 		return c, parseOK
 	}
@@ -184,8 +208,16 @@ func parse(toks []string, visual bool) (cmd, parseStatus) {
 	return c, parseOK
 }
 
-// Filled in by later features.
-var visualActions = map[string]bool{}
+// visualActions are the visual-mode commands of one key (besides motions
+// and text objects). The value reports whether the command modifies the
+// buffer.
+var visualActions = map[string]bool{
+	"d": true, "x": true, "<del>": true, "X": true, "D": true,
+	"c": true, "s": true, "S": true, "C": true, "R": true,
+	">": true, "<": true, "J": true, "~": true, "u": true, "U": true,
+	"y": false, "Y": false, "o": false, "O": false, "v": false, "V": false,
+	"/": false, "?": false,
+}
 
 // parseOperator parses op [count2] (op | motion | textobject) at toks[i].
 func parseOperator(toks []string, i int, c cmd) (cmd, parseStatus) {
