@@ -44,9 +44,19 @@ func emit(msg tea.Msg) tea.Cmd { return func() tea.Msg { return msg } }
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		if m.locked {
+			m.queue = append(m.queue, msg)
+			return m, nil
+		}
 		return m.handleKey(msg)
 	case clipboardTextMsg:
+		if m.locked {
+			m.queue = append(m.queue, msg)
+			return m, nil
+		}
 		return m.pasteClipboardText(msg)
+	case AutosaveTickMsg:
+		return m, m.autosave(msg)
 	case flashEndMsg:
 		if msg.id == m.flashID {
 			m.flashing = false

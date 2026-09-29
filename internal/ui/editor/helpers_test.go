@@ -21,7 +21,7 @@ func testPalette(t *testing.T) theme.Palette {
 
 func testOptions(t *testing.T) Options {
 	p := testPalette(t)
-	return Options{Vim: true, Styles: theme.NewStyles(p), Palette: p, AutosaveMS: 50}
+	return Options{Vim: true, Styles: theme.NewStyles(p), Palette: p, AutosaveMS: 1}
 }
 
 // newModel returns a focused editor of size w×h holding content with the
