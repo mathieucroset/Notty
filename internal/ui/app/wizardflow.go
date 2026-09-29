@@ -110,8 +110,6 @@ func (m *Model) previewWizardTheme(msg wizard.ThemePreviewMsg) {
 	}
 	m.lastWizardSeq = msg.Seq
 	m.applyPalette(msg.Palette)
-	w := m.wizard.SetStyles(m.opts.Styles)
-	m.wizard = &w
 }
 
 // handleWizardDone finishes the wizard: on first run it saves the vault and

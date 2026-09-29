@@ -157,6 +157,10 @@ type Model struct {
 	// wizardDone is set from the wizard's DoneMsg until the vault opened:
 	// a late wizard preview must not change the theme being saved.
 	wizardDone bool
+	// themes watches the user themes directory for live reload, or is nil;
+	// themesStarted is set once Init tried to start it.
+	themes        *themeWatcher
+	themesStarted bool
 
 	width, height  int
 	sidebarVisible bool
@@ -350,8 +354,10 @@ func (m *Model) NotePath() string { return m.note.path }
 
 // Init loads the vault tree and builds the index, and shows each of
 // Options.StartupWarnings as a warning toast, once (also over the wizard).
+// It starts the theme watcher, once: Init runs again when the wizard has
+// opened the vault.
 func (m *Model) Init() tea.Cmd {
-	warnings := m.startupWarningsCmd()
+	warnings := tea.Batch(m.startupWarningsCmd(), m.startThemeWatcher())
 	if m.wizard != nil {
 		return tea.Batch(m.wizard.Init(), warnings)
 	}
@@ -551,6 +557,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleNoteReloaded(msg)
 	case watchEventMsg:
 		return m, m.handleWatchEvent(msg)
+	case themeFilesMsg:
+		return m, tea.Batch(m.handleThemeFiles(msg.names), listenThemesCmd(m.themes))
 	case watchErrMsg:
 		return m, m.handleWatchErr(msg)
 	case pathsGoneMsg:
@@ -657,6 +665,7 @@ func (m *Model) finishQuit() tea.Cmd {
 	m.quitting = true
 	m.waitSaves()
 	m.closeWatcher()
+	m.closeThemeWatcher()
 	if m.opts.LocalPath != "" && !m.opts.WizardNeeded {
 		m.rememberCursor()
 		m.syncExpandedState()

@@ -115,6 +115,9 @@ func (m Model) SetThemeNames(names []string) Model {
 	return m
 }
 
+// ThemeNames returns the themes the picker lists.
+func (m Model) ThemeNames() []string { return slices.Clone(m.themeNames) }
+
 // InThemeMode reports whether the theme picker is showing: previews are
 // only wanted then.
 func (m Model) InThemeMode() bool { return m.mode == modeTheme }

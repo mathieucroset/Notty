@@ -86,10 +86,12 @@ func keyMsg(s string) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
 }
 
-// start creates the app, sizes it, and runs Init.
+// start creates the app, sizes it, and runs Init. The theme watcher Init
+// starts (with a Catalog.Dir) is closed when the test ends.
 func start(t *testing.T, opts Options, w, h int) *Model {
 	t.Helper()
 	m := New(opts)
+	t.Cleanup(m.closeThemeWatcher)
 	run(t, m, tea.WindowSizeMsg{Width: w, Height: h})
 	drive(t, m, execOne(t, m, m.Init()))
 	return m

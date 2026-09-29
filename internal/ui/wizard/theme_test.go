@@ -349,3 +349,85 @@ func TestThemeStepUnlistedCurrent(t *testing.T) {
 		t.Errorf("DoneMsg theme = %q, want %q", d.Palette.Name, first)
 	}
 }
+
+// TestSetThemeNames: the app refreshes the theme list when theme files
+// change. The cursor stays on the highlighted name; when that theme is
+// gone, the cursor is clamped and the theme it lands on is previewed, so
+// enter confirms the theme on screen.
+func TestSetThemeNames(t *testing.T) {
+	without := func(names []string, drop string) []string {
+		return slices.DeleteFunc(slices.Clone(names), func(n string) bool { return n == drop })
+	}
+	tests := []struct {
+		name        string
+		cursorOn    string
+		after       func(names []string) []string
+		wantCursor  string
+		wantPreview string // "" = none
+		wantDone    string // "" = enter refused
+	}{
+		{"highlighted name kept", "good",
+			func(ns []string) []string { return append(ns, "zzz") }, "good", "", "good"},
+		{"highlighted name moved", "catppuccin-mocha",
+			func(ns []string) []string { return append([]string{"aaa"}, ns...) }, "catppuccin-mocha", "", "catppuccin-mocha"},
+		{"highlighted theme removed, lands on a working one", "good",
+			func(ns []string) []string { return without(without(ns, "good"), "bad") }, "", "last", "last"},
+		{"highlighted theme removed, lands on a broken one", "good",
+			func(ns []string) []string { return without(ns, "good") }, "bad", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cat, _ := userCatalog(t)
+			m, _ := themeStep(t, cat, tt.cursorOn)
+			names := tt.after(cat.Names())
+			want := tt.wantCursor
+			if tt.wantPreview == "last" {
+				want = names[len(names)-1]
+			}
+			m, cmd := m.SetThemeNames(names)
+			m, out := drive(t, m, cmd)
+			if got := m.theme.names[m.theme.idx]; got != want {
+				t.Errorf("cursor on %q, want %q", got, want)
+			}
+			gotPreviews := previews(out)
+			switch {
+			case tt.wantPreview == "" && len(gotPreviews) != 0:
+				t.Errorf("previews = %v, want none", gotPreviews)
+			case tt.wantPreview != "" && !slices.Equal(gotPreviews, []string{want}):
+				t.Errorf("previews = %v, want [%s]", gotPreviews, want)
+			}
+			mustContain(t, m, want)
+			_, out = press(t, m, "enter")
+			if tt.wantDone == "" {
+				if len(out) != 0 {
+					t.Errorf("enter on a broken theme sent %v", out)
+				}
+				return
+			}
+			wantDone := tt.wantDone
+			if wantDone == "last" {
+				wantDone = want
+			}
+			if d := doneMsg(t, out); d.Palette.Name != wantDone {
+				t.Errorf("DoneMsg theme = %q, want %q", d.Palette.Name, wantDone)
+			}
+		})
+	}
+}
+
+// TestSetThemeNamesBeforeTheThemeStep: names set before the theme step do
+// nothing visible; the step lists the catalog when it opens.
+func TestSetThemeNamesBeforeTheThemeStep(t *testing.T) {
+	cat, _ := userCatalog(t)
+	f := &fakeEnv{vaultState: setup.Empty}
+	m := New(FirstRun, "~/Notes", builtin("catppuccin-mocha"), cat, f.env(), testStyles()).SetSize(120, 40)
+	m, _ = drive(t, m, m.Init())
+	m, cmd := m.SetThemeNames([]string{"nord"})
+	if cmd != nil {
+		t.Error("SetThemeNames before the theme step returned a command")
+	}
+	m, _ = press(t, m, "enter", "down", "enter")
+	if m.Stage() != StageTheme || !slices.Equal(m.theme.names, cat.Names()) {
+		t.Errorf("stage %v, names %v; want the theme step on %v", m.Stage(), m.theme.names, cat.Names())
+	}
+}

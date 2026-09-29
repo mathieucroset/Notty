@@ -181,6 +181,10 @@ func (m *Model) applyPalette(p theme.Palette) {
 			o.palette = o.palette.SetStyles(st)
 		}
 	}
+	if m.wizard != nil {
+		w := m.wizard.SetStyles(st)
+		m.wizard = &w
+	}
 	m.relayout()
 }
 

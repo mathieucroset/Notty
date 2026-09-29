@@ -443,11 +443,13 @@ func syncQuitCmd(s *syncer.Syncer) tea.Cmd {
 }
 
 // Shutdown releases what the app still holds once the program has exited:
-// the syncer's host fails fast, listeners stop, and a lock taken after the
-// wizard is released. main calls it after Program.Run returns.
+// the syncer's host fails fast, listeners and the vault and theme watchers
+// stop, and a lock taken after the wizard is released. main calls it after
+// Program.Run returns.
 func (m *Model) Shutdown() {
 	m.host.shutdown()
 	m.closeWatcher()
+	m.closeThemeWatcher()
 	if m.releaseLock != nil {
 		m.releaseLock()
 		m.releaseLock = nil

@@ -49,6 +49,32 @@ func (m Model) enterTheme() (Model, tea.Cmd) {
 	return m, nil
 }
 
+// SetThemeNames replaces the theme step's list, e.g. when a theme file
+// appears or goes away (user themes spec §3). The cursor stays on the same
+// name when it is still listed. Otherwise it is clamped, and the theme it
+// lands on is previewed, since enter confirms the theme on screen. Before
+// the theme step it does nothing: the step lists the catalog when it opens.
+func (m Model) SetThemeNames(names []string) (Model, tea.Cmd) {
+	if m.stage != StageTheme {
+		return m, nil
+	}
+	var cur string
+	if m.theme.idx >= 0 && m.theme.idx < len(m.theme.names) {
+		cur = m.theme.names[m.theme.idx]
+	}
+	m.theme.names = slices.Clone(names)
+	if i := slices.Index(m.theme.names, cur); i >= 0 {
+		m.theme.idx = i
+		return m, nil
+	}
+	if len(m.theme.names) == 0 {
+		m.theme.idx = 0
+		return m, nil
+	}
+	m.theme.idx = min(max(m.theme.idx, 0), len(m.theme.names)-1)
+	return m.preview(m.theme.names[m.theme.idx])
+}
+
 // resolve returns the named palette: the current one from memory, any
 // other through the catalog (a user theme is read from its file).
 func (m Model) resolve(name string) (theme.Palette, error) {

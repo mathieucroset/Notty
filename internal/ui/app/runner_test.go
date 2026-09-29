@@ -24,8 +24,9 @@ import (
 //     debounce, the finder's 50ms debounce, the 100ms Kitty ready tick)
 //     fire and are processed; longer ones (autosave, toast expiry) are
 //     dropped, so tests drive them explicitly.
-//   - watcher listeners (listenWatcherCmd). They stay pending across run
-//     calls until the watcher reports something; waitFor delivers them.
+//   - watcher listeners (listenWatcherCmd, listenThemesCmd, ...). They
+//     stay pending across run calls until the watcher reports something;
+//     waitFor delivers them.
 //
 // Any other command still running after cmdLimit fails the test.
 const (
@@ -58,7 +59,7 @@ func isTick(name string) bool {
 
 func isListener(name string) bool {
 	return strings.Contains(name, "listenWatcherCmd.func") || strings.Contains(name, "listenSyncCmd.func") ||
-		strings.Contains(name, "listenHostCmd.func")
+		strings.Contains(name, "listenHostCmd.func") || strings.Contains(name, "listenThemesCmd.func")
 }
 
 func startBackground(m *Model, cmd tea.Cmd, tick bool) {
@@ -265,5 +266,13 @@ func TestRunnerRecognizesTicks(t *testing.T) {
 	defer func() { _ = w.Close() }()
 	if !isListener(funcName(listenWatcherCmd(w))) {
 		t.Error("watcher listener not recognized")
+	}
+	tw, err := newThemeWatcher(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tw.Close() }()
+	if !isListener(funcName(listenThemesCmd(tw))) {
+		t.Error("theme watcher listener not recognized")
 	}
 }

@@ -273,6 +273,9 @@ func TestThemePickerRestoresFromMemory(t *testing.T) {
 				startWithTheme(t, &opts, tt.startTheme)
 			}
 			m := start(t, opts, 120, 30)
+			// The file changes below are not reloaded: this test is about
+			// restoring from memory.
+			stopThemeWatcher(t, m)
 			orig := m.opts.Palette
 			before := m.View().Content
 			openThemePicker(t, m)
@@ -432,6 +435,7 @@ func TestThemeCancelRestoresByKey(t *testing.T) {
 	dir := withUserThemes(t, &opts, map[string]string{"mine": userThemeFile})
 	startWithTheme(t, &opts, "mine")
 	m := start(t, opts, 120, 30)
+	stopThemeWatcher(t, m) // a reload would replace the original (spec §3)
 	orig := m.opts.Palette
 	openThemePicker(t, m)
 	writeTheme(t, dir, "mine", strings.Replace(userThemeFile, "#141318", "#000000", 1))
@@ -453,6 +457,7 @@ func TestChooseCurrentThemeAfterItsFileBroke(t *testing.T) {
 	dir := withUserThemes(t, &opts, map[string]string{"mine": userThemeFile})
 	startWithTheme(t, &opts, "mine")
 	m := start(t, opts, 120, 30)
+	stopThemeWatcher(t, m) // a reload would toast the broken file
 	orig := m.opts.Palette
 	openThemePicker(t, m)
 	writeTheme(t, dir, "mine", brokenThemeFile)

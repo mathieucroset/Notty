@@ -303,8 +303,8 @@ func TestSetThemeNames(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := openThemeMode(t, tt.before, tt.cursorOn)
 			m = m.SetThemeNames(tt.after)
-			if !slices.Equal(m.themeNames, tt.after) {
-				t.Errorf("theme names = %v, want %v", m.themeNames, tt.after)
+			if !slices.Equal(m.ThemeNames(), tt.after) {
+				t.Errorf("theme names = %v, want %v", m.ThemeNames(), tt.after)
 			}
 			if m.themeCursor != tt.wantCursor {
 				t.Errorf("cursor = %d, want %d", m.themeCursor, tt.wantCursor)
