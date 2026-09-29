@@ -128,3 +128,37 @@ func TestPasteIsSanitized(t *testing.T) {
 		t.Errorf("clipboard content = %q", got)
 	}
 }
+
+func TestPasteInCommandMode(t *testing.T) {
+	tests := []struct {
+		name, prefix, paste, want string
+	}{
+		{"ex command", ":", "e ideas", ":e ideas"},
+		{"search", "/", "alp", "/alp"},
+		{"newlines stripped", ":", "e\nwork/\nnotes\n", ":ework/notes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(t, testOptions(t), "alpha\n", buffer.Pos{}, 40, 5)
+			m, _ = typeKeys(m, tt.prefix)
+			m, _ = m.Update(tea.PasteMsg{Content: tt.paste})
+			if m.CommandLine() != tt.want || m.Content() != "alpha\n" {
+				t.Errorf("command line %q content %q, want %q and the buffer untouched", m.CommandLine(), m.Content(), tt.want)
+			}
+		})
+	}
+	ro := newModel(t, testOptions(t), "alpha\n", buffer.Pos{}, 40, 5).SetReadOnly(true, "")
+	ro, _ = typeKeys(ro, "/")
+	ro, _ = ro.Update(tea.PasteMsg{Content: "lph"})
+	if ro.CommandLine() != "/lph" {
+		t.Errorf("read-only search paste: command line %q", ro.CommandLine())
+	}
+
+	m := newModel(t, testOptions(t), "alpha\n", buffer.Pos{}, 40, 5)
+	m, _ = typeKeys(m, ":")
+	m, _ = m.Update(tea.PasteMsg{Content: "e ideas"})
+	_, out := typeKeys(m, "enter")
+	if o, ok := find[msgs.OpenNoteMsg](out); !ok || o.Path != "ideas.md" {
+		t.Errorf("pasted command does not run: %#v", out)
+	}
+}
