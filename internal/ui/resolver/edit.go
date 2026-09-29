@@ -4,6 +4,7 @@ import (
 	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mathieucroset/notty/internal/buffer"
 	"github.com/mathieucroset/notty/internal/ui/editor"
@@ -167,7 +168,7 @@ func (m Model) CursorPosition() *tea.Cursor {
 	}
 	lw, sw, _ := m.split()
 	if cl := m.ed.CommandLine(); cl != "" {
-		c := tea.NewCursor(lw+sw+min(len([]rune(cl)), m.w-lw-sw-1), 1+m.bodyHeight()-1)
+		c := tea.NewCursor(lw+sw+min(ansi.StringWidth(cl), m.w-lw-sw-1), 1+m.bodyHeight()-1)
 		c.Shape = tea.CursorBar
 		return c
 	}

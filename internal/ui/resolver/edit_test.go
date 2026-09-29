@@ -160,6 +160,16 @@ func TestEditVimWriteAccepts(t *testing.T) {
 	}
 }
 
+func TestCommandLineCursorUsesCellWidth(t *testing.T) {
+	m := newModelVim(t, true, 120, 40, textFile("n.md", base1, ours1, theirs1))
+	m, _ = press(t, m, "e", ":", "日")
+	c := m.CursorPosition()
+	lw, sw, _ := m.split()
+	if c == nil || c.X != lw+sw+3 || c.Y != m.bodyHeight() {
+		t.Fatalf("cursor %+v, want x %d y %d", c, lw+sw+3, m.bodyHeight())
+	}
+}
+
 func TestEditVimQuitLeaves(t *testing.T) {
 	m := newModelVim(t, true, 120, 40, textFile("n.md", base1, ours1, theirs1))
 	m, _ = press(t, m, "e", ":", "w", "q", "enter")

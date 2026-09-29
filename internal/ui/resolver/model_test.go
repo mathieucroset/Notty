@@ -30,6 +30,9 @@ func TestTextStateContent(t *testing.T) {
 		{"two conflicts", base2, ours2, theirs2, []choice{chooseTheirs, chooseOurs}, "1\nB\n3\nC\n5\n"},
 		{"trailing newline from theirs", "a\nb", "a\nX", "a\nY\n", []choice{chooseOurs}, "a\nX\n"},
 		{"no trailing newline", "a\nb", "a\nX", "a\nY", []choice{chooseTheirs}, "a\nY"},
+		{"ours dropped the newline", "a\nb\n", "a\nX", "a\nY\n", []choice{chooseTheirs}, "a\nY"},
+		{"theirs dropped the newline", "a\nb\n", "a\nX\n", "a\nY", []choice{chooseOurs}, "a\nX"},
+		{"two-way follows ours", noBase, "a\nb", "a\nc\n", []choice{chooseTheirs}, "a\nc"},
 		{"two-way", noBase, "a\nb\n", "a\nc\n", []choice{chooseOurs}, "a\nb\n"},
 		{"clean merge, no conflicts", base2, "1\nA\n3\n4\n5\n", "1\n2\n3\nD\n5\n", nil, "1\nA\n3\nD\n5\n"},
 	}

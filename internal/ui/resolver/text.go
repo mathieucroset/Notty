@@ -32,12 +32,13 @@ const (
 // textState is a text file's merge: the blocks, a choice per conflict
 // block, and the edited result once the embedded editor was accepted.
 type textState struct {
-	blocks    []merge.Block
-	conflicts []int    // indices into blocks of the Conflict blocks
-	choices   []choice // one per conflict
-	cur       int      // current conflict (index into conflicts)
-	twoWay    bool     // no base: the file was created on both sides
-	trailing  bool     // the result ends with a newline
+	blocks     []merge.Block
+	conflicts  []int    // indices into blocks of the Conflict blocks
+	conflictOf []int    // per block: its conflict number, -1 for the others
+	choices    []choice // one per conflict
+	cur        int      // current conflict (index into conflicts)
+	twoWay     bool     // no base: the file was created on both sides
+	trailing   bool     // the result ends with a newline
 
 	edited     bool   // the result was edited and accepted
 	editedText string // the accepted edit
@@ -47,9 +48,7 @@ type textState struct {
 
 func newTextState(f File) *textState {
 	ours, theirs := string(f.Ours), string(f.Theirs)
-	t := &textState{
-		trailing: merge.HasTrailingNewline(ours) || merge.HasTrailingNewline(theirs),
-	}
+	t := &textState{trailing: trailingNewline(f)}
 	o, th := merge.SplitLines(ours), merge.SplitLines(theirs)
 	if f.Base == nil {
 		t.twoWay = true
@@ -57,13 +56,27 @@ func newTextState(f File) *textState {
 	} else {
 		t.blocks = merge.Diff3(merge.SplitLines(string(f.Base)), o, th)
 	}
+	t.conflictOf = make([]int, len(t.blocks))
 	for i, b := range t.blocks {
+		t.conflictOf[i] = -1
 		if b.Kind == merge.Conflict {
+			t.conflictOf[i] = len(t.conflicts)
 			t.conflicts = append(t.conflicts, i)
 		}
 	}
 	t.choices = make([]choice, len(t.conflicts))
 	return t
+}
+
+// trailingNewline decides whether the result ends with a newline: when
+// ours kept the base's final newline (or lack of one), theirs' choice wins,
+// otherwise ours' change does. Without a base, ours decides.
+func trailingNewline(f File) bool {
+	ours := merge.HasTrailingNewline(string(f.Ours))
+	if f.Base != nil && ours == merge.HasTrailingNewline(string(f.Base)) {
+		return merge.HasTrailingNewline(string(f.Theirs))
+	}
+	return ours
 }
 
 // clone returns a copy that can be modified without touching t.
@@ -92,9 +105,7 @@ func (t *textState) resolvedCount() int {
 func (t *textState) allResolved() bool { return t.resolvedCount() == len(t.conflicts) }
 
 // conflictIndex returns the conflict number of block i, or -1.
-func (t *textState) conflictIndex(i int) int {
-	return slices.Index(t.conflicts, i)
-}
+func (t *textState) conflictIndex(i int) int { return t.conflictOf[i] }
 
 // chosen returns conflict block b's lines for choice c; fill is used for an
 // unset choice.
