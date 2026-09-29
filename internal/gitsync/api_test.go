@@ -528,6 +528,17 @@ func TestRenameBranch(t *testing.T) {
 	if got := gittest.Git(t, r.Dir, "log", "--format=%s"); got != "a" {
 		t.Fatalf("history lost after rename: %q", got)
 	}
+	// An existing branch is never overwritten.
+	gittest.Git(t, r.Dir, "branch", "other")
+	gittest.Write(t, r, "b.md", "b")
+	gittest.CommitAll(t, r, "b")
+	before := gittest.Git(t, r.Dir, "rev-parse", "other")
+	if err := r.RenameBranch("other"); err == nil {
+		t.Fatal("RenameBranch onto an existing branch succeeded")
+	}
+	if b, _ := r.CurrentBranch(); b != "main" || gittest.Git(t, r.Dir, "rev-parse", "other") != before {
+		t.Fatalf("failed rename changed state: branch %q", b)
+	}
 }
 
 func TestMergeUnrelatedHistories(t *testing.T) {

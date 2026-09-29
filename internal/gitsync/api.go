@@ -167,12 +167,13 @@ func (r *Repo) CurrentBranch() (string, error) {
 	return strings.TrimSpace(string(res.Stdout)), nil
 }
 
-// RenameBranch renames the current branch (`git branch -M <name>`).
+// RenameBranch renames the current branch (`git branch -m <name>`). It
+// fails, changing nothing, if a branch with that name already exists.
 func (r *Repo) RenameBranch(name string) error {
 	if err := checkArg("branch", name); err != nil {
 		return err
 	}
-	if _, err := r.git("branch", "-M", name); err != nil {
+	if _, err := r.git("branch", "-m", name); err != nil {
 		return fmt.Errorf("gitsync: rename branch to %s: %w", name, err)
 	}
 	return nil
