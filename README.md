@@ -138,6 +138,7 @@ vim = true                   # vim-style modal editing; false for a plain typing
 line_numbers = false         # show line numbers in the editor (relative, when on)
 editor = ""                  # command for ctrl+e; falls back to $VISUAL, then $EDITOR, then nano (notepad on Windows)
 autosave_ms = 1000           # idle delay before autosave, in milliseconds
+icons = "unicode"            # nerd | unicode | ascii — see below
 
 [sync]
 enabled = true                # false behaves like local-only: commits still happen, but no fetch or push
@@ -155,6 +156,18 @@ due_soon_days = 7             # a task is "due soon" within this many days
 protocol = "auto"             # kitty | sixel | iterm | halfblocks | off — "auto" detects the terminal
 max_import_mb = 5             # images larger than this ask for confirmation before importing
 ```
+
+`icons` picks the glyphs Notty draws for folders, notes, pins, task
+checkboxes, sync states, toasts and the like:
+
+| Value | Looks like | Use it when |
+|---|---|---|
+| `unicode` (default) | `▸ ▾ • ★ ☐ ☑ ✓ ↻ ⚠` | any modern terminal font |
+| `nerd` | Nerd Font icons (folders, files, a pin, …) | your terminal font is a [Nerd Font](https://www.nerdfonts.com); without one they show as empty boxes |
+| `ascii` | `> v - ^ [ ] [x] + ~ !` | a font or console with little Unicode |
+
+Only icons change: pane borders and separators are box-drawing characters
+in every set. Any other value is an error at startup.
 
 ## CLI
 
