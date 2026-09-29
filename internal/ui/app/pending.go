@@ -24,6 +24,7 @@ const (
 	opEmptyTrash
 	opCleanAttachments
 	opExternalChange
+	opImportImage
 )
 
 // pendingOp is what to do once a dialog is confirmed, with the data the
@@ -38,6 +39,11 @@ type pendingOp struct {
 	item vault.TrashItem
 	// files are the attachments to delete.
 	files []string
+	// note is the note an image is imported for; data and ext are the
+	// clipboard image bytes (nil when importing the file at path).
+	note string
+	data []byte
+	ext  string
 }
 
 // runPending performs op with the confirmed dialog result res.
@@ -72,6 +78,8 @@ func (m *Model) runPending(op pendingOp, res dialog.ResultMsg) tea.Cmd {
 		return deleteFilesCmd(v, op.files)
 	case opExternalChange:
 		return m.resolveExternalChange(op.path, res.Choice)
+	case opImportImage:
+		return m.runImport(op)
 	}
 	return nil
 }

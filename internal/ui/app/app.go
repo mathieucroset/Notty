@@ -383,6 +383,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handlePathsGone(msg)
 	case savedMsg:
 		return m, m.handleSaved(msg)
+	case msgs.ImportImageMsg:
+		return m, m.importImage(msg)
+	case imageSizeMsg:
+		return m, m.handleImageSize(msg)
+	case imageImportedMsg:
+		return m, m.handleImageImported(msg)
+	case msgs.OpenImageViewerMsg:
+		return m, m.openImageViewer(msg)
+	case imageViewerDoneMsg:
+		return m, m.handleImageViewerDone(msg)
 	case msgs.ToggleTaskMsg:
 		return m, m.toggleTask(msg)
 	case taskToggledMsg:
