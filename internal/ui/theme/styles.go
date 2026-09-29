@@ -4,11 +4,17 @@ import (
 	"image/color"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/mathieucroset/notty/internal/ui/icons"
 )
 
 // Styles holds every lipgloss.Style Notty's UI components use, all built
-// from a single Palette's semantic tokens.
+// from a single Palette's semantic tokens, and the glyph set they draw
+// with.
 type Styles struct {
+	// Icons is the configured glyph set (icons.Default until WithIcons).
+	Icons icons.Set
+
 	// Panes.
 	PaneBorder        lipgloss.Style
 	PaneBorderFocused lipgloss.Style
@@ -84,6 +90,8 @@ func NewStyles(p Palette) Styles {
 	}
 
 	return Styles{
+		Icons: icons.Default(),
+
 		PaneBorder: lipgloss.NewStyle().
 			Border(border).
 			BorderForeground(p.Muted),
@@ -152,4 +160,10 @@ func NewStyles(p Palette) Styles {
 		Warning: lipgloss.NewStyle().Foreground(p.Warning),
 		Success: lipgloss.NewStyle().Foreground(p.Success),
 	}
+}
+
+// WithIcons returns s drawing with the glyph set set.
+func (s Styles) WithIcons(set icons.Set) Styles {
+	s.Icons = set
+	return s
 }

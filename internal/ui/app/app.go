@@ -26,6 +26,7 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/dialog"
 	"github.com/mathieucroset/notty/internal/ui/editor"
 	"github.com/mathieucroset/notty/internal/ui/history"
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/preview"
 	"github.com/mathieucroset/notty/internal/ui/resolver"
@@ -115,7 +116,8 @@ const (
 	ViewPreview
 )
 
-const sidebarTitle = "◆ Notty"
+// sidebarTitle is the sidebar pane's title: the logo glyph and the name.
+func sidebarTitle(st theme.Styles) string { return st.Icons.Logo + " Notty" }
 
 // note describes the open note; its text lives in the editor buffer.
 type note struct {
@@ -257,6 +259,10 @@ func New(opts Options) *Model {
 	if opts.Pins == nil {
 		opts.Pins = &meta.State{}
 	}
+	// The icons setting (config.Load has validated it) picks the glyphs
+	// every component draws with.
+	set, _ := icons.Get(opts.Config.Icons)
+	opts.Styles = opts.Styles.WithIcons(set)
 	m := &Model{
 		opts:           opts,
 		sidebarVisible: true,
@@ -755,7 +761,7 @@ func (m *Model) render() string {
 	l := ComputeLayout(m.width, m.height, m.sidebarVisible)
 	var panes []string
 	if l.SidebarVisible {
-		panes = append(panes, renderPane(st, sidebarTitle, "", m.sidebar.View(),
+		panes = append(panes, renderPane(st, sidebarTitle(st), "", m.sidebar.View(),
 			l.Sidebar.W, l.Sidebar.H, m.focus == FocusSidebar))
 	}
 	panes = append(panes, m.renderMain(l))

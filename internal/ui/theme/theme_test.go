@@ -7,7 +7,41 @@ import (
 
 	"charm.land/glamour/v2"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
+
+	"github.com/mathieucroset/notty/internal/ui/icons"
 )
+
+func TestStylesCarryIcons(t *testing.T) {
+	p, _ := Get("nord")
+	tests := []struct {
+		name string
+		st   Styles
+		want string
+	}{
+		{"default is unicode", NewStyles(p), "unicode"},
+		{"WithIcons replaces the set", NewStyles(p).WithIcons(mustIcons(t, "nerd")), "nerd"},
+		{"WithIcons keeps the colours", NewStyles(p).WithIcons(mustIcons(t, "ascii")), "ascii"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.st.Icons.Name != tt.want {
+				t.Errorf("Icons = %q, want %q", tt.st.Icons.Name, tt.want)
+			}
+			if got, want := tt.st.Accent.GetForeground(), NewStyles(p).Accent.GetForeground(); got != want {
+				t.Errorf("accent changed: %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func mustIcons(t *testing.T, name string) icons.Set {
+	t.Helper()
+	s, ok := icons.Get(name)
+	if !ok {
+		t.Fatalf("icons.Get(%q) failed", name)
+	}
+	return s
+}
 
 // wantModes is the fixed set of status-bar modes every palette's Styles must
 // provide a pill style for.
