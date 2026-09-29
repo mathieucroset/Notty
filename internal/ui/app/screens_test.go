@@ -112,7 +112,9 @@ var screenCases = []screenCase{
 		m := openShowcase(t, w, h)
 		run(t, m, keyMsg("ctrl+f"))
 		typeText(t, m, "sprint")
-		waitFor(t, m, func() bool { return strings.Contains(screen(m), "demo") && !strings.Contains(screen(m), "searching…") })
+		waitFor(t, m, func() bool {
+			return strings.Contains(screen(m), "demo") && !strings.Contains(screen(m), "searching…")
+		})
 		return m
 	}},
 	{"palette", func(t *testing.T, w, h int) *Model {

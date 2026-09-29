@@ -50,35 +50,35 @@ type Set struct {
 var nerd = Set{
 	Name:             "nerd",
 	Logo:             "\U000F082E", // nf-md-notebook
-	FolderOpen:       "\uf07c",          // nf-fa-folder_open
-	FolderClosed:     "\uf07b",          // nf-fa-folder
-	Note:             "\uf0f6",          // nf-fa-file_text_o
-	File:             "\uf016",          // nf-fa-file_o
-	Pin:              "\uf435",          // nf-oct-pin
-	Tasks:            "\uf0ae",          // nf-fa-tasks
-	Conflicts:        "\uf071",          // nf-fa-exclamation_triangle
-	Trash:            "\uf014",          // nf-fa-trash_o
-	Dirty:            "\uf111",          // nf-fa-circle
-	TaskOpen:         "\uf096",          // nf-fa-square_o
-	TaskDone:         "\uf046",          // nf-fa-check_square_o
+	FolderOpen:       "\uf07c",     // nf-fa-folder_open
+	FolderClosed:     "\uf07b",     // nf-fa-folder
+	Note:             "\uf0f6",     // nf-fa-file_text_o
+	File:             "\uf016",     // nf-fa-file_o
+	Pin:              "\uf435",     // nf-oct-pin
+	Tasks:            "\uf0ae",     // nf-fa-tasks
+	Conflicts:        "\uf071",     // nf-fa-exclamation_triangle
+	Trash:            "\uf014",     // nf-fa-trash_o
+	Dirty:            "\uf111",     // nf-fa-circle
+	TaskOpen:         "\uf096",     // nf-fa-square_o
+	TaskDone:         "\uf046",     // nf-fa-check_square_o
 	ProgressFull:     "▰",
 	ProgressEmpty:    "▱",
-	Synced:           "\uf00c",          // nf-fa-check
-	Syncing:          "\uf021",          // nf-fa-refresh
+	Synced:           "\uf00c",     // nf-fa-check
+	Syncing:          "\uf021",     // nf-fa-refresh
 	Offline:          "\U000F0164", // nf-md-cloud_off_outline
-	SyncConflict:     "\uf071",          // nf-fa-exclamation_triangle
-	SyncError:        "\uf057",          // nf-fa-times_circle
-	LocalOnly:        "\uf0a0",          // nf-fa-hdd_o
-	Info:             "\uf05a",          // nf-fa-info_circle
-	Warn:             "\uf071",          // nf-fa-exclamation_triangle
-	Error:            "\uf057",          // nf-fa-times_circle
-	Check:            "\uf00c",          // nf-fa-check
-	Pending:          "\uf10c",          // nf-fa-circle_o
-	Image:            "\uf03e",          // nf-fa-picture_o
-	KindText:         "\uf0f6",          // nf-fa-file_text_o
-	KindBinary:       "\uf471",          // nf-oct-file_binary
-	KindModifyDelete: "\uf440",          // nf-oct-diff
-	KindPath:         "\uf443",          // nf-oct-arrow_switch
+	SyncConflict:     "\uf071",     // nf-fa-exclamation_triangle
+	SyncError:        "\uf057",     // nf-fa-times_circle
+	LocalOnly:        "\uf0a0",     // nf-fa-hdd_o
+	Info:             "\uf05a",     // nf-fa-info_circle
+	Warn:             "\uf071",     // nf-fa-exclamation_triangle
+	Error:            "\uf057",     // nf-fa-times_circle
+	Check:            "\uf00c",     // nf-fa-check
+	Pending:          "\uf10c",     // nf-fa-circle_o
+	Image:            "\uf03e",     // nf-fa-picture_o
+	KindText:         "\uf0f6",     // nf-fa-file_text_o
+	KindBinary:       "\uf471",     // nf-oct-file_binary
+	KindModifyDelete: "\uf440",     // nf-oct-diff
+	KindPath:         "\uf443",     // nf-oct-arrow_switch
 }
 
 var unicode = Set{

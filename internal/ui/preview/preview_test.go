@@ -386,7 +386,7 @@ func TestInlineImageBecomesChipAndBlock(t *testing.T) {
 	m, _ = setContent(t, m, "notes/n.md", "look ![alt](pic.png) and ![](pic.png) here")
 	v := m.View()
 	text := strings.Split(ansi.Strip(v), "\n")[0]
-	for _, want := range []string{"look", img+" alt", img+" pic.png", "here"} {
+	for _, want := range []string{"look", img + " alt", img + " pic.png", "here"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text row %q misses %q", text, want)
 		}
