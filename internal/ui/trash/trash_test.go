@@ -207,6 +207,77 @@ func TestMoveSelectionEmitsSelectionChanged(t *testing.T) {
 	}
 }
 
+// TestPreviewCachedAcrossViewAndUnrelatedMoves proves the preview's Glamour
+// render is computed once per (item, width, palette) and then only read
+// from the cache: repeated View() calls, and moving the selection away
+// from and back to the previewed item, must not trigger a second render.
+func TestPreviewCachedAcrossViewAndUnrelatedMoves(t *testing.T) {
+	m := newTest(t)
+	it, _ := m.Selected()
+
+	count := 0
+	m.onRender = func() { count++ }
+
+	m = m.SetPreview(it.ID, "# Hello\n\nWorld")
+	if count != 1 {
+		t.Fatalf("SetPreview (a cache miss) rendered %d times, want 1", count)
+	}
+
+	for i := 0; i < 10; i++ {
+		_ = m.View()
+	}
+	if count != 1 {
+		t.Errorf("View ×10 rendered %d times in total, want 1 (all cache hits)", count)
+	}
+
+	// Re-setting the same preview content is also a cache hit.
+	m = m.SetPreview(it.ID, "# Hello\n\nWorld")
+	if count != 1 {
+		t.Errorf("SetPreview with an unchanged key re-rendered: total = %d, want 1", count)
+	}
+
+	// Moving away (the preview no longer matches the selection, so nothing
+	// to render) and back again does not re-render either: the item's
+	// cached render is still valid.
+	m, _ = send(m, "j")
+	m, _ = send(m, "k")
+	if it2, _ := m.Selected(); it2.ID != it.ID {
+		t.Fatalf("selection after j,k = %q, want back to %q", it2.ID, it.ID)
+	}
+	if count != 1 {
+		t.Errorf("moving away and back re-rendered: total = %d, want 1", count)
+	}
+}
+
+// TestPreviewRecomputesOnCacheKeyChange proves the cache key really does
+// invalidate the cache: a width change or a different item must trigger a
+// recompute, and re-applying an unchanged size must not.
+func TestPreviewRecomputesOnCacheKeyChange(t *testing.T) {
+	m := newTest(t)
+	it, _ := m.Selected()
+	m = m.SetPreview(it.ID, "# Hello\n\nWorld")
+
+	count := 0
+	m.onRender = func() { count++ }
+
+	m = m.SetSize(m.width*2, m.height) // a width change
+	if count != 1 {
+		t.Errorf("SetSize (width change) rendered %d times, want 1", count)
+	}
+	m = m.SetSize(m.width, m.height) // the same size again: a cache hit
+	if count != 1 {
+		t.Errorf("SetSize with an unchanged size re-rendered: total = %d, want 1", count)
+	}
+
+	// Selecting a different item and loading its preview is a new key.
+	m, _ = send(m, "j")
+	next, _ := m.Selected()
+	m = m.SetPreview(next.ID, "# Another\n\nNote")
+	if count != 2 {
+		t.Errorf("SetPreview for a different item total renders = %d, want 2", count)
+	}
+}
+
 func TestNoOpKeysReturnNil(t *testing.T) {
 	m := newTest(t)
 	if _, cmd := m.Update(tea.KeyPressMsg{Code: 'z', Text: "z"}); cmd != nil {
@@ -217,19 +288,34 @@ func TestNoOpKeysReturnNil(t *testing.T) {
 	}
 }
 
+// wideRuneItems exercises CJK (double-width) and emoji (often double-width,
+// sometimes built from several runes) characters in the name, folder, and
+// host fields that end up in the rendered list rows.
+func wideRuneItems() []vault.TrashItem {
+	return []vault.TrashItem{
+		item("w3", "笔记/会议记录 🎉.md", "笔记本💻", now.Add(-time.Hour)),
+		item("w2", "emoji folder 😀😃😄/note.md", "desktop", now.Add(-2*time.Hour)),
+		item("w1", "readme.md", "台式机🖥️", now.Add(-3*time.Hour)),
+	}
+}
+
 func TestViewExactBounds(t *testing.T) {
 	sizes := [][2]int{{60, 20}, {40, 10}, {80, 5}, {20, 3}}
-	for _, sz := range sizes {
-		m := newTest(t)
-		m = m.SetSize(sz[0], sz[1])
-		v := m.View()
-		lines := strings.Split(v, "\n")
-		if len(lines) != sz[1] {
-			t.Errorf("size %v: got %d lines, want %d", sz, len(lines), sz[1])
-		}
-		for i, l := range lines {
-			if w := ansi.StringWidth(l); w != sz[0] {
-				t.Errorf("size %v: line %d width = %d, want %d (%q)", sz, i, w, sz[0], l)
+	datasets := [][]vault.TrashItem{threeItems(), wideRuneItems()}
+	for _, items := range datasets {
+		for _, sz := range sizes {
+			m := newTest(t)
+			m = m.SetItems(items, now)
+			m = m.SetSize(sz[0], sz[1])
+			v := m.View()
+			lines := strings.Split(v, "\n")
+			if len(lines) != sz[1] {
+				t.Errorf("size %v: got %d lines, want %d", sz, len(lines), sz[1])
+			}
+			for i, l := range lines {
+				if w := ansi.StringWidth(l); w != sz[0] {
+					t.Errorf("size %v: line %d width = %d, want %d (%q)", sz, i, w, sz[0], l)
+				}
 			}
 		}
 	}

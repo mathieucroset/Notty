@@ -52,6 +52,27 @@ type Model struct {
 	previewContent string
 
 	width, height int
+
+	// previewCache holds the last Glamour render of the preview, refreshed
+	// only by refreshPreview (called from SetItems, SetPreview, SetSize, and
+	// move). View reads it instead of recomputing on every keystroke or
+	// frame.
+	previewCache      string
+	previewCacheKey   previewCacheKey
+	previewCacheValid bool
+
+	// onRender, when set, is called each time refreshPreview actually
+	// re-renders the preview (a cache miss). It exists so tests can prove
+	// the cache is doing its job; production code leaves it nil.
+	onRender func()
+}
+
+// previewCacheKey identifies one Glamour render of the trash preview: the
+// previewed item's ID, the preview column's width, and the palette in use.
+type previewCacheKey struct {
+	id      string
+	width   int
+	palette string
 }
 
 // New returns an empty Trash view styled with styles and palette. palette
@@ -73,7 +94,7 @@ func (m Model) SetItems(items []vault.TrashItem, now time.Time) Model {
 			m.selID = items[0].ID
 		}
 	}
-	return m
+	return m.refreshPreview()
 }
 
 // SetPreview stores the loaded content for the trash item id, so it can be
@@ -81,7 +102,7 @@ func (m Model) SetItems(items []vault.TrashItem, now time.Time) Model {
 func (m Model) SetPreview(id, content string) Model {
 	m.previewID = id
 	m.previewContent = content
-	return m
+	return m.refreshPreview()
 }
 
 // Selected returns the currently selected item, or false if the trash is
@@ -111,7 +132,7 @@ func (m Model) selectedIndex() int {
 // SetSize sets the view's content size in columns and rows.
 func (m Model) SetSize(w, h int) Model {
 	m.width, m.height = w, h
-	return m
+	return m.refreshPreview()
 }
 
 // Title returns the pane title, e.g. "Trash · 3 items".
@@ -185,7 +206,39 @@ func (m Model) move(dir int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.selID = m.items[next].ID
+	m = m.refreshPreview()
 	return m, emit(SelectionChangedMsg{Item: m.items[next]})
+}
+
+// refreshPreview recomputes the Glamour preview when its cache key — the
+// previewed item's ID, the preview column's width, and the palette — has
+// changed. It is called explicitly from SetItems, SetPreview, SetSize, and
+// move; View never calls it, so scrolling through the list or re-rendering
+// the screen never re-runs Glamour.
+func (m Model) refreshPreview() Model {
+	it, ok := m.findSelected()
+	if !ok || m.previewID != it.ID {
+		return m
+	}
+	_, _, previewW := split(m.width)
+	if previewW <= 0 {
+		return m
+	}
+	key := previewCacheKey{id: m.previewID, width: previewW, palette: m.palette.Name}
+	if m.previewCacheValid && m.previewCacheKey == key {
+		return m
+	}
+	if m.onRender != nil {
+		m.onRender()
+	}
+	out, err := renderMarkdown(m.previewContent, m.palette, previewW)
+	if err != nil {
+		out = m.previewContent
+	}
+	m.previewCacheKey = key
+	m.previewCache = out
+	m.previewCacheValid = true
+	return m
 }
 
 // RelativeTime formats t relative to now (spec §8): "just now", "Nm ago",
@@ -309,8 +362,10 @@ func padRow(s string, w int, padStyle lipgloss.Style) string {
 	return s + padStyle.Render(strings.Repeat(" ", w-cur))
 }
 
-// renderPreview renders the Glamour preview of the selected item at width
-// w, or a loading placeholder while its content hasn't arrived yet.
+// renderPreview returns the selected item's preview: a loading placeholder
+// while its content hasn't arrived yet, and otherwise always previewCache
+// rather than a fresh Glamour render — the cache is refreshed only by
+// refreshPreview.
 func (m Model) renderPreview(w int) string {
 	it, ok := m.findSelected()
 	if !ok {
@@ -319,11 +374,7 @@ func (m Model) renderPreview(w int) string {
 	if m.previewID != it.ID {
 		return m.styles.Muted.Render("loading…")
 	}
-	out, err := renderMarkdown(m.previewContent, m.palette, w)
-	if err != nil {
-		return m.previewContent
-	}
-	return out
+	return m.previewCache
 }
 
 // renderMarkdown renders content as Glamour-styled markdown at width w using
