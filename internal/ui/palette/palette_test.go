@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/sahilm/fuzzy"
 
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/theme"
@@ -282,6 +283,36 @@ func TestSetSizeNeverExceedsTinyTerminal(t *testing.T) {
 		}
 		// Rendering at this size must not panic.
 		_ = m.View()
+	}
+}
+
+func TestHighlightUsesByteOffsetsNotRuneIndexes(t *testing.T) {
+	styles := testStyles(t)
+	// "café bar": é is a 2-byte UTF-8 rune, so from there on the byte
+	// offset of every following rune is one ahead of its rune index. The
+	// 'b' in "bar" sits at rune index 5 but byte offset 6.
+	s := "café bar"
+
+	matches := fuzzy.Find("b", []string{s})
+	if len(matches) != 1 || len(matches[0].MatchedIndexes) != 1 {
+		t.Fatalf("unexpected fuzzy match for %q: %+v", s, matches)
+	}
+
+	got := highlight(s, matches[0].MatchedIndexes, styles.Match)
+
+	if plain := ansi.Strip(got); plain != s {
+		t.Fatalf("highlight corrupted the string: got %q, want %q", plain, s)
+	}
+
+	wantStyled := styles.Match.Render("b")
+	if !strings.Contains(got, wantStyled) {
+		t.Errorf("expected the matched %q to be styled (looking for %q) in %q", "b", wantStyled, got)
+	}
+	// A rune-index interpretation of the same byte offset would
+	// incorrectly land one rune early, on the 'a' in "bar".
+	wrongStyled := styles.Match.Render("a")
+	if strings.Contains(got, wrongStyled) {
+		t.Errorf("no %q should be styled for a match on %q, got %q", "a", "b", got)
 	}
 }
 

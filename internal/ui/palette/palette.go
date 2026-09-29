@@ -352,8 +352,13 @@ func (m Model) listRows() int {
 	return avail
 }
 
-// highlight renders s with the runes at the matched indexes styled with
-// style, and every other rune left unstyled.
+// highlight renders s with the runes at the matched byte offsets styled
+// with style, and every other rune left unstyled. matched holds byte
+// offsets (as sahilm/fuzzy's Match.MatchedIndexes does, not rune indexes),
+// so this ranges over the string directly instead of over []rune(s): for
+// any name with a multi-byte rune before a match, a rune index and its byte
+// offset diverge, and indexing []rune(s) by a byte offset would highlight
+// the wrong character.
 func highlight(s string, matched []int, style lipgloss.Style) string {
 	if len(matched) == 0 {
 		return s
@@ -363,7 +368,7 @@ func highlight(s string, matched []int, style lipgloss.Style) string {
 		set[i] = true
 	}
 	var b strings.Builder
-	for i, r := range []rune(s) {
+	for i, r := range s {
 		if set[i] {
 			b.WriteString(style.Render(string(r)))
 		} else {
