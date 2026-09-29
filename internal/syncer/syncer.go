@@ -53,12 +53,17 @@ type repoAPI interface {
 	Merge(ref string, allowUnrelated bool) error
 	MergeBase(a, b string) (string, error)
 	DiffNameStatus(from, to string) ([]gitsync.Change, error)
+	ConflictedFiles() ([]gitsync.Conflict, error)
+	CommitMerge(msg string) error
 }
 
 const (
 	defaultCommitDelay   = 5 * time.Second
 	defaultFetchInterval = 5 * time.Minute
 )
+
+// backoff is the offline retry schedule (spec §7); the last step repeats.
+var backoff = []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 5 * time.Minute}
 
 // job is one unit of work for the worker. Only quit jobs run after Quit.
 type job struct {
@@ -110,8 +115,11 @@ type Syncer struct {
 	localOnly    bool
 	quitting     bool
 	cyclePending bool
+	authBlocked  bool // no automatic retries until a save or a manual sync
+	backoffStep  int
 	commitTimer  timerSlot
 	fetchTimer   timerSlot
+	retryTimer   timerSlot
 }
 
 // New returns a syncer for repo. clock is RealClock() in production.
@@ -158,25 +166,47 @@ func (s *Syncer) Start(ctx context.Context) {
 }
 
 // NoteChanged (re)starts the commit timer after a save or a watcher event.
+// It is ignored in Conflict. It also re-enables automatic retries after an
+// authentication failure.
 func (s *Syncer) NoteChanged(rel string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.quitting {
+	if s.quitting || s.status.State == Conflict {
 		return
 	}
+	s.authBlocked = false
 	s.arm(&s.commitTimer, s.commitDelay, s.requestCycle)
 }
 
-// SyncNow runs a full cycle immediately.
+// SyncNow runs a full cycle immediately. In Conflict it does nothing: the UI
+// opens the resolver instead.
 func (s *Syncer) SyncNow() {
 	s.mu.Lock()
-	if s.quitting {
+	if s.quitting || s.status.State == Conflict {
 		s.mu.Unlock()
 		return
 	}
+	s.authBlocked = false
 	s.disarm(&s.commitTimer)
 	s.mu.Unlock()
 	s.requestCycle()
+}
+
+// ConflictResolved is called by the resolver after it committed the merge.
+// The syncer leaves Conflict, runs a full cycle (which commits edits made
+// during the conflict and pushes the merge) and resumes its timers. If a
+// merge is still in progress with conflicts left, it stays in Conflict.
+func (s *Syncer) ConflictResolved() {
+	s.enqueue(job{fn: func() {
+		if s.repo.MergeInProgress() && !s.concludeMerge() {
+			return
+		}
+		s.mu.Lock()
+		s.status = Status{State: Idle}
+		s.mu.Unlock()
+		s.armFetch()
+		s.cycle()
+	}})
 }
 
 // Quit flushes the buffer (unless skipFlush), commits and, with a remote,
@@ -188,6 +218,7 @@ func (s *Syncer) Quit(ctx context.Context, skipFlush bool) error {
 	s.quitting = true
 	s.disarm(&s.commitTimer)
 	s.disarm(&s.fetchTimer)
+	s.disarm(&s.retryTimer)
 	s.mu.Unlock()
 	// Abort a background fetch or push so the quit job runs sooner.
 	s.netCancel()
@@ -208,6 +239,11 @@ func (s *Syncer) quitJob(ctx context.Context, skipFlush bool) error {
 	}
 	if !skipFlush {
 		_ = s.host.Flush()
+	}
+	// In Conflict the merge stays in progress for the next start: no commit,
+	// no push (spec §7).
+	if s.Status().State == Conflict || s.repo.MergeInProgress() {
+		return nil
 	}
 	if err := s.commitAll(); err != nil {
 		return err
@@ -409,6 +445,9 @@ func (s *Syncer) startLogic() {
 		s.disarm(&s.fetchTimer)
 	}
 	s.mu.Unlock()
+	if s.repo.MergeInProgress() && !s.concludeMerge() {
+		return
+	}
 	if localOnly {
 		s.setState(LocalOnly)
 		return
@@ -427,8 +466,63 @@ func (s *Syncer) armFetch() {
 	s.arm(&s.fetchTimer, s.fetchInterval, func() { s.enqueue(job{fn: s.fetchTick}) })
 }
 
+// concludeMerge handles a merge found in progress: with conflicts left it
+// enters Conflict and returns false; with every file resolved (the app
+// stopped before committing the merge) it commits the merge and returns true.
+func (s *Syncer) concludeMerge() bool {
+	paths, err := s.conflictedPaths()
+	if err != nil {
+		s.fail(err)
+		return false
+	}
+	if len(paths) > 0 {
+		s.enterConflict(Update{}, paths)
+		return false
+	}
+	if err := s.repo.CommitMerge("Merge · " + s.hostname); err != nil {
+		s.fail(fmt.Errorf("syncer: %w", err))
+		return false
+	}
+	return true
+}
+
+// conflictedPaths lists the unmerged paths, sorted.
+func (s *Syncer) conflictedPaths() ([]string, error) {
+	conflicts, err := s.repo.ConflictedFiles()
+	if err != nil {
+		return nil, fmt.Errorf("syncer: %w", err)
+	}
+	paths := make([]string, 0, len(conflicts))
+	for _, c := range conflicts {
+		paths = append(paths, c.Path)
+	}
+	slices.Sort(paths)
+	return paths, nil
+}
+
+// enterConflict pauses every timer and emits u with the Conflict status and
+// the conflicted paths.
+func (s *Syncer) enterConflict(u Update, paths []string) {
+	st := Status{State: Conflict, Conflicts: len(paths)}
+	s.mu.Lock()
+	s.disarm(&s.commitTimer)
+	s.disarm(&s.fetchTimer)
+	s.disarm(&s.retryTimer)
+	s.status = st
+	s.mu.Unlock()
+	u.Status = st
+	u.Conflicted = paths
+	s.emit(u)
+}
+
 // cycle is the full cycle of spec §7.
 func (s *Syncer) cycle() {
+	if s.Status().State == Conflict {
+		return
+	}
+	if s.repo.MergeInProgress() && !s.concludeMerge() {
+		return
+	}
 	s.setState(Committing)
 	_ = s.host.Flush()
 	if err := s.commitAll(); err != nil {
@@ -453,7 +547,17 @@ func (s *Syncer) cycle() {
 // fetchTick is the fetch timer (spec §7): fetch; if the remote is ahead run
 // the rest of a full cycle, if only local is ahead push.
 func (s *Syncer) fetchTick() {
+	s.mu.Lock()
+	conflict := s.status.State == Conflict
+	skip := s.authBlocked
+	s.mu.Unlock()
+	if conflict {
+		return // the timer resumes when the conflict is resolved
+	}
 	defer s.armFetch()
+	if skip {
+		return
+	}
 	s.setState(Pulling)
 	if err := s.repo.Fetch(s.netCtx); err != nil {
 		s.fail(err)
@@ -483,8 +587,12 @@ func (s *Syncer) afterFetch() {
 		return
 	}
 	if behind > 0 {
-		if err := s.mergeSection(); err != nil {
+		conflicted, err := s.mergeSection()
+		if err != nil {
 			s.fail(err)
+			return
+		}
+		if conflicted {
 			return
 		}
 	}
@@ -495,6 +603,11 @@ func (s *Syncer) afterFetch() {
 			return
 		}
 	}
+	s.mu.Lock()
+	s.backoffStep = 0
+	s.authBlocked = false
+	s.disarm(&s.retryTimer)
+	s.mu.Unlock()
 	s.setStatus(Status{State: Synced})
 }
 
@@ -516,42 +629,65 @@ func (s *Syncer) headExists() bool {
 	return err == nil
 }
 
-// mergeSection is the locked merge section of spec §7.
-func (s *Syncer) mergeSection() (err error) {
+// mergeSection is the locked merge section of spec §7. It reports whether
+// the merge stopped with conflicts (the syncer is then in Conflict).
+func (s *Syncer) mergeSection() (conflicted bool, err error) {
 	s.setState(Merging)
 	branch, err := s.repo.CurrentBranch()
 	if err != nil {
-		return fmt.Errorf("syncer: merge: %w", err)
+		return false, fmt.Errorf("syncer: merge: %w", err)
 	}
 	ref := "origin/" + branch
 
-	conflicted := map[string]bool{}
+	conflictSet := map[string]bool{}
 	s.host.LockMutations()
 	s.host.PauseWatcher()
 	defer func() {
 		s.host.ResumeWatcher()
-		s.host.UnlockMutations(conflicted)
+		s.host.UnlockMutations(conflictSet)
 	}()
 
 	_ = s.host.Flush()
 	if err := s.commitAll(); err != nil {
-		return err
+		return false, err
 	}
 	err = s.repo.Merge(ref, false)
 	if errors.Is(err, gitsync.ErrLocalChanges) {
 		// Another program changed a file in the same instant: commit and
 		// retry once.
 		if cerr := s.commitAll(); cerr != nil {
-			return cerr
+			return false, cerr
 		}
 		err = s.repo.Merge(ref, false)
 	}
-	if err != nil {
-		return fmt.Errorf("syncer: merge: %w", err)
+	stopped := errors.Is(err, gitsync.ErrConflict) && s.repo.MergeInProgress()
+	if err != nil && !stopped {
+		return false, fmt.Errorf("syncer: merge: %w", err)
+	}
+	var paths []string
+	if stopped {
+		if paths, err = s.conflictedPaths(); err != nil {
+			return false, err
+		}
 	}
 	reindex, reload := s.reindex()
-	s.emit(Update{Status: s.Status(), Reindex: reindex, Reload: reload})
-	return nil
+	u := Update{Reindex: reindex, Reload: reload}
+	if len(paths) > 0 {
+		for _, p := range paths {
+			conflictSet[p] = true
+		}
+		s.enterConflict(u, paths)
+		return true, nil
+	}
+	if stopped {
+		// Nothing is left unmerged: conclude the merge.
+		if err := s.repo.CommitMerge("Merge · " + s.hostname); err != nil {
+			return false, fmt.Errorf("syncer: merge: %w", err)
+		}
+	}
+	u.Status = s.Status()
+	s.emit(u)
+	return false, nil
 }
 
 // reindex returns the paths changed by the last merge (spec §7: every file in
@@ -619,7 +755,32 @@ func stagedChanges(entries []gitsync.StatusEntry) []gitsync.Change {
 	return changes
 }
 
-// fail enters Error with err.
+// fail records a failed step: Offline with a retry on network errors
+// (spec §7 backoff), Error without automatic retries on authentication
+// errors, Error otherwise. Failures after Quit (whose network context is
+// cancelled) are ignored.
 func (s *Syncer) fail(err error) {
-	s.setStatus(Status{State: Error, Err: err})
+	if s.isQuitting() {
+		return
+	}
+	switch {
+	case errors.Is(err, gitsync.ErrNetwork):
+		ahead, _, _ := s.repo.AheadBehind()
+		s.mu.Lock()
+		if s.retryTimer.t == nil {
+			d := backoff[min(s.backoffStep, len(backoff)-1)]
+			s.backoffStep++
+			s.arm(&s.retryTimer, d, s.requestCycle)
+		}
+		s.mu.Unlock()
+		s.setStatus(Status{State: Offline, Pending: ahead})
+	case errors.Is(err, gitsync.ErrAuth):
+		s.mu.Lock()
+		s.authBlocked = true
+		s.disarm(&s.retryTimer)
+		s.mu.Unlock()
+		s.setStatus(Status{State: Error, Err: err, Detail: "auth"})
+	default:
+		s.setStatus(Status{State: Error, Err: err})
+	}
 }
