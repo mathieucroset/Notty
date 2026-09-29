@@ -301,7 +301,18 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, errorToast("Could not open %s: %v", msg.path, msg.err)
 		}
+		if p := m.editor.Path(); p != "" && p != msg.path {
+			// Typed into the old note while the new one was read: save
+			// it before its buffer is replaced.
+			if cmd := m.saveThen(msg); cmd != nil {
+				return m, cmd
+			}
+		}
 		return m, m.showNote(msg.path, msg.content, msg.line)
+	case loadNoteMsg:
+		return m, m.loadNote(msg)
+	case savedThenMsg:
+		return m, m.handleSavedThen(msg)
 
 	case editor.ChangedMsg:
 		return m, m.handleEditorChanged(msg)

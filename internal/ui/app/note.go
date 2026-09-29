@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -50,20 +51,61 @@ func (m *Model) openNote(msg msgs.OpenNoteMsg) tea.Cmd {
 		m.setFocus(FocusMain)
 		return nil
 	}
-	return tea.Batch(m.leaveNote(), loadNoteCmd(m.opts.Vault, msg.Path, msg.Line, m.openSeq))
+	m.rememberCursor()
+	load := loadNoteMsg{path: msg.Path, line: msg.Line, seq: m.openSeq}
+	if cmd := m.saveThen(load); cmd != nil {
+		return cmd // the new note loads once the old one is saved
+	}
+	return m.loadNote(load)
 }
 
-// leaveNote remembers the open note's cursor and saves its buffer when it
-// has unsaved changes.
-func (m *Model) leaveNote() tea.Cmd {
-	if m.note.path == "" {
-		return nil
+// loadNoteMsg asks to read a note from disk for open request seq.
+type loadNoteMsg struct {
+	path string
+	line int
+	seq  int
+}
+
+// loadNote reads the note of a still current open request.
+func (m *Model) loadNote(msg loadNoteMsg) tea.Cmd {
+	if msg.seq != m.openSeq || m.opts.Vault == nil {
+		return nil // superseded by a newer open request
 	}
-	m.rememberCursor()
+	return loadNoteCmd(m.opts.Vault, msg.path, msg.line, msg.seq)
+}
+
+// savedThenMsg reports the save of the open buffer that must succeed
+// before next is handled.
+type savedThenMsg struct {
+	saved savedMsg
+	next  tea.Msg
+}
+
+// saveThen saves the dirty buffer and then delivers next; it returns nil
+// when there is nothing to save. A failed save drops next and keeps the
+// note open (handleSavedThen).
+func (m *Model) saveThen(next tea.Msg) tea.Cmd {
 	if !m.editor.Dirty() {
 		return nil
 	}
-	return m.saveEditorCmd()
+	save := m.saveEditorCmd()
+	if save == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		res, _ := save().(savedMsg)
+		return savedThenMsg{saved: res, next: next}
+	}
+}
+
+// handleSavedThen goes on with the action a save was guarding, or keeps
+// the note open when the save failed.
+func (m *Model) handleSavedThen(msg savedThenMsg) tea.Cmd {
+	if msg.saved.err != nil {
+		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s, so it stays open: %v",
+			msg.saved.path, msg.saved.err))
+	}
+	return tea.Batch(m.handleSaved(msg.saved), emit(msg.next))
 }
 
 // rememberCursor records the open note's cursor in the local state, so

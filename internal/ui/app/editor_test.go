@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -145,6 +146,51 @@ func TestSwitchingNotesSavesAndRemembersCursor(t *testing.T) {
 	run(t, m, msgs.OpenNoteMsg{Path: "ideas.md", Line: -1})
 	if got := m.editor.Cursor(); got != cur {
 		t.Errorf("reopened cursor = %+v, want %+v", got, cur)
+	}
+}
+
+func TestSwitchKeepsNoteOpenWhenSaveFails(t *testing.T) {
+	opts := testOptions(t)
+	m := openNote(t, opts, "ideas.md")
+	insertText(t, m, "unsaved ")
+	root := opts.Vault.Root
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	run(t, m, msgs.OpenNoteMsg{Path: "Work/Standup notes.md", Line: -1})
+	if m.NotePath() != "ideas.md" || !strings.HasPrefix(m.editor.Content(), "unsaved ") || !m.editor.Dirty() {
+		t.Fatalf("switch went ahead after a failed save: open %q", m.NotePath())
+	}
+	if !hasToast(m, msgs.ToastError, "stays open") {
+		t.Errorf("toasts = %v", toastTexts(m))
+	}
+	// Once saving works again, switching saves then loads.
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(t, m, msgs.OpenNoteMsg{Path: "Work/Standup notes.md", Line: -1})
+	if m.NotePath() != "Work/Standup notes.md" {
+		t.Fatalf("open note = %q", m.NotePath())
+	}
+	if got := readFile(t, opts.Vault, "ideas.md"); !strings.HasPrefix(got, "unsaved ") {
+		t.Errorf("ideas.md = %q", got)
+	}
+}
+
+func TestLoadedNoteSavesDirtyBufferFirst(t *testing.T) {
+	opts := testOptions(t)
+	m := openNote(t, opts, "ideas.md")
+	// A load that lands while the old buffer has unsaved edits (typed
+	// while the new note was read).
+	m.openSeq++
+	insertText(t, m, "late ")
+	run(t, m, noteLoadedMsg{seq: m.openSeq, path: "Work/Standup notes.md", content: "# Standup\n", line: -1})
+	if m.NotePath() != "Work/Standup notes.md" {
+		t.Fatalf("open note = %q", m.NotePath())
+	}
+	if got := readFile(t, opts.Vault, "ideas.md"); !strings.HasPrefix(got, "late ") {
+		t.Errorf("old buffer lost: ideas.md = %q", got)
 	}
 }
 
