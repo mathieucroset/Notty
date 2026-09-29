@@ -40,13 +40,21 @@ func HighlightCode(lang, line string) []Span {
 	if line == "" {
 		return nil
 	}
-	it, err := lexerFor(lang).Tokenise(nil, line+"\n")
+	plain := []Span{{Start: 0, End: len(line), Kind: CodeBlock, Lang: lang, Token: chroma.Text}}
+	full := line + "\n"
+	it, err := lexerFor(lang).Tokenise(nil, full)
 	if err != nil {
-		return []Span{{Start: 0, End: len(line), Kind: CodeBlock, Lang: lang, Token: chroma.Text}}
+		return plain
 	}
 	var out []Span
 	pos := 0
 	for tok := it(); tok != chroma.EOF; tok = it() {
+		// Chroma may rewrite its input (e.g. invalid UTF-8 becomes U+FFFD);
+		// if the tokens stop matching the line byte for byte, the offsets
+		// would be wrong, so fall back to one plain span.
+		if !strings.HasPrefix(full[pos:], tok.Value) {
+			return plain
+		}
 		start := pos
 		pos += len(tok.Value)
 		end := min(pos, len(line))
@@ -59,8 +67,8 @@ func HighlightCode(lang, line string) []Span {
 		}
 		out = append(out, Span{Start: start, End: end, Kind: CodeBlock, Lang: lang, Token: tok.Type})
 	}
-	if pos < len(line) { // defensive: lexer consumed less than the line
-		out = append(out, Span{Start: pos, End: len(line), Kind: CodeBlock, Lang: lang, Token: chroma.Text})
+	if pos < len(line) { // the tokens did not cover the whole line
+		return plain
 	}
 	return out
 }

@@ -225,6 +225,14 @@ func TestHighlightCodeFallback(t *testing.T) {
 			t.Errorf("lang %q: covered %d of %d bytes", lang, covered, len(line))
 		}
 	}
+	// Invalid UTF-8 may be rewritten by chroma; the result must still map
+	// onto the original bytes.
+	bad := "x := \"\xff\xfe\" // \xc3"
+	spans := HighlightCode("go", bad)
+	checkSpans(t, bad, spans)
+	if len(spans) != 1 || spans[0].Start != 0 || spans[0].End != len(bad) || spans[0].Token != chroma.Text {
+		t.Errorf("invalid UTF-8 spans = %+v, want one Text span over the line", spans)
+	}
 	if spans := HighlightCode("go", ""); spans != nil {
 		t.Errorf("empty line spans = %+v", spans)
 	}
