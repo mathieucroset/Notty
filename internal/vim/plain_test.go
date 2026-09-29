@@ -151,7 +151,8 @@ func TestPlainReadOnly(t *testing.T) {
 		{"cut", "<c-x>", "a|bc", true},
 		{"paste", "<c-v>", "a|bc", true},
 		{"undo", "<c-z>", "a|bc", true},
-		{"tab", "<tab>", "a|bc", true},
+		{"tab focuses sidebar", "<tab>", "a|bc", false},
+		{"shift tab", "<s-tab>", "a|bc", true},
 		{"move ok", "<right>", "ab|c", false},
 		{"select ok", "<s-right>", "ab|c", false},
 		{"copy ok", "<c-c>", "a|bc", false},
@@ -168,6 +169,9 @@ func TestPlainReadOnly(t *testing.T) {
 			}
 			if eff.Blocked != tt.blocked {
 				t.Errorf("Blocked = %v", eff.Blocked)
+			}
+			if want := tt.keys == "<tab>" || tt.keys == "<esc>"; eff.FocusSidebar != want {
+				t.Errorf("FocusSidebar = %v, want %v", eff.FocusSidebar, want)
 			}
 			p.PasteClipboard(b, "zz", false)
 			if b.Dirty() {

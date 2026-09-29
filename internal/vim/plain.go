@@ -105,6 +105,11 @@ func (p *Plain) Handle(b *buffer.Buffer, k Key) Effect {
 	if !insertion {
 		p.endTyping(b)
 	}
+	if p.readOnly && tok == "<tab>" {
+		// Nothing to indent in a read-only note: tab moves focus instead.
+		eff.FocusSidebar = true
+		return eff
+	}
 	if p.readOnly && (insertion || plainEdits[tok]) {
 		eff.Blocked = true
 		return eff
