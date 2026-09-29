@@ -6,6 +6,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/mathieucroset/notty/internal/vault"
 )
 
 func TestParseInterspersed(t *testing.T) {
@@ -80,6 +83,40 @@ func TestNewCreatesNoteAndOpensIt(t *testing.T) {
 				t.Errorf("lock not released after the TUI exits: %v", err)
 			}
 		})
+	}
+}
+
+// notty new waits for a lock held by a headless sync (spec §9), like the
+// TUI does, and goes on once it is released.
+func TestNewWaitsForLock(t *testing.T) {
+	f := newFixture(t)
+	f.makeRepo(t)
+	f.writeConfig(t, "")
+	lock, err := vault.AcquireLock(f.vaultDir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan struct{})
+	go func() {
+		defer close(released)
+		time.Sleep(200 * time.Millisecond)
+		_ = lock.Release()
+	}()
+	e := f.env()
+	e.lockWait = 5 * time.Second
+	code := run([]string{"--vault", f.vaultDir, "new", "Idea"}, e)
+	<-released
+	if code != 0 {
+		t.Fatalf("exit code %d, stderr %q", code, f.stderr.String())
+	}
+	if !strings.Contains(f.stderr.String(), "waiting for vault lock") {
+		t.Errorf("stderr = %q, want the waiting message", f.stderr.String())
+	}
+	if f.got == nil || f.got.InitialNote != "Idea.md" {
+		t.Fatalf("TUI options = %+v, want InitialNote Idea.md", f.got)
+	}
+	if _, err := os.Stat(filepath.Join(f.vaultDir, "Idea.md")); err != nil {
+		t.Errorf("note not created: %v", err)
 	}
 }
 

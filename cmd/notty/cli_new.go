@@ -4,10 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
-
-	"github.com/mathieucroset/notty/internal/config"
 )
 
 const usage = `usage:
@@ -75,45 +71,6 @@ func flagExit(err error) int {
 	return 2
 }
 
-// vaultRoot loads the local config and returns the absolute vault root:
-// vaultFlag if set, else the configured vault.
-func vaultRoot(vaultFlag string, e env) (string, error) {
-	cfg, err := config.Load(e.configPath, "")
-	if err != nil {
-		return "", err
-	}
-	root := cfg.VaultPath()
-	if vaultFlag != "" {
-		root = config.ExpandHome(vaultFlag)
-	}
-	if abs, err := filepath.Abs(root); err == nil {
-		root = abs
-	}
-	return root, nil
-}
-
-// isDir reports whether p is an existing directory.
-func isDir(p string) bool {
-	fi, err := os.Stat(p)
-	return err == nil && fi.IsDir()
-}
-
-// resolveVault is vaultRoot, returning errNeedsSetup when the vault does
-// not exist or the first-run wizard would run.
-func resolveVault(vaultFlag string, e env) (string, error) {
-	root, err := vaultRoot(vaultFlag, e)
-	if err != nil {
-		return "", err
-	}
-	if !isDir(root) {
-		return "", errNeedsSetup
-	}
-	if wizardNeeded(e.configPath, root, e.lookPath) {
-		return "", errNeedsSetup
-	}
-	return root, nil
-}
-
 // runNew is `notty new "<title>" [--folder X]`: it creates the note, then
 // opens the TUI on it.
 func runNew(args []string, vaultFlag string, e env) int {
@@ -128,12 +85,10 @@ func runNew(args []string, vaultFlag string, e env) int {
 		return 2
 	}
 
-	root, err := resolveVault(*vaultPath, e)
-	if err != nil {
-		_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
-		return 1
-	}
-	opts, release, err := prepare(root, e)
+	// prepare resolves the vault and takes the lock exactly as the TUI does.
+	// A vault that is missing or not set up means the wizard would run: it
+	// then returns without the lock and without creating the vault.
+	opts, release, err := prepare(*vaultPath, e)
 	if err != nil {
 		_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
 		return 1

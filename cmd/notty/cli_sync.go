@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/mathieucroset/notty/internal/config"
@@ -109,6 +111,29 @@ func runSync(args []string, vaultFlag string, e env) int {
 	// without committing; with every file resolved it commits the merge
 	// and the cycle goes on.
 	return syncOnce(repo, cfg, e.stdout, e.stderr)
+}
+
+// vaultRoot loads the local config and returns the absolute vault root:
+// vaultFlag if set, else the configured vault.
+func vaultRoot(vaultFlag string, e env) (string, error) {
+	cfg, err := config.Load(e.configPath, "")
+	if err != nil {
+		return "", err
+	}
+	root := cfg.VaultPath()
+	if vaultFlag != "" {
+		root = config.ExpandHome(vaultFlag)
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return root, nil
+}
+
+// isDir reports whether p is an existing directory.
+func isDir(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
 }
 
 // syncOnce runs the syncer's startup logic (a full cycle, or LocalOnly
