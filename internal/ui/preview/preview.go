@@ -268,9 +268,10 @@ func (m Model) startRender() tea.Cmd {
 		if s.Kind != Text {
 			continue
 		}
-		key := textKey{hash: hashString(s.Markdown), width: cw, palette: m.palette.Name}
+		md := prepareText(s.Markdown)
+		key := textKey{hash: hashString(md), width: cw, palette: m.palette.Name}
 		lines, ok := m.sh.textCache[key]
-		job.texts = append(job.texts, textJob{key: key, markdown: s.Markdown, lines: lines, cached: ok})
+		job.texts = append(job.texts, textJob{key: key, markdown: md, lines: lines, cached: ok})
 	}
 	return job.run
 }
@@ -284,11 +285,8 @@ func (m Model) applyRender(msg renderedMsg) (Model, tea.Cmd) {
 	}
 	// Keep only the text renderings the current document uses.
 	used := map[textKey]bool{}
-	cw := contentWidth(msg.doc.width)
-	for _, s := range msg.doc.segs {
-		if s.Kind == Text {
-			used[textKey{hash: hashString(s.Markdown), width: cw, palette: m.palette.Name}] = true
-		}
+	for _, k := range msg.doc.textKeys {
+		used[k] = true
 	}
 	maps.DeleteFunc(m.sh.textCache, func(k textKey, _ []string) bool { return !used[k] })
 

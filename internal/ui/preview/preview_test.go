@@ -163,6 +163,35 @@ func TestSegmentCacheReuse(t *testing.T) {
 	}
 }
 
+func TestTabsAndCarriageReturnsNeverReachTheFrame(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	content := "```go\r\nfunc a() {\r\n\treturn\r\n}\r\n```\r\n\r\ntext\twith tab\r\n\r\n| a\tb | c |\n|---|---|\n| x | y |"
+	m, _ = setContent(t, m, "n.md", content)
+	v := m.View()
+	if strings.ContainsAny(v, "\t\r") {
+		t.Fatalf("view contains a tab or CR: %q", v)
+	}
+	checkDims(t, v, 60, 30)
+	if !strings.Contains(ansi.Strip(v), "    return") {
+		t.Fatalf("tab not expanded to 4 columns:\n%s", ansi.Strip(v))
+	}
+}
+
+func TestExpandTabs(t *testing.T) {
+	cases := map[string]string{
+		"\tx":     "    x",
+		"ab\tx":   "ab  x",
+		"abcd\tx": "abcd    x",
+		"é\tx":    "é   x",
+		"no tabs": "no tabs",
+	}
+	for in, want := range cases {
+		if got := expandTabs(in); got != want {
+			t.Errorf("expandTabs(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestSetContentIsDebouncedAndStaleRendersDropped(t *testing.T) {
 	m := newTest(t, imgrender.ProtoOff, t.TempDir())
 	m, first := m.SetContent("n.md", "old text")

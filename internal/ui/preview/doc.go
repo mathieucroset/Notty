@@ -16,8 +16,9 @@ type doc struct {
 	content       string
 	width, height int
 
-	segs   []Segment
-	blocks []block // parallel to segs
+	segs     []Segment
+	blocks   []block   // parallel to segs
+	textKeys []textKey // cache keys of the text segments
 
 	lines     []docLine
 	segTop    []int // first layout row of each segment

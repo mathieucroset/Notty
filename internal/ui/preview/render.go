@@ -155,6 +155,7 @@ func (j renderJob) run() tea.Msg {
 			if !tj.cached {
 				msg.newTexts[tj.key] = tj.lines
 			}
+			d.textKeys = append(d.textKeys, tj.key)
 			d.blocks[i].text = tj.lines
 			continue
 		}
