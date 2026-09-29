@@ -49,8 +49,22 @@ func Init(dir, branch string) (*Repo, error) {
 // Clone clones url into dir (created with its parents if missing; it must be
 // empty if it exists).
 func Clone(ctx context.Context, url, dir string) (*Repo, error) {
+	return CloneBranch(ctx, url, dir, "")
+}
+
+// CloneBranch is Clone checking out branch instead of the remote's HEAD
+// (which may point to a branch that does not exist). An empty branch means
+// the remote's HEAD.
+func CloneBranch(ctx context.Context, url, dir, branch string) (*Repo, error) {
 	if err := checkArg("url", url); err != nil {
 		return nil, err
+	}
+	args := []string{"clone", "-q"}
+	if branch != "" {
+		if err := checkArg("branch", branch); err != nil {
+			return nil, err
+		}
+		args = append(args, "-b", branch)
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -61,7 +75,7 @@ func Clone(ctx context.Context, url, dir string) (*Repo, error) {
 		return nil, fmt.Errorf("gitsync: clone: %w", err)
 	}
 	run := newExecRunner(configuredSSHCommand(""))
-	if _, err := runGit(ctx, run, parent, true, "clone", "-q", "--", url, abs); err != nil {
+	if _, err := runGit(ctx, run, parent, true, append(args, "--", url, abs)...); err != nil {
 		return nil, fmt.Errorf("gitsync: clone %s: %w", url, err)
 	}
 	return Open(abs), nil

@@ -486,6 +486,23 @@ func TestClone(t *testing.T) {
 	}
 }
 
+func TestCloneBranch(t *testing.T) {
+	env := gittest.New(t)
+	gittest.Git(t, env.Laptop.Dir, "push", "-q", "origin", "main:trunk")
+	// The remote's HEAD points to a branch that does not exist.
+	gittest.Git(t, env.Remote, "symbolic-ref", "HEAD", "refs/heads/missing")
+	r, err := gitsync.CloneBranch(ctx, env.Remote, filepath.Join(t.TempDir(), "Notes"), "trunk")
+	if err != nil {
+		t.Fatalf("CloneBranch: %v", err)
+	}
+	if b, _ := r.CurrentBranch(); b != "trunk" || !r.HasUpstream() {
+		t.Fatalf("branch = %q, upstream %v; want trunk with upstream", b, r.HasUpstream())
+	}
+	if got := gittest.Read(t, r, "README.md"); got != "# Notes\n" {
+		t.Fatalf("README.md = %q", got)
+	}
+}
+
 func TestRenameBranch(t *testing.T) {
 	gittest.Isolate(t)
 	r, err := gitsync.Init(t.TempDir(), "main")
