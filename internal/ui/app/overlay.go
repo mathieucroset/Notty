@@ -136,6 +136,10 @@ func (m *Model) handleDialogResult(res dialog.ResultMsg) tea.Cmd {
 	}
 	m.closeOverlay()
 	if !res.OK {
+		if o.pending.kind == opExternalChange {
+			// Dismissing the dialog keeps the edits.
+			return m.resolveExternalChange(o.pending.path, choiceKeepMine)
+		}
 		return nil
 	}
 	return m.runPending(o.pending, res)

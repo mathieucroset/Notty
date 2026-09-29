@@ -92,6 +92,9 @@ func (m *Model) saveRequest() tea.Cmd {
 	if m.note.path == "" || !m.editor.Dirty() {
 		return nil
 	}
+	if m.extConflict == m.editor.Path() {
+		return nil // the "changed on disk" dialog decides first
+	}
 	return m.saveEditorCmd()
 }
 
@@ -101,6 +104,7 @@ func (m *Model) closeNote() {
 	m.openSeq++ // drop any load still in flight
 	m.editor = m.editor.SetReadOnly(false, "").Load("", "", buffer.Pos{})
 	m.editorStatus = ""
+	m.extConflict = ""
 	m.sidebar.SetDirty("")
 }
 

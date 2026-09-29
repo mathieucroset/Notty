@@ -23,6 +23,7 @@ const (
 	opDeleteForever
 	opEmptyTrash
 	opCleanAttachments
+	opExternalChange
 )
 
 // pendingOp is what to do once a dialog is confirmed, with the data the
@@ -69,6 +70,8 @@ func (m *Model) runPending(op pendingOp, res dialog.ResultMsg) tea.Cmd {
 		return emptyTrashCmd(v)
 	case opCleanAttachments:
 		return deleteFilesCmd(v, op.files)
+	case opExternalChange:
+		return m.resolveExternalChange(op.path, res.Choice)
 	}
 	return nil
 }

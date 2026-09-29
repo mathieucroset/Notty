@@ -97,7 +97,7 @@ func goneCmd(v *vault.Vault, paths []string) tea.Cmd {
 func (m *Model) handlePathsGone(msg pathsGoneMsg) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(msg.paths))
 	for _, p := range msg.paths {
-		cmds = append(cmds, m.pathRemoved(p))
+		cmds = append(cmds, m.pathRemoved(p, true))
 	}
 	return tea.Batch(cmds...)
 }

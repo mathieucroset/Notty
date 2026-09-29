@@ -303,7 +303,7 @@ func (m *Model) handleFileOp(msg fileOpMsg) tea.Cmd {
 		m.pendingSelect = msg.path
 		cmds = append(cmds, m.pathRenamed(msg.old, msg.path))
 	case opTrash:
-		cmds = append(cmds, m.pathRemoved(msg.old), loadTrashCmd(m.opts.Vault),
+		cmds = append(cmds, m.pathRemoved(msg.old, false), loadTrashCmd(m.opts.Vault),
 			m.pushToast(msgs.ToastInfo, fmt.Sprintf("Moved '%s' to trash", displayName(msg.old))))
 	}
 	m.refreshIndexViews()
@@ -334,18 +334,23 @@ func (m *Model) pathRenamed(oldPath, newPath string) tea.Cmd {
 }
 
 // pathRemoved forgets p (and everything under it) in the pins, the local
-// state and the open note.
-func (m *Model) pathRemoved(p string) tea.Cmd {
+// state and the open note. With keepDirty (a deletion made outside the
+// app) an open note with unsaved edits stays open, so saving recreates it.
+func (m *Model) pathRemoved(p string, keepDirty bool) tea.Cmd {
 	m.opts.Pins.Remove(p)
 	m.sidebar.SetPins(m.opts.Pins.Pins)
 	m.opts.Local.Remove(p)
 	m.sidebar.SetExpanded(m.opts.Local.Expanded)
-	// TODO(editor pass): keep a dirty buffer open (and offer to save it)
-	// when its file is deleted outside the app.
+	var warn tea.Cmd
 	if m.note.path != "" && isUnder(m.note.path, p) {
-		m.closeNote()
+		if keepDirty && m.editor.Dirty() {
+			warn = m.pushToast(msgs.ToastWarn,
+				fmt.Sprintf("'%s' was deleted on disk; save to recreate it", displayName(m.note.path)))
+		} else {
+			m.closeNote()
+		}
 	}
-	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd())
+	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd(), warn)
 }
 
 // editorCommand builds the $EDITOR command for the file at abs.

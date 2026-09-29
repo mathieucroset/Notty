@@ -162,6 +162,9 @@ type Model struct {
 	// editorStatus is the editor's last message (unknown command, search
 	// wrapped), shown in the status row until the next key.
 	editorStatus string
+	// extConflict is the open note while the "changed on disk" dialog
+	// waits for an answer; its saves are held until then.
+	extConflict string
 
 	// deferred are commands produced by helpers that cannot return one
 	// (a resize, a theme change); Update batches them with its result.
@@ -435,6 +438,7 @@ func (m *Model) showNote(p, content string, line int) tea.Cmd {
 	}
 	m.editor = m.editor.SetReadOnly(m.isConflicted(p), "").Load(p, content, cur)
 	m.editorStatus = ""
+	m.extConflict = ""
 	m.note = note{
 		path:  p,
 		title: vault.Title(content, p),
