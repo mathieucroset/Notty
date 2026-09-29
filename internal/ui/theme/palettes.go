@@ -50,7 +50,10 @@ var names = []string{
 	"nord",
 }
 
-var palettes = map[string]Palette{
+// palettes holds each theme's canonical colours, as published by its
+// authors. legiblePalettes then nudges the few tokens that are too faint on
+// their backgrounds (see contrast.go), so every theme stays readable.
+var palettes = legiblePalettes(map[string]Palette{
 	// Catppuccin Mocha — https://catppuccin.com/palette (Mocha)
 	"catppuccin-mocha": {
 		Name:    "catppuccin-mocha",
@@ -225,7 +228,7 @@ var palettes = map[string]Palette{
 			hex("#b48ead"), // nord15, purple
 		},
 	},
-}
+})
 
 // Names returns the available palette names in a stable, deliberate order.
 func Names() []string {

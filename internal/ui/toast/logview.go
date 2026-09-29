@@ -58,13 +58,14 @@ func (v *LogView) SetSize(width, height int) {
 }
 
 func levelGlyph(level msgs.ToastLevel, styles theme.Styles) (string, lipgloss.Style) {
+	glyph := icon(styles.Icons, level)
 	switch level {
 	case msgs.ToastWarn:
-		return "⚠", styles.Warning
+		return glyph, styles.Warning
 	case msgs.ToastError:
-		return "✗", styles.Error
+		return glyph, styles.Error
 	default:
-		return "ℹ", styles.Muted
+		return glyph, styles.Muted
 	}
 }
 

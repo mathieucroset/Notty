@@ -31,6 +31,9 @@ type doc struct {
 	pathIdx  []int      // per image: index into paths, or -1
 	tasks    []tasks.Task
 	taskRows []int // layout row of each task's marker, -1 when unknown
+	// boxes are the open and done checkbox glyphs Glamour drew, which
+	// mark the rows that show a task.
+	boxes [2]string
 }
 
 // docLine is one layout row: a Glamour line, a blank separator, or one row
@@ -137,7 +140,7 @@ func (d *doc) mapTasks() {
 		}
 		sr := rows[si]
 		if sr == nil {
-			sr = newSegRows(d.blocks[si].text)
+			sr = newSegRows(d.blocks[si].text, d.boxes)
 			rows[si] = sr
 		}
 		row := sr.find(taskNeedle(t.Text))
@@ -160,13 +163,24 @@ type segRows struct {
 	next int
 }
 
-func newSegRows(lines []string) *segRows {
+func newSegRows(lines []string, boxes [2]string) *segRows {
 	sr := &segRows{norm: make([]string, len(lines)), box: make([]bool, len(lines))}
 	for i, l := range lines {
 		sr.norm[i] = normalize(l)
-		sr.box[i] = strings.ContainsAny(sr.norm[i], "☐☑")
+		sr.box[i] = hasBox(sr.norm[i], boxes)
 	}
 	return sr
+}
+
+// hasBox reports whether the normalized row shows one of the checkbox
+// glyphs.
+func hasBox(row string, boxes [2]string) bool {
+	for _, b := range boxes {
+		if b != "" && strings.Contains(row, b) {
+			return true
+		}
+	}
+	return false
 }
 
 // find returns the row of the next task, whose text starts with needle:

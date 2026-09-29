@@ -287,8 +287,8 @@ func TestSectionsAndEntries(t *testing.T) {
 		wantContains    []string
 		wantNotContains []string
 	}{
-		{"minimal", nil, nil, 0, []string{"NOTES", "Tasks (2)", "Trash (5)"}, []string{"PINNED", "TAGS", "Conflicts"}},
-		{"everything", []string{"readme.md"}, []msgs.TagCount{{Tag: "design", Count: 3}}, 2, []string{"PINNED", "NOTES", "TAGS", "#design 3", "⚠ Conflicts (2)"}, nil},
+		{"minimal", nil, nil, 0, []string{"N O T E S", "Tasks (2)", "Trash (5)"}, []string{"P I N N E D", "T A G S", "Conflicts"}},
+		{"everything", []string{"readme.md"}, []msgs.TagCount{{Tag: "design", Count: 3}}, 2, []string{"P I N N E D", "N O T E S", "T A G S", "#design 3", "⚠ Conflicts (2)"}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -482,7 +482,7 @@ func TestScrollKeepsCursorVisible(t *testing.T) {
 		t.Errorf("bottom entry not visible after scrolling:\n%s", ansi.Strip(m.View()))
 	}
 	m, _ = send(m, "g")
-	if !strings.Contains(ansi.Strip(m.View()), "NOTES") {
+	if !strings.Contains(ansi.Strip(m.View()), "N O T E S") {
 		t.Errorf("header not visible after g:\n%s", ansi.Strip(m.View()))
 	}
 }
@@ -530,10 +530,10 @@ func TestRenderSnapshot(t *testing.T) {
 	m.SetFocused(true)
 
 	want := strings.Join([]string{
-		"  PINNED                    ",
+		"  P I N N E D               ",
 		"  ★ Standup notes ●         ",
 		"                            ",
-		"  NOTES                     ",
+		"  N O T E S                 ",
 		"  ▸ Personal                ",
 		"  ▾ Work                    ",
 		"    ▸ Sub                   ",
@@ -542,7 +542,7 @@ func TestRenderSnapshot(t *testing.T) {
 		"  · diagram.png             ",
 		"  • readme                  ",
 		"                            ",
-		"  TAGS                      ",
+		"  T A G S                   ",
 		"   #design 3   #todo 7      ",
 		"   #work/client 12          ",
 		"                            ",

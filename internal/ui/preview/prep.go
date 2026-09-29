@@ -32,7 +32,7 @@ var (
 
 // prepareText turns a text segment into the markdown handed to Glamour:
 //   - its inline images (imgs, from the follow-up image block) become
-//     chips "🖼 alt" in a code span, since the image itself renders right
+//     chips "<icon> alt" in a code span, since the image itself renders right
 //     after the paragraph (spec §6.1);
 //   - note-relative link targets are rewritten to vault-root form
 //     ("/dir/file.md"), which is how Glamour prints every relative URL;
@@ -41,7 +41,7 @@ var (
 //     another segment;
 //   - carriage returns are dropped and tabs expanded to 4-column stops,
 //     so no control character reaches the frame.
-func prepareText(seg Segment, imgs []links.ImageLink, notePath string, defs []refDef) string {
+func prepareText(seg Segment, imgs []links.ImageLink, notePath string, defs []refDef, icon string) string {
 	byLine := map[int][]links.ImageLink{}
 	for _, im := range imgs {
 		byLine[im.Line] = append(byLine[im.Line], im)
@@ -57,7 +57,7 @@ func prepareText(seg Segment, imgs []links.ImageLink, notePath string, defs []re
 				inFence = false
 			}
 		} else if !inFence {
-			line = chipImages(line, byLine[seg.StartLine+i])
+			line = chipImages(line, byLine[seg.StartLine+i], icon)
 			line = rewriteLinks(line, notePath)
 		}
 		lines[i] = expandTabs(strings.ReplaceAll(line, "\r", ""))
@@ -79,8 +79,8 @@ func prepareText(seg Segment, imgs []links.ImageLink, notePath string, defs []re
 	return md
 }
 
-// chipImages replaces the image links of one line with chips.
-func chipImages(line string, imgs []links.ImageLink) string {
+// chipImages replaces the image links of one line with chips led by icon.
+func chipImages(line string, imgs []links.ImageLink, icon string) string {
 	if len(imgs) == 0 {
 		return line
 	}
@@ -93,7 +93,7 @@ func chipImages(line string, imgs []links.ImageLink) string {
 		if label == "" {
 			label = imageName(im.Target)
 		}
-		line = line[:im.Start] + "`🖼 " + label + "`" + line[im.End:]
+		line = line[:im.Start] + "`" + icon + " " + label + "`" + line[im.End:]
 	}
 	return line
 }

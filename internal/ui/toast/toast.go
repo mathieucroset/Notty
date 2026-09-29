@@ -11,7 +11,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/textutil"
 	"github.com/mathieucroset/notty/internal/ui/theme"
@@ -150,14 +152,15 @@ func (m Model) errorCount() int {
 	return n
 }
 
-func icon(level msgs.ToastLevel) string {
+// icon is the glyph set's symbol for level.
+func icon(set icons.Set, level msgs.ToastLevel) string {
 	switch level {
 	case msgs.ToastWarn:
-		return "⚠"
+		return set.Warn
 	case msgs.ToastError:
-		return "✗"
+		return set.Error
 	default:
-		return "ℹ"
+		return set.Info
 	}
 }
 
@@ -197,20 +200,22 @@ func (m Model) renderToast(t toastItem, outerWidth int) string {
 	style := m.styleFor(t.level).Border(lipgloss.RoundedBorder())
 
 	// outerWidth includes a 1-cell border and Padding(0, 1) on each side.
+	glyph := icon(m.styles.Icons, t.level) + " "
+	indent := strings.Repeat(" ", ansi.StringWidth(glyph))
 	contentWidth := max(outerWidth-4, 1)
-	textWidth := max(contentWidth-2, 1) // icon + space
+	textWidth := max(contentWidth-len(indent), 1)
 
 	wrapped := textutil.Wrap(t.text, textWidth)
 	for i, l := range wrapped {
-		prefix := "  "
+		prefix := indent
 		if i == 0 {
-			prefix = icon(t.level) + " "
+			prefix = glyph
 		}
 		wrapped[i] = textutil.PadLine(prefix+l, contentWidth)
 	}
 	if t.level == msgs.ToastError {
 		// Errors never expire: say how to get rid of them.
-		wrapped = append(wrapped, textutil.PadLine("  "+dismissHint, contentWidth))
+		wrapped = append(wrapped, textutil.PadLine(indent+dismissHint, contentWidth))
 	}
 
 	return style.Width(outerWidth).Render(strings.Join(wrapped, "\n"))

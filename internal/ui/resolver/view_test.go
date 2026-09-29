@@ -58,7 +58,7 @@ func TestViewContent120(t *testing.T) {
 	m := newModel(t, 120, 40, allKinds()...)
 	v := plain(m)
 	for _, want := range []string{
-		"Resolve conflicts", "1 of 6 files resolved", "Files",
+		"╭─ Conflicts ─", "1 of 6 resolved", "╭─ notes/meeting.md ─",
 		"notes/meeting.md", "✓", "●", "Yours", "Theirs", "Result",
 		"]c/[c", "esc close",
 	} {
@@ -73,17 +73,19 @@ func TestViewContent120(t *testing.T) {
 
 func TestNarrowTabCycling(t *testing.T) {
 	m := newModel(t, 80, 24, textFile("n.md", base1, ours1, theirs1))
+	// The right pane's column title row: top border, file header, then
+	// the column title, after the file list pane.
 	title := func(m Model) string {
 		rows := strings.Split(plain(m), "\n")
-		return rows[2] // title, file header, column title
+		return strings.SplitN(rows[2], "││", 2)[1]
 	}
 	shown := func(m Model) string {
-		return strings.Fields(strings.SplitN(title(m), "│", 2)[1])[0]
+		return strings.Fields(title(m))[0]
 	}
 	if got := shown(m); got != "Result" {
 		t.Fatalf("narrow view starts on %q, want Result", got)
 	}
-	if strings.Count(title(m), "│") != 1 {
+	if strings.Count(title(m), "│") != 1 { // only the pane's right border
 		t.Fatalf("narrow view shows more than one column: %q", title(m))
 	}
 	for _, s := range []struct{ col, line string }{{"Yours", "X"}, {"Theirs", "Y"}, {"Result", unresolvedPlaceholder}} {

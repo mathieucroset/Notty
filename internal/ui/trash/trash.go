@@ -20,6 +20,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/vault"
@@ -234,6 +235,7 @@ func (m Model) refreshPreview() Model {
 	if previewW <= 0 {
 		return m
 	}
+	previewW = previewTextWidth(previewW)
 	key := previewCacheKey{id: m.previewID, width: previewW, palette: m.palette.Name}
 	if m.previewCacheValid && m.previewCacheKey == key {
 		return m
@@ -241,7 +243,7 @@ func (m Model) refreshPreview() Model {
 	if m.onRender != nil {
 		m.onRender()
 	}
-	out, err := renderMarkdown(m.previewContent, m.palette, previewW)
+	out, err := renderMarkdown(m.previewContent, m.palette, m.styles.Icons, previewW)
 	if err != nil {
 		out = m.previewContent
 	}
@@ -284,7 +286,9 @@ func (m Model) View() string {
 	if previewW == 0 {
 		return strings.Join(listLines, "\n")
 	}
-	previewLines := fitBlock(m.renderPreview(previewW), previewW, m.height)
+	textW := previewTextWidth(previewW)
+	previewLines := fitBlock(m.renderPreview(textW), textW, m.height)
+	padR := strings.Repeat(" ", max(previewW-textW-1, 0))
 
 	sep := m.styles.Muted.Render("│")
 	rows := make([]string, m.height)
@@ -293,11 +297,15 @@ func (m Model) View() string {
 		if sepW > 0 {
 			row += sep
 		}
-		row += previewLines[i]
+		row += " " + previewLines[i] + padR
 		rows[i] = row
 	}
 	return strings.Join(rows, "\n")
 }
+
+// previewTextWidth is the preview's text width in a column previewW wide:
+// one column of padding on each side, like every pane.
+func previewTextWidth(previewW int) int { return max(previewW-2, 1) }
 
 // split divides width into the list, separator, and preview column widths.
 // The preview column is dropped (previewW == 0, sepW == 0) when there is not
@@ -389,12 +397,12 @@ func (m Model) renderPreview(w int) string {
 
 // renderMarkdown renders content as Glamour-styled markdown at width w using
 // p's tokens.
-func renderMarkdown(content string, p theme.Palette, w int) (string, error) {
+func renderMarkdown(content string, p theme.Palette, set icons.Set, w int) (string, error) {
 	if w < 1 {
 		w = 1
 	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStyles(theme.GlamourStyle(p)),
+		glamour.WithStyles(theme.GlamourStyle(p, set)),
 		glamour.WithWordWrap(w),
 	)
 	if err != nil {

@@ -53,6 +53,53 @@ func TestDefault(t *testing.T) {
 	if c.Images.MaxImportMB != 5 {
 		t.Errorf("Images.MaxImportMB = %d, want 5", c.Images.MaxImportMB)
 	}
+	if c.Icons != "unicode" {
+		t.Errorf("Icons = %q, want unicode", c.Icons)
+	}
+}
+
+func TestLoadIcons(t *testing.T) {
+	tests := []struct {
+		name    string
+		local   string
+		vault   string
+		want    string
+		wantErr bool
+	}{
+		{name: "default", want: "unicode"},
+		{name: "nerd", local: `icons = "nerd"`, want: "nerd"},
+		{name: "ascii from the vault", vault: `icons = "ascii"`, want: "ascii"},
+		{name: "local wins over the vault", local: `icons = "unicode"`, vault: `icons = "nerd"`, want: "unicode"},
+		{name: "unknown set", local: `icons = "emoji"`, wantErr: true},
+		{name: "empty", local: `icons = ""`, wantErr: true},
+		{name: "unknown set in the vault", vault: `icons = "Nerd"`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			local := filepath.Join(dir, "config.toml")
+			vaultRoot := filepath.Join(dir, "vault")
+			if tt.local != "" {
+				writeFile(t, local, tt.local+"\n")
+			}
+			if tt.vault != "" {
+				writeFile(t, filepath.Join(vaultRoot, ".notty", "settings.toml"), tt.vault+"\n")
+			}
+			c, err := Load(local, vaultRoot)
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "icons") {
+					t.Fatalf("Load error = %v, want one about icons", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if c.Icons != tt.want {
+				t.Errorf("Icons = %q, want %q", c.Icons, tt.want)
+			}
+		})
+	}
 }
 
 func writeFile(t *testing.T, path, contents string) {
@@ -272,6 +319,20 @@ func TestSetKey(t *testing.T) {
 		}
 		if c.Theme != "dracula" {
 			t.Errorf("Theme = %q, want dracula", c.Theme)
+		}
+	})
+
+	t.Run("icons key", func(t *testing.T) {
+		local := filepath.Join(t.TempDir(), "config.toml")
+		if err := SetKey(local, "icons", "nerd"); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		c, err := Load(local, "")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if c.Icons != "nerd" {
+			t.Errorf("Icons = %q, want nerd", c.Icons)
 		}
 	})
 

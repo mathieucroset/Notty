@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mathieucroset/notty/internal/imgrender"
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -97,7 +98,7 @@ func TestPiecesRenderLikeTheWholeBlock(t *testing.T) {
 			if got := len(m.doc.segs) > 1; got != c.cut {
 				t.Fatalf("cut = %v (%d segments), want %v", got, len(m.doc.segs), c.cut)
 			}
-			tr, err := glamour.NewTermRenderer(glamour.WithStyles(theme.GlamourStyle(m.palette)), glamour.WithWordWrap(contentWidth(m.width)))
+			tr, err := glamour.NewTermRenderer(glamour.WithStyles(theme.GlamourStyle(m.palette, icons.Default())), glamour.WithWordWrap(contentWidth(m.width)))
 			if err != nil {
 				t.Fatal(err)
 			}

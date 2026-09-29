@@ -29,7 +29,7 @@ func TestWatcherExternalEditRefreshes(t *testing.T) {
 	t.Cleanup(func() { _ = w.Close() })
 	opts.Watcher = w
 	tm := teatest.NewTestModel(t, New(opts), teatest.WithInitialTermSize(120, 30))
-	waitScreen(t, tm, "NOTES", "ideas")
+	waitScreen(t, tm, "N O T E S", "ideas")
 
 	writeFile(t, opts.Vault, "ideas.md", "# Ideas\n\nnow tagged #fresh\n")
 	writeFile(t, opts.Vault, "Later.md", "# Later\n")

@@ -143,7 +143,7 @@ func (m Model) mutateChoice(f func(c *choiceState)) Model {
 // scrollChoice scrolls a modify/delete file's content.
 func (m Model) scrollChoice(d int) Model {
 	it := m.current()
-	_, _, w := m.split()
+	_, w := m.split()
 	_, h := m.choiceLayout(it.choice, it.file, w, m.contentHeight())
 	return m.mutateChoice(func(c *choiceState) {
 		c.scroll = clampScroll(c.scroll+d, len(c.content), h)

@@ -137,13 +137,13 @@ func (m Model) runView(w int) string {
 		var marker, text string
 		switch {
 		case i == m.run.failed:
-			marker, text = m.styles.Error.Render("✗"), m.styles.Error.Render(s.Desc)
+			marker, text = m.styles.Error.Render(m.styles.Icons.Error), m.styles.Error.Render(s.Desc)
 		case i < m.run.current || m.run.phase == phaseDone:
-			marker, text = m.styles.Success.Render("✓"), m.styles.StatusText.Render(s.Desc)
+			marker, text = m.styles.Success.Render(m.styles.Icons.Check), m.styles.StatusText.Render(s.Desc)
 		case i == m.run.current && m.run.phase == phaseRunning:
 			marker, text = m.spinner.View(), m.styles.Accent.Render(s.Desc)
 		default:
-			marker, text = m.styles.Muted.Render("○"), m.styles.Muted.Render(s.Desc)
+			marker, text = m.styles.Muted.Render(m.styles.Icons.Pending), m.styles.Muted.Render(s.Desc)
 		}
 		lines = append(lines, marker+" "+ansi.Truncate(text, max(1, w-2), "…"))
 	}
@@ -254,9 +254,9 @@ func (m Model) syncView(w int) string {
 		case !m.choiceEnabled(c):
 			line = "  " + m.styles.Muted.Render(label)
 		case selected && m.sub == subList:
-			line = m.styles.Accent.Render("❯ ") + m.styles.Accent.Bold(true).Render(label)
+			line = m.styles.Accent.Render("› ") + m.styles.Accent.Bold(true).Render(label)
 		case selected:
-			line = m.styles.Accent.Render("❯ ") + m.styles.StatusText.Render(label)
+			line = m.styles.Accent.Render("› ") + m.styles.StatusText.Render(label)
 		default:
 			line = "  " + m.styles.StatusText.Render(label)
 		}

@@ -8,18 +8,17 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/textutil"
 )
 
 // Layout constants.
 const (
-	listWidth      = 28  // file list width on wide terminals
-	narrowBelow    = 100 // below this width only one text column is shown
-	minSplitWidth  = 40  // below this width the file list is hidden
-	previewGap     = 2   // columns between the two binary previews
-	tabWidth       = 4   // spaces a tab is shown as
-	resolvedMarker = "✓"
-	pendingMarker  = "●"
+	listWidth     = 28  // file list width on wide terminals
+	narrowBelow   = 100 // below this width only one text column is shown
+	minSplitWidth = 40  // below this width the file list is hidden
+	previewGap    = 2   // columns between the two binary previews
+	tabWidth      = 4   // spaces a tab is shown as
 )
 
 var columnTitles = [...]string{"Yours", "Theirs", "Result"}
@@ -33,25 +32,45 @@ const (
 	footerEdit     = "ctrl+s accept · esc done (keeps the edits)"
 )
 
-// split returns the widths of the file list, the separator and the right
-// pane.
-func (m Model) split() (listW, sepW, rightW int) {
+// panes returns the outer widths of the file list pane (0 when it is
+// hidden) and of the right pane. They sit side by side, like the main
+// screen's panes.
+func (m Model) panes() (listW, rightW int) {
 	switch {
 	case m.w < minSplitWidth:
-		return 0, 0, m.w
+		return 0, m.w
 	case m.w < narrowBelow:
 		listW = min(listWidth, max(16, m.w/4))
 	default:
 		listW = listWidth
 	}
-	return listW, 1, m.w - listW - 1
+	return listW, m.w - listW
+}
+
+// split returns the text widths inside the file list pane (0 when it is
+// hidden) and the right pane: each pane less its two borders.
+func (m Model) split() (listW, rightW int) {
+	lw, rw := m.panes()
+	if lw > 0 {
+		lw -= 2
+	}
+	return lw, max(0, rw-2)
+}
+
+// rightX is the screen column of the right pane's first text cell.
+func (m Model) rightX() int {
+	lw, _ := m.panes()
+	return lw + 1
 }
 
 // isNarrow reports whether text files show a single column.
 func (m Model) isNarrow() bool { return m.w < narrowBelow }
 
-// bodyHeight is the height below the title row and above the footer.
-func (m Model) bodyHeight() int { return max(0, m.h-2) }
+// paneHeight is the panes' height: the screen above the footer.
+func (m Model) paneHeight() int { return max(0, m.h-1) }
+
+// bodyHeight is the height inside the panes, between their borders.
+func (m Model) bodyHeight() int { return max(0, m.paneHeight()-2) }
 
 // contentHeight is the right pane's height below the file header and above
 // the message line.
@@ -61,30 +80,49 @@ func (m Model) contentHeight() int { return max(0, m.bodyHeight()-2) }
 // titles).
 func (m Model) columnHeight() int { return max(0, m.contentHeight()-1) }
 
-// View renders the resolver at exactly the configured size.
+// View renders the resolver at exactly the configured size: the file list
+// and the selected file in rounded panes, like the main screen's (spec
+// §4.1), over a one-line key hint.
 func (m Model) View() string {
 	if m.w <= 0 || m.h <= 0 {
 		return ""
 	}
-	rows := []string{textutil.PadLine(m.title(), m.w)}
-	if m.h >= 3 {
-		rows = append(rows, m.body()...)
+	var rows []string
+	if ph := m.paneHeight(); ph > 0 {
+		rows = textutil.FitBlock(strings.Split(m.renderPanes(ph), "\n"), m.w, ph)
 	}
-	if m.h >= 2 {
-		rows = append(rows, textutil.PadLine(m.styles.Muted.Render(m.footer()), m.w))
-	}
+	footer := ansi.Truncate(m.footer(), max(0, m.w-2), "…")
+	rows = append(rows, textutil.PadLine(" "+m.styles.Muted.Render(footer), m.w))
 	return strings.Join(rows, "\n")
 }
 
-func (m Model) title() string {
+// renderPanes draws the panes h rows high: the file list, titled with the
+// resolved count, and the focused file pane, titled with its path.
+func (m Model) renderPanes(h int) string {
+	bodyH := max(0, h-2)
+	listW, rightW := m.panes()
+	title := ""
+	if it := m.current(); it != nil {
+		title = sanitize(it.file.Path)
+	}
+	right := m.styles.Pane(title, "", strings.Join(m.rightPane(max(0, rightW-2), bodyH), "\n"), rightW, h, true)
+	if listW == 0 {
+		return right
+	}
+	list := m.styles.Pane("Conflicts", "", strings.Join(m.fileList(listW-2, bodyH), "\n"), listW, h, false)
+	return lipgloss.JoinHorizontal(lipgloss.Top, list, right)
+}
+
+// resolvedSummary is the file list's first row, like "1 of 6 resolved",
+// short enough for the narrowest list.
+func (m Model) resolvedSummary() string {
 	done := 0
 	for _, it := range m.items {
 		if it.file.Resolved {
 			done++
 		}
 	}
-	return m.styles.DialogTitle.Render("Resolve conflicts") +
-		m.styles.Muted.Render(fmt.Sprintf("  %d of %d files resolved", done, len(m.items)))
+	return fmt.Sprintf("%d of %d resolved", done, len(m.items))
 }
 
 func (m Model) footer() string {
@@ -102,33 +140,17 @@ func (m Model) footer() string {
 	return fmt.Sprintf(footerChoice, len(it.choice.options))
 }
 
-func (m Model) body() []string {
-	h := m.bodyHeight()
-	listW, sepW, rightW := m.split()
-	right := textutil.FitBlock(m.rightPane(rightW, h), rightW, h)
-	if listW == 0 {
-		return right
-	}
-	list := textutil.FitBlock(m.fileList(listW, h), listW, h)
-	sep := m.styles.Muted.Render(strings.Repeat("│", sepW))
-	out := make([]string, h)
-	for i := range h {
-		out[i] = list[i] + sep + right[i]
-	}
-	return out
-}
-
 // kindIcon is the file list's icon for a file kind.
-func kindIcon(k FileKind) string {
+func kindIcon(set icons.Set, k FileKind) string {
 	switch k {
 	case Binary:
-		return "◆"
+		return set.KindBinary
 	case ModifyDelete:
-		return "±"
+		return set.KindModifyDelete
 	case PathConflict:
-		return "⇄"
+		return set.KindPath
 	}
-	return "≡"
+	return set.KindText
 }
 
 // fileList renders the file list, keeping the selection in view.
@@ -139,24 +161,24 @@ func (m Model) fileList(w, h int) []string {
 	selStyle := m.styles.SidebarSelectedFocused
 	var entries []entry
 	for i, it := range m.items {
-		mark := m.styles.Warning.Render(pendingMarker)
+		mark := m.styles.Warning.Render(m.styles.Icons.Dirty)
 		if it.file.Resolved {
-			mark = m.styles.Success.Render(resolvedMarker)
+			mark = m.styles.Success.Render(m.styles.Icons.Check)
 		}
 		name := truncateLeft(it.file.Path, max(1, w-6))
-		row := " " + mark + " " + kindIcon(it.file.Kind) + " "
+		row := " " + mark + " " + kindIcon(m.styles.Icons, it.file.Kind) + " "
 		if i == m.sel {
-			row = selStyle.Render(" ") + mark + selStyle.Render(" "+kindIcon(it.file.Kind)+" "+textutil.PadLine(name, max(0, w-5)))
+			row = selStyle.Render(" ") + mark + selStyle.Render(" "+kindIcon(m.styles.Icons, it.file.Kind)+" "+textutil.PadLine(name, max(0, w-5)))
 		} else {
 			row += name
 		}
 		e := entry{rows: []string{row}}
 		if it.err != "" {
-			e.rows = append(e.rows, m.styles.Error.Render("   ✗ "+sanitize(it.err)))
+			e.rows = append(e.rows, m.styles.Error.Render("   "+m.styles.Icons.Error+" "+sanitize(it.err)))
 		}
 		entries = append(entries, e)
 	}
-	out := []string{m.styles.SidebarSection.Render(" Files")}
+	out := []string{m.styles.Muted.Render(" " + m.resolvedSummary())}
 	// Window the entries so the selected one is visible.
 	avail := h - 1
 	start, used := 0, 0
@@ -219,7 +241,7 @@ func (m Model) rightPane(w, h int) []string {
 	var content []string
 	switch {
 	case it.file.Resolved:
-		content = []string{"", m.styles.Success.Render(" " + resolvedMarker + " This file is resolved.")}
+		content = []string{"", m.styles.Success.Render(" " + m.styles.Icons.Check + " This file is resolved.")}
 	case m.editing:
 		content = append([]string{m.styles.Muted.Render(" " + editNote)}, strings.Split(m.ed.View(), "\n")...)
 	case it.text != nil:
@@ -235,9 +257,10 @@ func (m Model) rightPane(w, h int) []string {
 	return rows
 }
 
-// fileHeader is the right pane's first row.
+// fileHeader is the right pane's first row: the file's state (its path is
+// the pane's title).
 func (m Model) fileHeader(it *item) string {
-	s := m.styles.PaneTitleFocused.Render(" "+sanitize(it.file.Path)) + "  "
+	s := " "
 	switch {
 	case it.file.Resolved:
 		return s + m.styles.Success.Render("resolved")
@@ -280,7 +303,7 @@ func (m Model) messageLine(it *item) string {
 		}
 		return m.styles.Muted.Render(" " + m.status)
 	case it.err != "":
-		return m.styles.Error.Render(" ✗ " + sanitize(it.err))
+		return m.styles.Error.Render(" " + m.styles.Icons.Error + " " + sanitize(it.err))
 	case it.pending:
 		return m.styles.Muted.Render(" Saving…")
 	case m.hint != "":

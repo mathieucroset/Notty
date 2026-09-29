@@ -137,7 +137,7 @@ func TestDialogOverlayGetsKeys(t *testing.T) {
 		t.Errorf("keyContext = %v, want Overlay", got)
 	}
 	s := screen(m)
-	if !strings.Contains(s, "Test dialog") || !strings.Contains(s, "NOTES") {
+	if !strings.Contains(s, "Test dialog") || !strings.Contains(s, "N O T E S") {
 		t.Errorf("dialog not drawn over the screen:\n%s", s)
 	}
 	assertSize(t, m, 120, 30)

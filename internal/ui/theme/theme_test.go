@@ -7,7 +7,92 @@ import (
 
 	"charm.land/glamour/v2"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/mathieucroset/notty/internal/ui/icons"
 )
+
+func TestSectionTitle(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"notes", "N O T E S"},
+		{"PINNED", "P I N N E D"},
+		{"Due soon", "D U E   S O O N"},
+		{"Editor · insert", "E D I T O R   ·   I N S E R T"},
+		{"  Tags  ", "T A G S"},
+		{"Rosé", "R O S É"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := SectionTitle(tt.in); got != tt.want {
+			t.Errorf("SectionTitle(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestSectionStyle(t *testing.T) {
+	p, _ := Get("catppuccin-mocha")
+	st := NewStyles(p)
+	if st.Section.GetForeground() != p.Subtext || !st.Section.GetBold() {
+		t.Errorf("Section is not Subtext bold: fg %v bold %v", st.Section.GetForeground(), st.Section.GetBold())
+	}
+}
+
+func TestStylesCarryIcons(t *testing.T) {
+	p, _ := Get("nord")
+	tests := []struct {
+		name string
+		st   Styles
+		want string
+	}{
+		{"default is unicode", NewStyles(p), "unicode"},
+		{"WithIcons replaces the set", NewStyles(p).WithIcons(mustIcons(t, "nerd")), "nerd"},
+		{"WithIcons keeps the colours", NewStyles(p).WithIcons(mustIcons(t, "ascii")), "ascii"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.st.Icons.Name != tt.want {
+				t.Errorf("Icons = %q, want %q", tt.st.Icons.Name, tt.want)
+			}
+			if got, want := tt.st.Accent.GetForeground(), NewStyles(p).Accent.GetForeground(); got != want {
+				t.Errorf("accent changed: %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestGlamourStyleTaskGlyphs checks the preview's checkboxes come from the
+// icon set, like the editor's.
+func TestGlamourStyleTaskGlyphs(t *testing.T) {
+	p, _ := Get("catppuccin-mocha")
+	for _, name := range icons.Names() {
+		t.Run(name, func(t *testing.T) {
+			set := mustIcons(t, name)
+			r, err := glamour.NewTermRenderer(glamour.WithStyles(GlamourStyle(p, set)), glamour.WithWordWrap(60))
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := r.Render("- [ ] open\n- [x] done\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = ansi.Strip(out)
+			for _, want := range []string{set.TaskOpen + " open", set.TaskDone + " done"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("render lacks %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
+func mustIcons(t *testing.T, name string) icons.Set {
+	t.Helper()
+	s, ok := icons.Get(name)
+	if !ok {
+		t.Fatalf("icons.Get(%q) failed", name)
+	}
+	return s
+}
 
 // wantModes is the fixed set of status-bar modes every palette's Styles must
 // provide a pill style for.
@@ -135,7 +220,7 @@ func TestChromaStyleDoesNotLeakAcrossPalettes(t *testing.T) {
 			t.Fatalf("Get(%q) failed", name)
 		}
 		r, err := glamour.NewTermRenderer(
-			glamour.WithStyles(GlamourStyle(p)),
+			glamour.WithStyles(GlamourStyle(p, icons.Default())),
 			glamour.WithWordWrap(60),
 		)
 		if err != nil {
@@ -190,7 +275,7 @@ func TestGlamourStyleRenders(t *testing.T) {
 	for _, name := range Names() {
 		p, _ := Get(name)
 		r, err := glamour.NewTermRenderer(
-			glamour.WithStyles(GlamourStyle(p)),
+			glamour.WithStyles(GlamourStyle(p, icons.Default())),
 			glamour.WithWordWrap(60),
 		)
 		if err != nil {

@@ -151,7 +151,7 @@ func (m *Model) applyTheme(name string) {
 	if !ok {
 		return
 	}
-	st := theme.NewStyles(p)
+	st := theme.NewStyles(p).WithIcons(m.opts.Styles.Icons)
 	m.opts.Palette, m.opts.Styles = p, st
 	m.sidebar.SetStyles(st)
 	m.status = statusbar.New(st)

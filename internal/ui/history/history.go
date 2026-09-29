@@ -3,8 +3,8 @@
 // against the current buffer, and a way to restore an old version (spec
 // §4.4, §8 "History").
 //
-// The History view owns the whole screen; unlike the pane-embedded views, it
-// draws its own header and footer. It never touches the vault or git
+// The History view owns the whole screen: it draws its own rounded panes,
+// like the main screen's, and its key hint below them. It never touches the vault or git
 // itself: loading a revision and restoring it are both requested as
 // messages for the app to perform.
 package history
@@ -20,6 +20,7 @@ import (
 
 	"github.com/mathieucroset/notty/internal/gitsync"
 	"github.com/mathieucroset/notty/internal/merge"
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -29,6 +30,10 @@ const listRatio = 2.0 / 5.0
 
 const minListWidth = 20
 const minContentWidth = 10
+
+// fullRowWidth is the list pane width that fits a commit row with a short
+// host, borders and padding included.
+const fullRowWidth = 36
 
 // footerHint is the footer's key hint line.
 const footerHint = "tab rendered/diff · enter restore · esc close"
@@ -236,9 +241,10 @@ func (m Model) pageStep() int {
 	return 1
 }
 
+// contentHeight is the number of rows inside the panes.
 func (m Model) contentHeight() int {
-	_, _, bodyH := m.layout()
-	return bodyH
+	paneH, _ := m.layout()
+	return max(paneH-2, 0)
 }
 
 func (m Model) clampScroll(s int) int {
@@ -261,77 +267,91 @@ func (m Model) maxScroll() int {
 	return lines - bodyH
 }
 
-// layout returns the header height (0 or 1), footer height (0 or 1), and
-// the body height, which always sum to m.height.
-func (m Model) layout() (headerH, footerH, bodyH int) {
+// layout returns the height of the panes and of the key hint below them,
+// which always sum to m.height.
+func (m Model) layout() (paneH, footerH int) {
 	if m.height <= 0 {
-		return 0, 0, 0
+		return 0, 0
 	}
-	headerH = 1
-	footerH = 0
 	if m.height >= 2 {
 		footerH = 1
 	}
-	bodyH = max(m.height-headerH-footerH, 0)
-	return
+	return m.height - footerH, footerH
 }
 
-// View renders the History view at exactly the configured width and height.
+// View renders the History view at exactly the configured width and
+// height: the commit list and the selected version in rounded panes, like
+// the main screen's (spec §4.1), over a one-line key hint.
 func (m Model) View() string {
 	if m.width <= 0 || m.height <= 0 {
 		return ""
 	}
-	headerH, footerH, bodyH := m.layout()
+	paneH, footerH := m.layout()
 	var lines []string
-	if headerH > 0 {
-		title := fmt.Sprintf("History · %s", m.notePath)
-		lines = append(lines, padLine(m.styles.DialogTitle.Render(title), m.width))
-	}
-	if bodyH > 0 {
-		lines = append(lines, m.renderBody(bodyH)...)
+	if paneH > 0 {
+		lines = append(lines, fitBlock(m.renderPanes(paneH), m.width, paneH)...)
 	}
 	if footerH > 0 {
-		lines = append(lines, padLine(m.styles.Muted.Render(footerHint), m.width))
+		lines = append(lines, padLine(" "+m.styles.Muted.Render(footerHint), m.width))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) renderBody(bodyH int) []string {
+// renderPanes draws the panes h rows high: the focused commit list, titled
+// with the note, and the selected version, titled with its date and host.
+func (m Model) renderPanes(h int) string {
+	title := fmt.Sprintf("History · %s", m.notePath)
+	innerH := max(h-2, 0)
 	if len(m.entries) == 0 {
-		return fitBlock(centered(m.styles.Muted.Render("No history yet"), m.width, bodyH), m.width, bodyH)
+		body := centered(m.styles.Muted.Render("No history yet"), max(m.width-2, 0), innerH)
+		return m.styles.Pane(title, "", body, m.width, h, true)
 	}
-
-	listW, sepW, contentW := split(m.width)
-	listLines := fitBlock(m.renderList(listW, bodyH), listW, bodyH)
+	listW, contentW := split(m.width)
+	list := m.styles.Pane(title, "", m.renderList(max(listW-2, 0), innerH), listW, h, true)
 	if contentW == 0 {
-		return listLines
+		return list
 	}
-	contentLines := fitBlock(m.scrolledContent(bodyH), contentW, bodyH)
-
-	sep := m.styles.Muted.Render("│")
-	rows := make([]string, bodyH)
-	for i := 0; i < bodyH; i++ {
-		row := listLines[i]
-		if sepW > 0 {
-			row += sep
-		}
-		row += contentLines[i]
-		rows[i] = row
+	textW := m.contentWidth()
+	rows := fitBlock(m.scrolledContent(innerH), textW, innerH)
+	for i, r := range rows {
+		rows[i] = " " + r + " "
 	}
-	return rows
+	label := "rendered"
+	if m.mode == modeDiff {
+		label = "diff"
+	}
+	content := m.styles.Pane(m.versionTitle(), label, strings.Join(rows, "\n"), contentW, h, false)
+	return lipgloss.JoinHorizontal(lipgloss.Top, list, content)
 }
 
-// split divides width into the list, separator, and content column widths.
-// The content column is dropped when there isn't enough room for both.
-func split(width int) (listW, sepW, contentW int) {
+// versionTitle names the selected version: its date, and the host that
+// made it.
+func (m Model) versionTitle() string {
+	e, ok := m.selected()
+	if !ok {
+		return ""
+	}
+	t := e.Date.Format("2006-01-02 15:04")
+	if e.Host != "" {
+		t += " · " + e.Host
+	}
+	return t
+}
+
+// split divides width between the list pane and the content pane. The
+// content pane is dropped when there isn't enough room for both.
+func split(width int) (listW, contentW int) {
 	listW = int(float64(width) * listRatio)
 	if listW < 1 {
 		listW = width
 	}
-	if width-listW-1 < minContentWidth || listW < minListWidth {
-		return width, 0, 0
+	// Room for a whole row ("2006-01-02 15:04  host  +12 −3") when the
+	// content pane can spare it.
+	listW = max(listW, min(fullRowWidth, width-minContentWidth-4))
+	if width-listW-4 < minContentWidth || listW < minListWidth {
+		return width, 0
 	}
-	return listW, 1, width - listW - 1
+	return listW, width - listW
 }
 
 func (m Model) renderList(w, h int) string {
@@ -365,7 +385,7 @@ func (m Model) renderList(w, h int) string {
 		delStyle := on(m.styles.Error, selected)
 		gap := on(lipgloss.NewStyle(), selected)
 
-		row := textStyle.Render(e.Date.Format("2006-01-02 15:04"))
+		row := gap.Render(" ") + textStyle.Render(e.Date.Format("2006-01-02 15:04"))
 		if e.Host != "" {
 			row += gap.Render("  ") + mutedStyle.Render(e.Host)
 		}
@@ -432,19 +452,21 @@ func (m Model) computeContent() string {
 	if m.mode == modeDiff {
 		return m.renderDiff()
 	}
-	out, err := renderMarkdown(m.loadedContent, m.palette, m.contentWidth())
+	out, err := renderMarkdown(m.loadedContent, m.palette, m.styles.Icons, m.contentWidth())
 	if err != nil {
 		return m.loadedContent
 	}
 	return out
 }
 
+// contentWidth is the version's text width: the content pane less its
+// borders and one column of padding on each side.
 func (m Model) contentWidth() int {
-	_, _, contentW := split(m.width)
+	_, contentW := split(m.width)
 	if contentW == 0 {
 		return max(m.width, 1)
 	}
-	return contentW
+	return max(contentW-4, 1)
 }
 
 func (m Model) renderDiff() string {
@@ -472,12 +494,12 @@ func (m Model) renderDiff() string {
 
 // renderMarkdown renders content as Glamour-styled markdown at width w using
 // p's tokens.
-func renderMarkdown(content string, p theme.Palette, w int) (string, error) {
+func renderMarkdown(content string, p theme.Palette, set icons.Set, w int) (string, error) {
 	if w < 1 {
 		w = 1
 	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStyles(theme.GlamourStyle(p)),
+		glamour.WithStyles(theme.GlamourStyle(p, set)),
 		glamour.WithWordWrap(w),
 	)
 	if err != nil {

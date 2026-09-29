@@ -419,7 +419,7 @@ func TestRenderSnapshot(t *testing.T) {
 	if len(lines) != 10 {
 		t.Fatalf("got %d lines, want 10:\n%s", len(lines), got)
 	}
-	if !strings.Contains(lines[0], "OVERDUE") {
+	if !strings.Contains(lines[0], "O V E R D U E") {
 		t.Errorf("line 0 = %q, want OVERDUE header", lines[0])
 	}
 	if !strings.Contains(lines[1], "send invoice") || !strings.Contains(lines[1], "@09-27") || !strings.Contains(lines[1], "Work/admin") {
@@ -461,7 +461,7 @@ func TestDoneRowStrikethroughHiddenByDefault(t *testing.T) {
 	if !strings.Contains(view, "finished task") {
 		t.Errorf("done task should show with show_done=true:\n%s", view)
 	}
-	if !strings.Contains(view, glyphDone) {
+	if !strings.Contains(view, m.styles.Icons.TaskDone) {
 		t.Errorf("expected done glyph in view:\n%s", view)
 	}
 }

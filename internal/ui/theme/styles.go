@@ -2,13 +2,20 @@ package theme
 
 import (
 	"image/color"
+	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/mathieucroset/notty/internal/ui/icons"
 )
 
 // Styles holds every lipgloss.Style Notty's UI components use, all built
-// from a single Palette's semantic tokens.
+// from a single Palette's semantic tokens, and the glyph set they draw
+// with.
 type Styles struct {
+	// Icons is the configured glyph set (icons.Default until WithIcons).
+	Icons icons.Set
+
 	// Panes.
 	PaneBorder        lipgloss.Style
 	PaneBorderFocused lipgloss.Style
@@ -29,9 +36,12 @@ type Styles struct {
 	SidebarDim             lipgloss.Style
 
 	// General-purpose.
-	Muted  lipgloss.Style
-	Accent lipgloss.Style
-	Chip   lipgloss.Style
+	// Section is a section header (Subtext bold), drawn over the text of
+	// SectionTitle: the sidebar's, the Tasks view's and the help's.
+	Section lipgloss.Style
+	Muted   lipgloss.Style
+	Accent  lipgloss.Style
+	Chip    lipgloss.Style
 
 	// Dialogs and overlays.
 	Dialog      lipgloss.Style
@@ -84,6 +94,8 @@ func NewStyles(p Palette) Styles {
 	}
 
 	return Styles{
+		Icons: icons.Default(),
+
 		PaneBorder: lipgloss.NewStyle().
 			Border(border).
 			BorderForeground(p.Muted),
@@ -120,6 +132,9 @@ func NewStyles(p Palette) Styles {
 		SidebarDim: lipgloss.NewStyle().
 			Foreground(p.Muted),
 
+		Section: lipgloss.NewStyle().
+			Foreground(p.Subtext).
+			Bold(true),
 		Muted:  lipgloss.NewStyle().Foreground(p.Muted),
 		Accent: lipgloss.NewStyle().Foreground(p.Accent),
 		Chip: lipgloss.NewStyle().
@@ -152,4 +167,20 @@ func NewStyles(p Palette) Styles {
 		Warning: lipgloss.NewStyle().Foreground(p.Warning),
 		Success: lipgloss.NewStyle().Foreground(p.Success),
 	}
+}
+
+// WithIcons returns s drawing with the glyph set set.
+func (s Styles) WithIcons(set icons.Set) Styles {
+	s.Icons = set
+	return s
+}
+
+// SectionTitle spells a section header in letter-spaced capitals (spec
+// §4): "Notes" becomes "N O T E S", and words are three spaces apart.
+func SectionTitle(s string) string {
+	words := strings.Fields(strings.ToUpper(s))
+	for i, w := range words {
+		words[i] = strings.Join(strings.Split(w, ""), " ")
+	}
+	return strings.Join(words, "   ")
 }

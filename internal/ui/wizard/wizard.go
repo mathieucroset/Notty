@@ -245,7 +245,7 @@ func New(mode Mode, defaultVault string, currentTheme string, env Env, styles th
 		defaultVault: defaultVault,
 		currentTheme: currentTheme,
 		choice:       setup.ExistingURL,
-		spinner:      spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		spinner:      spinner.New(),
 	}
 	m.vaultInput = newInput("~/Notes")
 	m.vaultInput.SetValue(defaultVault)
@@ -292,6 +292,7 @@ func (m *Model) applyStyles() {
 	for _, in := range m.inputs() {
 		in.SetStyles(st)
 	}
+	m.spinner.Spinner = spinner.Spinner{Frames: m.styles.Icons.Spinner(), FPS: spinner.MiniDot.FPS}
 	m.spinner.Style = m.styles.Accent
 }
 

@@ -102,7 +102,7 @@ func (m Model) fullTextStatus() string {
 	if len(m.hits) == 0 {
 		return "no results"
 	}
-	return strconv.Itoa(len(m.hits)) + " results"
+	return resultCount(len(m.hits))
 }
 
 // hitItemLines renders hit i's three lines (spec §8): the dim "path:line"

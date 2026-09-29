@@ -56,7 +56,7 @@ func hasToast(m *Model, level msgs.ToastLevel, substr string) bool {
 func TestCreateFolderThenNoteFlow(t *testing.T) {
 	opts := testOptions(t)
 	tm := teatest.NewTestModel(t, New(opts), teatest.WithInitialTermSize(120, 30))
-	waitScreen(t, tm, "NOTES", "ideas")
+	waitScreen(t, tm, "N O T E S", "ideas")
 
 	// Rows: Work, ideas.md. On ideas, N creates the folder at the root.
 	tm.Send(keyMsg("j"))

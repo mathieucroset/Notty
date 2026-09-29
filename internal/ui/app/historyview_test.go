@@ -78,7 +78,7 @@ func TestHistoryCloses(t *testing.T) {
 	if m.history != nil {
 		t.Error("esc did not close the history view")
 	}
-	if !strings.Contains(screen(m), "NOTES") {
+	if !strings.Contains(screen(m), "N O T E S") {
 		t.Errorf("main screen not back:\n%s", screen(m))
 	}
 }

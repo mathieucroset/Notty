@@ -52,7 +52,7 @@ func TestIndexBuiltAtStartup(t *testing.T) {
 	if strings.Contains(s, "indexing…") {
 		t.Errorf("indexing still shown after the build:\n%s", s)
 	}
-	if !strings.Contains(s, "TAGS") || !strings.Contains(s, "#work") {
+	if !strings.Contains(s, "T A G S") || !strings.Contains(s, "#work") {
 		t.Errorf("tag chips missing:\n%s", s)
 	}
 	if m.ix == nil || m.ix.Len() != 3 {
@@ -121,7 +121,7 @@ func TestPinTogglePersists(t *testing.T) {
 	opts := testOptions(t)
 	m := start(t, opts, 120, 30)
 	run(t, m, msgs.TogglePinMsg{Path: "ideas.md"})
-	if !strings.Contains(screen(m), "PINNED") {
+	if !strings.Contains(screen(m), "P I N N E D") {
 		t.Errorf("PINNED missing after pinning:\n%s", screen(m))
 	}
 	saved, err := meta.Load(opts.Vault.Root)
@@ -132,7 +132,7 @@ func TestPinTogglePersists(t *testing.T) {
 		t.Errorf("saved pins = %v", saved.Pins)
 	}
 	run(t, m, msgs.TogglePinMsg{Path: "ideas.md"})
-	if strings.Contains(screen(m), "PINNED") {
+	if strings.Contains(screen(m), "P I N N E D") {
 		t.Errorf("PINNED still shown after unpinning:\n%s", screen(m))
 	}
 	if saved, _ = meta.Load(opts.Vault.Root); len(saved.Pins) != 0 {
@@ -150,7 +150,7 @@ func TestPinAndFilterFlow(t *testing.T) {
 	// Rows: Work, ideas.md. Pin ideas.
 	tm.Send(keyMsg("j"))
 	tm.Send(keyMsg("p"))
-	waitScreen(t, tm, "PINNED")
+	waitScreen(t, tm, "P I N N E D")
 
 	tm.Send(keyMsg("#"))
 	for _, r := range "work" {

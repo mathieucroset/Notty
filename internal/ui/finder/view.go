@@ -91,14 +91,18 @@ func (m Model) bodyRows(cw int, wrap func(string) string) []string {
 
 	listW, previewW := m.paneWidths(cw)
 	listLines := m.listPane(listW, bodyH)
-	previewLines := m.previewPaneLines(previewW, bodyH)
+	// The preview keeps one column of padding on each side.
+	innerW := m.previewWidth()
+	previewLines := m.previewPaneLines(innerW, bodyH)
 	sep := lipgloss.NewStyle().Foreground(m.palette.Muted).Inherit(m.surface).Render("│")
+	pad := m.bgStyle(lipgloss.NewStyle(), false).Render(" ")
 
 	out := make([]string, bodyH)
 	for i := range out {
 		row := padLine(listLines[i], listW)
 		if previewW > 0 {
-			row += sep + padLine(previewLines[i], previewW)
+			preview := padLine(pad+padLine(previewLines[i], innerW)+pad, previewW)
+			row += sep + preview
 		}
 		out[i] = wrap(row)
 	}

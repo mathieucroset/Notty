@@ -1,0 +1,40 @@
+╭─ ◆ Notty ────────────────╮╭─ Work / Standup notes ───────────────────────────────────────────────────────────────────╮
+│  P I N N E D             ││ # Standup notes ▰▰▰▱▱ 1/2                                                                │
+│  ★ Standup notes         ││                                                                                          │
+│     ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────╮     │
+│  N O│                                                                                                          │     │
+│  ▸ P│  Keyboard shortcuts  j/k scroll · esc close                                                              │     │
+│  ▾ W│                                                                                                          │     │
+│    •│  G L O B A L                                        E D I T O R   ·   R E A D - O N L Y                  │     │
+│  • i│  ctrl+p fuzzy finder                                motions move and scroll                              │     │
+│     │  ctrl+f full-text search                            /       search                                       │     │
+│  T A│  ctrl+k command palette                             y       yank / copy                                  │     │
+│   #d│  ctrl+b toggle sidebar (zen layout)                 tab     focus sidebar                                │     │
+│   #t│  ctrl+g cycle editor / split / preview              c       open resolver on this file                   │     │
+│     │  ctrl+s save                                                                                             │     │
+│  ☐ T│  ctrl+e open note in $EDITOR                        P R E V I E W                                        │     │
+│  ⌫ T│  ctrl+q quit                                        j/k      scroll                                      │     │
+│     │  F1     help                                        ctrl+d/u half-page down / up                         │     │
+│     │                                                     gg G     top / bottom                                │     │
+│     │  S I D E B A R                                      ]t [t    next / previous task                        │     │
+│     │  j/↓   move down                                    space    toggle highlighted task                     │     │
+│     │  k/↑   move up                                      ]i [i    next / previous image                       │     │
+│     │  h/←   collapse folder / go to parent               enter    open image viewer                           │     │
+│     │  l/→   expand folder                                tab      focus sidebar                               │     │
+│     │  enter open note, toggle folder, open entry         ?        help                                        │     │
+│     │  tab   focus main pane                                                                                   │     │
+│     │  n     new note                                     T A S K S                                            │     │
+│     │  N     new folder                                   j/k   move                                           │     │
+│     │  r     rename                                       space toggle task                                    │     │
+│     │  m     move                                         enter open note at task                              │     │
+│     │  d     delete (move to trash)                       tab   focus sidebar                                  │     │
+│     │  p     pin / unpin                                  esc   back to note                                   │     │
+│     │  H     note history                                                                                      │     │
+│     │  #     filter by tag                                T R A S H                                            │     │
+│     │  esc   clear tag filter                             j/k   move                                           │     │
+│     │  c     open resolver                                enter restore                                        │     │
+│     │                                                                                                          │     │
+│     ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────╯     │
+│                          ││                                                                                          │
+╰──────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────────────────╯
+ NORMAL  Work/Standup notes.md · 30 words                                                                       F1 help 

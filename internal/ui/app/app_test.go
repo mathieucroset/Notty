@@ -113,7 +113,7 @@ func TestViewShowsShell(t *testing.T) {
 		t.Error("View().AltScreen = false")
 	}
 	s := screen(m)
-	for _, want := range []string{"◆ Notty", "NOTES", "Work", "ideas", "No note open · tab to browse notes", "NORMAL", "F1 help"} {
+	for _, want := range []string{"◆ Notty", "N O T E S", "Work", "ideas", "No note open · tab to browse notes", "NORMAL", "F1 help"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("screen missing %q:\n%s", want, s)
 		}
@@ -469,7 +469,7 @@ func TestPinsShown(t *testing.T) {
 	opts := testOptions(t)
 	opts.Pins = &meta.State{Pins: []string{"ideas.md"}}
 	m := start(t, opts, 120, 30)
-	if !strings.Contains(screen(m), "PINNED") {
+	if !strings.Contains(screen(m), "P I N N E D") {
 		t.Errorf("PINNED section missing:\n%s", screen(m))
 	}
 }

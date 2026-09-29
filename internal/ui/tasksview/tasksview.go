@@ -29,15 +29,6 @@ import (
 // BackMsg asks the app to return focus to the note (esc).
 type BackMsg struct{}
 
-// Glyphs for open and done tasks. Plain Unicode, no Nerd Font required.
-const (
-	glyphOpen = "☐"
-	glyphDone = "☑"
-)
-
-// row indent, used consistently for headers and tasks.
-const indent = "  "
-
 // rowKind is the kind of a flattened row.
 type rowKind int
 
@@ -517,11 +508,11 @@ func padLine(s string, w int) string {
 func (m Model) renderHeader(it item) string {
 	switch it.group {
 	case groupOverdue:
-		return padLine(m.styles.Error.Bold(true).Render(indent+it.header), m.width)
+		return padLine(m.styles.Error.Bold(true).Render(theme.SectionTitle(it.header)), m.width)
 	case groupDueSoon:
-		return padLine(m.styles.Warning.Bold(true).Render(indent+it.header), m.width)
+		return padLine(m.styles.Warning.Bold(true).Render(theme.SectionTitle(it.header)), m.width)
 	default:
-		label := indent + it.header
+		label := it.header
 		count := fmt.Sprintf("%d/%d", it.done, it.total)
 		avail := m.width - ansi.StringWidth(count) - 1
 		if avail < 0 {
@@ -532,7 +523,7 @@ func (m Model) renderHeader(it item) string {
 		if gap < 1 {
 			gap = 1
 		}
-		line := m.styles.SidebarSection.Render(label) + strings.Repeat(" ", gap) + m.styles.Muted.Render(count)
+		line := m.styles.Section.Render(label) + strings.Repeat(" ", gap) + m.styles.Muted.Render(count)
 		return padLine(line, m.width)
 	}
 }
@@ -540,11 +531,11 @@ func (m Model) renderHeader(it item) string {
 // renderTask renders a single task row.
 func (m Model) renderTask(it item, selected bool) string {
 	t := it.ref.Task
-	glyph := glyphOpen
+	glyph := m.styles.Icons.TaskOpen
 	if t.Done {
-		glyph = glyphDone
+		glyph = m.styles.Icons.TaskDone
 	}
-	prefix := indent + glyph + " "
+	prefix := glyph + " "
 	label := stripDue(t.Text)
 
 	if t.Done {
@@ -614,7 +605,7 @@ func (m Model) renderTask(it item, selected bool) string {
 
 // emptyView renders the "no open tasks" placeholder, centered.
 func (m Model) emptyView() string {
-	const msg = "No open tasks 🎉"
+	msg := m.styles.Icons.Check + " No open tasks"
 	h := max(m.height, 1)
 	out := make([]string, h)
 	mid := h / 2

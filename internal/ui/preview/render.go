@@ -19,6 +19,7 @@ import (
 
 	"github.com/mathieucroset/notty/internal/imgrender"
 	"github.com/mathieucroset/notty/internal/links"
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -58,6 +59,7 @@ type textKey struct {
 	hash    uint64
 	width   int
 	palette string
+	icons   string // icon set name: it draws the checkboxes
 }
 
 func hashString(s string) uint64 {
@@ -107,6 +109,7 @@ type renderJob struct {
 	content       string
 	width, height int
 	palette       theme.Palette
+	icons         icons.Set
 	caps          imgrender.Caps
 	vaultRoot     string
 	segs          []Segment
@@ -146,6 +149,7 @@ func (j renderJob) run() tea.Msg {
 		height:   j.height,
 		segs:     j.segs,
 		blocks:   make([]block, len(j.segs)),
+		boxes:    [2]string{j.icons.TaskOpen, j.icons.TaskDone},
 	}
 	j.renderTexts()
 	j.encoded = map[uint32]string{}
@@ -186,7 +190,7 @@ func (j renderJob) renderTexts() {
 		}
 	}
 	if len(todo) > 0 {
-		style := theme.GlamourStyle(j.palette) // registers the chroma style once
+		style := theme.GlamourStyle(j.palette, j.icons) // registers the chroma style once
 		workers := min(len(todo), runtime.GOMAXPROCS(0))
 		var next atomic.Int64
 		var wg sync.WaitGroup

@@ -328,7 +328,7 @@ func (m Model) viewTheme() string {
 		name := m.themeNames[i]
 		mark := "  "
 		if name == m.currentTheme {
-			mark = "✓ "
+			mark = m.styles.Icons.Check + " "
 		}
 		line := padLine(mark+name, inner)
 		if i == m.themeCursor {
