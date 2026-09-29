@@ -2,7 +2,6 @@ package vim
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/mathieucroset/notty/internal/buffer"
 )
@@ -145,12 +144,12 @@ func (m *Machine) execOperator(b *buffer.Buffer, c cmd) {
 	if !ok {
 		return
 	}
-	m.applyOp(b, c.op, c.reg, r, lw, 1)
+	m.applyOp(b, c.op, c.reg, r, lw, 1, false)
 }
 
 // applyOp applies an operator to a range. shift is the number of indent
-// levels for > and <.
-func (m *Machine) applyOp(b *buffer.Buffer, op, reg string, r buffer.Range, lw bool, shift int) {
+// levels for > and <; visual is set for a visual-mode operator.
+func (m *Machine) applyOp(b *buffer.Buffer, op, reg string, r buffer.Range, lw bool, shift int, visual bool) {
 	r = r.Normalized()
 	switch op {
 	case "y":
@@ -162,7 +161,7 @@ func (m *Machine) applyOp(b *buffer.Buffer, op, reg string, r buffer.Range, lw b
 			b.SetCursor(pos(r.Start.Line, cur.Col))
 		}
 	case "d":
-		if !lw && r.End.Line > r.Start.Line && r.Start.Col <= indentCols(b, r.Start.Line) &&
+		if !lw && !visual && r.End.Line > r.Start.Line && r.Start.Col <= indentCols(b, r.Start.Line) &&
 			isBlank(b.TextIn(buffer.Range{Start: r.End, End: lineEnd(b, r.End.Line)})) {
 			// A multi-line delete of whole lines' worth of text is linewise.
 			r, lw = lines(b, r.Start.Line, r.End.Line), true
@@ -361,18 +360,6 @@ func toggleCase(b *buffer.Buffer, n int) {
 		return
 	}
 	r := buffer.Range{Start: cur, End: pos(cur.Line, end)}
-	b.Replace(r, swapCase(b.TextIn(r)))
+	b.Replace(r, mapCase(b.TextIn(r), "~"))
 	b.SetCursor(pos(cur.Line, end))
-}
-
-func swapCase(s string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case unicode.IsUpper(r):
-			return unicode.ToLower(r)
-		case unicode.IsLower(r):
-			return unicode.ToUpper(r)
-		}
-		return r
-	}, s)
 }

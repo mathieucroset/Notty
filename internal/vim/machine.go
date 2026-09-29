@@ -77,6 +77,8 @@ type Machine struct {
 
 	eff Effect // effect of the key being handled
 
+	anchor buffer.Pos // visual selection start
+
 	unnamed    register
 	pasteCount int // count of a "+p waiting for PasteClipboard
 
@@ -85,6 +87,11 @@ type Machine struct {
 	undoCur, redoCur map[uint64]buffer.Pos
 	chgCursor        buffer.Pos
 	chgVersion       uint64
+
+	// dot-repeat
+	last      *lastChange
+	recording bool // the insert session belongs to m.last
+	replaying bool
 
 	// insert session
 	insertRepeat int   // count for i/a/I/A (3ifoo<esc>)
@@ -199,6 +206,7 @@ func (m *Machine) exec(b *buffer.Buffer, c cmd) {
 		return
 	}
 	if isChange(c) {
+		m.recordChange(c)
 		m.beginChange(b)
 		if c.op != "" {
 			m.execOperator(b, c)
@@ -294,6 +302,12 @@ func (m *Machine) execOther(b *buffer.Buffer, c cmd) {
 		m.undo(b, c.count())
 	case "<c-r>":
 		m.redo(b, c.count())
+	case "v":
+		m.enterVisual(b, Visual)
+	case "V":
+		m.enterVisual(b, VisualLine)
+	case ".":
+		m.repeat(b, c)
 	}
 }
 
@@ -322,9 +336,8 @@ func normalCol(b *buffer.Buffer, l, col int) int {
 
 // Stubs filled in by later features.
 
-func (m *Machine) execVisual(b *buffer.Buffer, c cmd) {}
-
-func (m *Machine) exitVisual(b *buffer.Buffer) { m.mode = Normal }
+// execVisualSpecial handles visual commands added by later features.
+func (m *Machine) execVisualSpecial(b *buffer.Buffer, c cmd) bool { return false }
 
 func (m *Machine) commandKey(b *buffer.Buffer, k Key) { m.mode = Normal }
 
@@ -350,11 +363,6 @@ func (m *Machine) PasteClipboard(b *buffer.Buffer, text string, before bool) {
 
 // SetReadOnly toggles read-only mode.
 func (m *Machine) SetReadOnly(ro bool) { m.readOnly = ro }
-
-// Selection returns the visual selection.
-func (m *Machine) Selection(b *buffer.Buffer) (buffer.Range, bool) {
-	return buffer.Range{}, false
-}
 
 func (m *Machine) searchMotion(b *buffer.Buffer, p buffer.Pos, reverse bool, n int) motionRes {
 	return motionRes{}

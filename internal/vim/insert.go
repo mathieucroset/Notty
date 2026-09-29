@@ -139,6 +139,3 @@ func (m *Machine) leaveInsert(b *buffer.Buffer) {
 	m.clampNormal(b)
 	m.curswant = b.Cursor().Col
 }
-
-// endInsertSession is a hook for dot-repeat recording.
-func (m *Machine) endInsertSession(keys []Key) {}
