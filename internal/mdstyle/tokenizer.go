@@ -2,7 +2,9 @@
 // live (spec §5). It produces byte-offset spans tagged with a Kind; the
 // editor maps Kinds (and chroma token types inside fenced code) to theme
 // styles. State carried between lines makes fenced code blocks work, and
-// Cache re-tokenizes incrementally after edits.
+// Cache re-tokenizes incrementally after edits. Recognition is per line and
+// approximates CommonMark/GFM; see tokenizeBlock and inline for the known
+// limitations.
 package mdstyle
 
 import (
@@ -108,6 +110,18 @@ func nextState(line string, in State) State {
 	return State{}
 }
 
+// tokenizeBlock tokenizes a line outside any fence. Block constructs are
+// recognized per line only, with these known limitations:
+//   - Blockquotes: only the first '>' is Markup; the rest of the line is
+//     Quote text with inline styling, so nested quotes ("> > x") and lists,
+//     headings or tasks inside a quote are not recognized, and lazy
+//     continuation lines (a quote paragraph continued without '>') are
+//     plain paragraphs.
+//   - Done tasks: the text after "[x] " is a single TaskDoneText span and is
+//     not inline-parsed (no emphasis, code, link or tag spans), because it is
+//     rendered dimmed and struck through as a whole.
+//   - Setext headings (text underlined with "===" or "---") are not
+//     recognized; a "---" line is always a Rule.
 func tokenizeBlock(line string) []Span {
 	if isRule(line) {
 		return []Span{{Start: 0, End: len(line), Kind: Rule}}
@@ -118,7 +132,7 @@ func tokenizeBlock(line string) []Span {
 	}
 
 	// ATX heading: 1-6 '#' followed by a space or end of line.
-	if n := runLen(line, indent, '#'); n >= 1 && n <= 6 {
+	if n := runLenTo(line, indent, len(line), '#'); n >= 1 && n <= 6 {
 		end := indent + n
 		if end == len(line) || line[end] == ' ' || line[end] == '\t' {
 			if end < len(line) {
@@ -245,12 +259,4 @@ func taskBox(line string, i int) (end int, done, ok bool) {
 		return i + 3, true, true
 	}
 	return 0, false, false
-}
-
-func runLen(s string, i int, c byte) int {
-	n := 0
-	for i+n < len(s) && s[i+n] == c {
-		n++
-	}
-	return n
 }
