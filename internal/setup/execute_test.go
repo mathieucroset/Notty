@@ -567,6 +567,69 @@ func TestExecuteCreateGitHubNeedsGH(t *testing.T) {
 	}
 }
 
+func TestExecuteCloneRetry(t *testing.T) {
+	gittest.Isolate(t)
+	remote := newRemote(t, "main", map[string]string{"a.md": "a\n"})
+	identity(t)
+	vault := filepath.Join(t.TempDir(), "Notes")
+	req := setup.Request{Vault: vault, Choice: setup.ExistingURL, URL: remote, Host: "box"}
+	steps, err := setup.Plan(req, setup.Missing, setup.RemoteState{HasHistory: true, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First attempt: the clone worked and .gitignore was written, but the
+	// commit failed.
+	if _, err := setup.Execute(context.Background(), req, steps[:1], nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	writeFiles(t, vault, map[string]string{".gitignore": ".DS_Store\nThumbs.db\ndesktop.ini\n*.notty-tmp\n.notty/recovery/\n.notty/lock\n"})
+
+	mustRunSteps(t, req, steps, nil)
+	if s := headSubject(t, vault); s != "Update .gitignore · box" {
+		t.Errorf("HEAD subject = %q", s)
+	}
+	assertClean(t, vault)
+	mustRunSteps(t, req, steps, nil) // and again: nothing to do
+
+	other := req
+	other.URL = filepath.Join(t.TempDir(), "other.git")
+	steps, err = setup.Plan(other, setup.Missing, setup.RemoteState{HasHistory: true, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setup.Execute(context.Background(), other, steps, nil, nil); !errors.Is(err, setup.ErrRemoteExists) {
+		t.Errorf("clone over a repo with another origin: err = %v, want ErrRemoteExists", err)
+	}
+}
+
+func TestExecuteCreateGitHubRetry(t *testing.T) {
+	remote := gittest.NewEmptyRemote(t)
+	identity(t)
+	vault := filepath.Join(t.TempDir(), "Notes")
+	gh := &fakeGH{t: t, remote: remote, available: true}
+	req := setup.Request{Vault: vault, Choice: setup.CreateGitHub, RepoName: "notes", Host: "box", GHAvailable: true}
+	steps, err := setup.Plan(req, setup.Missing, setup.RemoteState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustRunSteps(t, req, steps, gh)
+	// gh created the repo; the retry pushes instead of creating it again.
+	writeFiles(t, vault, map[string]string{"b.md": "b\n"})
+	gittest.CommitAll(t, gitsync.Open(vault), "b · box")
+	mustRunSteps(t, req, steps, gh)
+	if len(gh.calls) != 1 {
+		t.Errorf("CreateRepo calls = %d, want 1", len(gh.calls))
+	}
+	assertSynced(t, vault, remote, "main")
+}
+
+func mustRunSteps(t *testing.T, req setup.Request, steps []setup.Step, gh setup.GH) {
+	t.Helper()
+	if c, err := setup.Execute(context.Background(), req, steps, gh, nil); err != nil || c {
+		t.Fatalf("Execute = %v, %v", c, err)
+	}
+}
+
 func TestExecuteRetryIsIdempotent(t *testing.T) {
 	remote := gittest.NewEmptyRemote(t)
 	identity(t)

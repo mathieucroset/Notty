@@ -113,6 +113,14 @@ func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.R
 		_, err := repo.Commit(arg)
 		return repo, false, err
 	case StepClone:
+		if existing := gitsync.Open(dir); existing.IsRepo() {
+			// A retry after the clone succeeded.
+			cur, err := existing.RemoteURL()
+			if err != nil || !SameURL(cur, arg) {
+				return repo, false, fmt.Errorf("%w (%s)", ErrRemoteExists, cur)
+			}
+			return existing, false, nil
+		}
 		r, err := cloneInto(ctx, arg, s.Args[1], dir)
 		if err != nil {
 			return repo, false, err
@@ -149,6 +157,10 @@ func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.R
 	case StepPush:
 		return repo, false, repo.Push(ctx, true)
 	case StepGHCreate:
+		if repo.HasRemote() {
+			// A retry after gh created the repo and added origin.
+			return repo, false, repo.Push(ctx, true)
+		}
 		if gh == nil {
 			return repo, false, ErrGHUnavailable
 		}
@@ -157,9 +169,17 @@ func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.R
 		if repo.MergeInProgress() {
 			return repo, false, nil
 		}
-		changed, err := vault.EnsureGitignore(dir)
-		if err != nil || !changed {
+		if _, err := vault.EnsureGitignore(dir); err != nil {
 			return repo, false, err
+		}
+		// Decide from git, not from whether the file was just written, so a
+		// retry commits a .gitignore written by an earlier failed attempt.
+		entries, err := repo.Status()
+		if err != nil {
+			return repo, false, err
+		}
+		if !slices.ContainsFunc(entries, func(e gitsync.StatusEntry) bool { return e.Path == ".gitignore" && e.Kind != '!' }) {
+			return repo, false, nil
 		}
 		if err := repo.Add(".gitignore"); err != nil {
 			return repo, false, err
