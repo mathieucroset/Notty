@@ -180,7 +180,8 @@ Your notes are plain `.md` files in an ordinary folder (the *vault*,
 ├── .trash/             trashed notes and folders, restorable
 └── .notty/
     ├── state.json      pins (synced)
-    └── settings.toml   synced settings (optional)
+    ├── settings.toml   synced settings (optional)
+    └── recovery/       unsaved edits saved after a crash (not synced)
 ```
 
 Nothing here is proprietary — you can read, edit, `grep`, or back up your
@@ -194,9 +195,15 @@ data safe:
   has passed (or you empty it yourself).
 - **History:** every save is a git commit, so `H` in the sidebar gives you
   the full history of a note, with the option to restore any past version.
-- **Crash recovery:** if Notty ever crashes with unsaved edits, it writes
-  them to `.notty/recovery/` before exiting and offers to restore them next
-  time you start it.
+- **Crash recovery:** if Notty ever crashes with unsaved edits, it restores
+  the terminal, writes them to `.notty/recovery/<note>-<timestamp>.md`
+  (kept out of git) and says where. The next time you start it, it offers
+  each file back: restore it as a new note `<name> (recovered)` next to the
+  original, or discard it (`esc` asks again next time).
+- **Log:** warnings, errors and crash details go to `notty.log` in
+  `$XDG_STATE_HOME/notty/` (`~/.local/state/notty/` by default,
+  `%LOCALAPPDATA%\notty\` on Windows), rotated to `notty.log.1` past 5 MB.
+  Set `NOTTY_DEBUG=1` for a more detailed log.
 
 ## Development
 
