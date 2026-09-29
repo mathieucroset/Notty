@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -358,6 +359,40 @@ func TestRunSmallAndUnknownSize(t *testing.T) {
 		v.Size = size
 		runViewer(t, v)
 		assertOrder(t, out.String(), altEnter, altLeave)
+	}
+}
+
+// failingWriter records every write and fails from the failAt-th one on,
+// each time with a new error.
+type failingWriter struct {
+	calls  []string
+	errs   []error
+	failAt int
+}
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	w.calls = append(w.calls, string(p))
+	if len(w.calls) < w.failAt {
+		return len(p), nil
+	}
+	err := errors.New("write failed #" + strconv.Itoa(len(w.errs)+1))
+	w.errs = append(w.errs, err)
+	return 0, err
+}
+
+func TestRunRestoresTerminalAfterWriteError(t *testing.T) {
+	dir := t.TempDir()
+	a := writePNG(t, dir, "a.png", 10, 10)
+	v, _ := newTestViewer([]string{a}, imgrender.ProtoKitty, strings.NewReader("q"))
+	w := &failingWriter{failAt: 2} // enter succeeds, the first draw fails
+	v.SetStdout(w)
+	err := v.Run()
+	if err == nil || len(w.errs) < 2 || !errors.Is(err, w.errs[0]) {
+		t.Fatalf("Run = %v, want the first write error (errors %v)", err, w.errs)
+	}
+	last := w.calls[len(w.calls)-1]
+	if !strings.Contains(last, imgrender.KittyDelete(kittyID)) || !strings.HasSuffix(last, altLeave) {
+		t.Errorf("last write %q: want the kitty delete and the leave sequence", last)
 	}
 }
 

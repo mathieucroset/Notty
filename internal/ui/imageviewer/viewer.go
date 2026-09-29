@@ -131,8 +131,17 @@ func (v *Viewer) Run() (err error) {
 
 	s.write(seqEnter)
 	defer func() {
-		s.deleteKitty()
-		s.write(seqLeave)
+		// Always attempt the restore, even after a failed write: a
+		// transient error must not leave the terminal on our screen.
+		tail := seqLeave
+		if s.kittyVisible {
+			tail = s.wrap(imgrender.KittyDelete(kittyID)) + tail
+			s.kittyVisible = false
+		}
+		_, werr := io.WriteString(out, tail)
+		if s.err == nil {
+			s.err = werr
+		}
 		if err == nil && s.err != nil {
 			err = fmt.Errorf("image viewer: write: %w", s.err)
 		}
