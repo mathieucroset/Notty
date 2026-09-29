@@ -3,6 +3,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -165,6 +166,9 @@ type Model struct {
 	// extConflict is the open note while the "changed on disk" dialog
 	// waits for an answer; its saves are held until then.
 	extConflict string
+	// discardOnQuit is set when saving on quit failed: the next quit
+	// leaves without saving.
+	discardOnQuit bool
 
 	// deferred are commands produced by helpers that cannot return one
 	// (a resize, a theme change); Update batches them with its result.
@@ -330,6 +334,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.cycleNoteView()
 	case msgs.QuitMsg:
 		return m, m.quit()
+	case quitSavedMsg:
+		return m, m.handleQuitSaved(msg)
 	case msgs.ActivateEntryMsg:
 		switch msg.Entry {
 		case msgs.EntryTasks:
@@ -421,17 +427,51 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// quit stops the watcher, saves the local state and ends the program.
-// Both happen synchronously: nothing runs after tea.Quit.
-// TODO(syncer pass): the full quit sequence (buffer save, kitty cleanup,
-// syncer flush; plan amendment A7).
+// quitSavedMsg reports the buffer save that runs before quitting.
+type quitSavedMsg struct{ saved savedMsg }
+
+// quit runs the quit sequence (plan amendment A7): a dirty buffer is saved
+// first, and a failed save cancels the quit (quitting again discards the
+// edits); then finishQuit ends the program.
 func (m *Model) quit() tea.Cmd {
+	if !m.discardOnQuit && m.note.path != "" && m.editor.Dirty() {
+		if save := m.saveEditorCmd(); save != nil {
+			return func() tea.Msg {
+				res, _ := save().(savedMsg)
+				return quitSavedMsg{saved: res}
+			}
+		}
+	}
+	return m.finishQuit()
+}
+
+// handleQuitSaved quits once the buffer is saved.
+func (m *Model) handleQuitSaved(msg quitSavedMsg) tea.Cmd {
+	if msg.saved.err != nil {
+		m.discardOnQuit = true
+		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s: %v. Quit again to discard your edits.",
+			msg.saved.path, msg.saved.err))
+	}
+	m.editor = m.editor.MarkSaved(msg.saved.path, msg.saved.version)
+	return m.finishQuit()
+}
+
+// finishQuit stops the watcher, saves the local state (with the open
+// note's cursor), deletes the Kitty images the preview transmitted, and
+// ends the program. The state is written synchronously: nothing runs
+// after tea.Quit.
+// TODO(syncer pass, plan amendment A7): flush the syncer before quitting.
+func (m *Model) finishQuit() tea.Cmd {
 	m.closeWatcher()
 	if m.opts.LocalPath != "" && !m.opts.WizardNeeded {
+		m.rememberCursor()
 		m.syncExpandedState()
 		local, path := m.opts.Local, m.opts.LocalPath
 		// Nowhere left to report an error.
 		_ = m.localSaver.save(m.localSaver.ticket(), func() error { return local.Save(path) })
+	}
+	if cleanup := m.preview.KittyCleanup(); cleanup != "" {
+		return tea.Sequence(tea.Raw(cleanup), tea.Quit)
 	}
 	return tea.Quit
 }
