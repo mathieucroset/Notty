@@ -34,7 +34,9 @@ func TestDecodeRejectsHugeImages(t *testing.T) {
 		w, h uint32
 		huge bool
 	}{
-		{"both sides huge", 100000, 100000, true},
+		// Bigger claims (e.g. 100000x100000) are refused by image/png itself
+		// on 32-bit platforms before our check; stay below that.
+		{"both limits exceeded", 16400, 10000, true},
 		{"too many pixels", 8000, 8000, true},   // 64e6 > 50e6
 		{"one side too long", 16385, 10, true},  // side > 16384
 		{"tall side too long", 10, 20000, true}, //
