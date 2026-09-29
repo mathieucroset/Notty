@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -180,198 +181,225 @@ func TestSaveParentPathIsRegularFile(t *testing.T) {
 }
 
 func TestTouch(t *testing.T) {
-	t.Run("moves existing entry to front and dedupes", func(t *testing.T) {
-		s := &State{Recents: []string{"a.md", "b.md", "c.md"}}
-		s.Touch("b.md")
-		want := []string{"b.md", "a.md", "c.md"}
-		if !reflect.DeepEqual(s.Recents, want) {
-			t.Fatalf("Recents = %v, want %v", s.Recents, want)
-		}
-		if s.LastNote != "b.md" {
-			t.Fatalf("LastNote = %q, want %q", s.LastNote, "b.md")
-		}
-	})
+	// many simulates touching more than maxRecents distinct notes, in order.
+	many := make([]string, maxRecents+5)
+	for i := range many {
+		many[i] = fmt.Sprintf("note-%02d.md", i)
+	}
+	// The cap keeps the last maxRecents touches, most recently touched
+	// first (i.e. the tail of many, reversed).
+	wantCapped := make([]string, 0, maxRecents)
+	for i := len(many) - 1; i >= len(many)-maxRecents; i-- {
+		wantCapped = append(wantCapped, many[i])
+	}
 
-	t.Run("adds new entry to front", func(t *testing.T) {
-		s := &State{Recents: []string{"a.md", "b.md"}}
-		s.Touch("new.md")
-		want := []string{"new.md", "a.md", "b.md"}
-		if !reflect.DeepEqual(s.Recents, want) {
-			t.Fatalf("Recents = %v, want %v", s.Recents, want)
-		}
-	})
-
-	t.Run("caps at 20 entries", func(t *testing.T) {
-		s := newState()
-		for i := 0; i < 25; i++ {
-			s.Touch(string(rune('a' + i)))
-		}
-		if len(s.Recents) != 20 {
-			t.Fatalf("len(Recents) = %d, want 20", len(s.Recents))
-		}
-		// Most recent (last touched) should be at front.
-		if s.Recents[0] != string(rune('a'+24)) {
-			t.Fatalf("Recents[0] = %q, want most recently touched entry", s.Recents[0])
-		}
-	})
-
-	t.Run("re-touching same entry keeps it deduped at front", func(t *testing.T) {
-		s := newState()
-		s.Touch("a.md")
-		s.Touch("b.md")
-		s.Touch("a.md")
-		want := []string{"a.md", "b.md"}
-		if !reflect.DeepEqual(s.Recents, want) {
-			t.Fatalf("Recents = %v, want %v", s.Recents, want)
-		}
-	})
-}
-
-func TestRenameNote(t *testing.T) {
-	s := &State{
-		Recents:  []string{"Work/Standup notes.md", "Personal/ideas.md"},
-		LastNote: "Work/Standup notes.md",
-		Cursor: map[string][2]int{
-			"Work/Standup notes.md": {4, 12},
-			"Personal/ideas.md":     {0, 0},
+	cases := []struct {
+		name         string
+		initial      []string
+		touches      []string
+		wantRecents  []string
+		wantLastNote string
+	}{
+		{
+			name:         "moves existing entry to front and dedupes",
+			initial:      []string{"a.md", "b.md", "c.md"},
+			touches:      []string{"b.md"},
+			wantRecents:  []string{"b.md", "a.md", "c.md"},
+			wantLastNote: "b.md",
 		},
-		Expanded: []string{"Work", "Personal"},
+		{
+			name:         "adds new entry to front",
+			initial:      []string{"a.md", "b.md"},
+			touches:      []string{"new.md"},
+			wantRecents:  []string{"new.md", "a.md", "b.md"},
+			wantLastNote: "new.md",
+		},
+		{
+			name:         "re-touching same entry keeps it deduped at front",
+			touches:      []string{"a.md", "b.md", "a.md"},
+			wantRecents:  []string{"a.md", "b.md"},
+			wantLastNote: "a.md",
+		},
+		{
+			name:         "caps at maxRecents entries, most recent first",
+			touches:      many,
+			wantRecents:  wantCapped,
+			wantLastNote: many[len(many)-1],
+		},
 	}
 
-	s.Rename("Work/Standup notes.md", "Work/Daily notes.md")
-
-	wantRecents := []string{"Work/Daily notes.md", "Personal/ideas.md"}
-	if !reflect.DeepEqual(s.Recents, wantRecents) {
-		t.Errorf("Recents = %v, want %v", s.Recents, wantRecents)
-	}
-	if s.LastNote != "Work/Daily notes.md" {
-		t.Errorf("LastNote = %q, want %q", s.LastNote, "Work/Daily notes.md")
-	}
-	if _, ok := s.Cursor["Work/Standup notes.md"]; ok {
-		t.Error("old cursor key should be removed")
-	}
-	if got, ok := s.Cursor["Work/Daily notes.md"]; !ok || got != [2]int{4, 12} {
-		t.Errorf("Cursor[new] = %v, ok=%v, want {4,12}, true", got, ok)
-	}
-	if got, ok := s.Cursor["Personal/ideas.md"]; !ok || got != [2]int{0, 0} {
-		t.Errorf("unrelated cursor entry should be untouched: %v, %v", got, ok)
-	}
-	// Expanded is a folder list; renaming a note path should not affect it.
-	wantExpanded := []string{"Work", "Personal"}
-	if !reflect.DeepEqual(s.Expanded, wantExpanded) {
-		t.Errorf("Expanded = %v, want %v", s.Expanded, wantExpanded)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &State{Recents: append([]string(nil), tc.initial...)}
+			for _, p := range tc.touches {
+				s.Touch(p)
+			}
+			if !reflect.DeepEqual(s.Recents, tc.wantRecents) {
+				t.Errorf("Recents = %v, want %v", s.Recents, tc.wantRecents)
+			}
+			if s.LastNote != tc.wantLastNote {
+				t.Errorf("LastNote = %q, want %q", s.LastNote, tc.wantLastNote)
+			}
+		})
 	}
 }
 
-func TestRenameFolder(t *testing.T) {
-	s := &State{
-		Recents: []string{
-			"Work/Standup notes.md",
-			"Work/Sub/nested.md",
-			"Work2/other.md",
-			"Personal/ideas.md",
+func TestRename(t *testing.T) {
+	cases := []struct {
+		name         string
+		initial      *State
+		oldPath      string
+		newPath      string
+		wantRecents  []string
+		wantLastNote string
+		wantCursor   map[string][2]int
+		wantExpanded []string
+	}{
+		{
+			name: "renames a single note",
+			initial: &State{
+				Recents:  []string{"Work/Standup notes.md", "Personal/ideas.md"},
+				LastNote: "Work/Standup notes.md",
+				Cursor: map[string][2]int{
+					"Work/Standup notes.md": {4, 12},
+					"Personal/ideas.md":     {0, 0},
+				},
+				// Expanded is a folder list; renaming a note should not
+				// affect it.
+				Expanded: []string{"Work", "Personal"},
+			},
+			oldPath:      "Work/Standup notes.md",
+			newPath:      "Work/Daily notes.md",
+			wantRecents:  []string{"Work/Daily notes.md", "Personal/ideas.md"},
+			wantLastNote: "Work/Daily notes.md",
+			wantCursor: map[string][2]int{
+				"Work/Daily notes.md": {4, 12},
+				"Personal/ideas.md":   {0, 0},
+			},
+			wantExpanded: []string{"Work", "Personal"},
 		},
-		LastNote: "Work/Standup notes.md",
-		Cursor: map[string][2]int{
-			"Work/Standup notes.md": {1, 1},
-			"Work/Sub/nested.md":    {2, 2},
-			"Work2/other.md":        {3, 3},
+		{
+			name: "renames a folder and its descendants, not a same-prefix sibling",
+			initial: &State{
+				Recents: []string{
+					"Work/Standup notes.md",
+					"Work/Sub/nested.md",
+					"Work2/other.md", // must NOT match "Work" prefix
+					"Personal/ideas.md",
+				},
+				LastNote: "Work/Standup notes.md",
+				Cursor: map[string][2]int{
+					"Work/Standup notes.md": {1, 1},
+					"Work/Sub/nested.md":    {2, 2},
+					"Work2/other.md":        {3, 3},
+				},
+				Expanded: []string{"Work", "Work/Sub", "Work2", "Personal"},
+			},
+			oldPath: "Work",
+			newPath: "Projects",
+			wantRecents: []string{
+				"Projects/Standup notes.md",
+				"Projects/Sub/nested.md",
+				"Work2/other.md",
+				"Personal/ideas.md",
+			},
+			wantLastNote: "Projects/Standup notes.md",
+			wantCursor: map[string][2]int{
+				"Projects/Standup notes.md": {1, 1},
+				"Projects/Sub/nested.md":    {2, 2},
+				"Work2/other.md":            {3, 3},
+			},
+			wantExpanded: []string{"Projects", "Projects/Sub", "Work2", "Personal"},
 		},
-		Expanded: []string{"Work", "Work/Sub", "Work2", "Personal"},
 	}
 
-	s.Rename("Work", "Projects")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.initial.Rename(tc.oldPath, tc.newPath)
 
-	wantRecents := []string{
-		"Projects/Standup notes.md",
-		"Projects/Sub/nested.md",
-		"Work2/other.md", // must NOT match "Work" prefix
-		"Personal/ideas.md",
-	}
-	if !reflect.DeepEqual(s.Recents, wantRecents) {
-		t.Errorf("Recents = %v, want %v", s.Recents, wantRecents)
-	}
-	if s.LastNote != "Projects/Standup notes.md" {
-		t.Errorf("LastNote = %q, want %q", s.LastNote, "Projects/Standup notes.md")
-	}
-
-	wantCursor := map[string][2]int{
-		"Projects/Standup notes.md": {1, 1},
-		"Projects/Sub/nested.md":    {2, 2},
-		"Work2/other.md":            {3, 3},
-	}
-	if !reflect.DeepEqual(s.Cursor, wantCursor) {
-		t.Errorf("Cursor = %v, want %v", s.Cursor, wantCursor)
-	}
-
-	wantExpanded := []string{"Projects", "Projects/Sub", "Work2", "Personal"}
-	if !reflect.DeepEqual(s.Expanded, wantExpanded) {
-		t.Errorf("Expanded = %v, want %v", s.Expanded, wantExpanded)
+			if !reflect.DeepEqual(tc.initial.Recents, tc.wantRecents) {
+				t.Errorf("Recents = %v, want %v", tc.initial.Recents, tc.wantRecents)
+			}
+			if tc.initial.LastNote != tc.wantLastNote {
+				t.Errorf("LastNote = %q, want %q", tc.initial.LastNote, tc.wantLastNote)
+			}
+			if !reflect.DeepEqual(tc.initial.Cursor, tc.wantCursor) {
+				t.Errorf("Cursor = %v, want %v", tc.initial.Cursor, tc.wantCursor)
+			}
+			if !reflect.DeepEqual(tc.initial.Expanded, tc.wantExpanded) {
+				t.Errorf("Expanded = %v, want %v", tc.initial.Expanded, tc.wantExpanded)
+			}
+		})
 	}
 }
 
 func TestRemove(t *testing.T) {
-	t.Run("removes a note everywhere", func(t *testing.T) {
-		s := &State{
-			Recents:  []string{"Work/a.md", "Work/b.md"},
-			LastNote: "Work/a.md",
-			Cursor: map[string][2]int{
-				"Work/a.md": {1, 1},
-				"Work/b.md": {2, 2},
+	cases := []struct {
+		name         string
+		initial      *State
+		remove       string
+		wantRecents  []string
+		wantLastNote string
+		wantCursor   map[string][2]int
+		wantExpanded []string
+	}{
+		{
+			name: "removes a note everywhere",
+			initial: &State{
+				Recents:  []string{"Work/a.md", "Work/b.md"},
+				LastNote: "Work/a.md",
+				Cursor: map[string][2]int{
+					"Work/a.md": {1, 1},
+					"Work/b.md": {2, 2},
+				},
+				Expanded: []string{"Work"},
 			},
-			Expanded: []string{"Work"},
-		}
-		s.Remove("Work/a.md")
-
-		if reflect.DeepEqual(s.Recents, []string{"Work/a.md", "Work/b.md"}) {
-			t.Fatal("Recents unchanged")
-		}
-		wantRecents := []string{"Work/b.md"}
-		if !reflect.DeepEqual(s.Recents, wantRecents) {
-			t.Errorf("Recents = %v, want %v", s.Recents, wantRecents)
-		}
-		if s.LastNote != "" {
-			t.Errorf("LastNote = %q, want empty", s.LastNote)
-		}
-		if _, ok := s.Cursor["Work/a.md"]; ok {
-			t.Error("cursor entry for removed note should be gone")
-		}
-		if _, ok := s.Cursor["Work/b.md"]; !ok {
-			t.Error("unrelated cursor entry should remain")
-		}
-	})
-
-	t.Run("removes a folder and its children, not siblings with prefix name", func(t *testing.T) {
-		s := &State{
-			Recents: []string{
-				"Work/a.md",
-				"Work/Sub/b.md",
-				"Work2/c.md",
+			remove:       "Work/a.md",
+			wantRecents:  []string{"Work/b.md"},
+			wantLastNote: "",
+			wantCursor:   map[string][2]int{"Work/b.md": {2, 2}},
+			wantExpanded: []string{"Work"},
+		},
+		{
+			name: "removes a folder and its children, not a same-prefix sibling",
+			initial: &State{
+				Recents: []string{
+					"Work/a.md",
+					"Work/Sub/b.md",
+					"Work2/c.md", // must NOT match "Work" prefix
+				},
+				LastNote: "Work/Sub/b.md",
+				Cursor: map[string][2]int{
+					"Work/a.md":     {1, 1},
+					"Work/Sub/b.md": {2, 2},
+					"Work2/c.md":    {3, 3},
+				},
+				Expanded: []string{"Work", "Work/Sub", "Work2"},
 			},
-			LastNote: "Work/Sub/b.md",
-			Cursor: map[string][2]int{
-				"Work/a.md":     {1, 1},
-				"Work/Sub/b.md": {2, 2},
-				"Work2/c.md":    {3, 3},
-			},
-			Expanded: []string{"Work", "Work/Sub", "Work2"},
-		}
-		s.Remove("Work")
+			remove:       "Work",
+			wantRecents:  []string{"Work2/c.md"},
+			wantLastNote: "",
+			wantCursor:   map[string][2]int{"Work2/c.md": {3, 3}},
+			wantExpanded: []string{"Work2"},
+		},
+	}
 
-		wantRecents := []string{"Work2/c.md"}
-		if !reflect.DeepEqual(s.Recents, wantRecents) {
-			t.Errorf("Recents = %v, want %v", s.Recents, wantRecents)
-		}
-		if s.LastNote != "" {
-			t.Errorf("LastNote = %q, want empty", s.LastNote)
-		}
-		wantCursor := map[string][2]int{"Work2/c.md": {3, 3}}
-		if !reflect.DeepEqual(s.Cursor, wantCursor) {
-			t.Errorf("Cursor = %v, want %v", s.Cursor, wantCursor)
-		}
-		wantExpanded := []string{"Work2"}
-		if !reflect.DeepEqual(s.Expanded, wantExpanded) {
-			t.Errorf("Expanded = %v, want %v", s.Expanded, wantExpanded)
-		}
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.initial.Remove(tc.remove)
+
+			if !reflect.DeepEqual(tc.initial.Recents, tc.wantRecents) {
+				t.Errorf("Recents = %v, want %v", tc.initial.Recents, tc.wantRecents)
+			}
+			if tc.initial.LastNote != tc.wantLastNote {
+				t.Errorf("LastNote = %q, want %q", tc.initial.LastNote, tc.wantLastNote)
+			}
+			if !reflect.DeepEqual(tc.initial.Cursor, tc.wantCursor) {
+				t.Errorf("Cursor = %v, want %v", tc.initial.Cursor, tc.wantCursor)
+			}
+			if !reflect.DeepEqual(tc.initial.Expanded, tc.wantExpanded) {
+				t.Errorf("Expanded = %v, want %v", tc.initial.Expanded, tc.wantExpanded)
+			}
+		})
+	}
 }
