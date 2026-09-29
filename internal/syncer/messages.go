@@ -64,6 +64,12 @@ type TrashWarning struct {
 }
 
 // Update is sent to the UI on every state change and after every merge.
+//
+// Updates are delivered asynchronously through Syncer.Updates, while Host
+// calls are made synchronously from the syncer's worker. The UI must
+// therefore not rely on their relative order: the Update carrying a merge's
+// Reindex/Reload (or its Conflict and Conflicted) may arrive before or after
+// the matching Host.UnlockMutations call.
 type Update struct {
 	Status Status
 	// Reindex lists every path the last merge changed, including the old

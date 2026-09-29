@@ -26,7 +26,8 @@ type Host interface {
 	Flush() error
 	// LockMutations locks every action that changes files for the locked
 	// merge section (spec §7); UnlockMutations releases them, with the set
-	// of paths left conflicted by the merge.
+	// of paths left conflicted by the merge. The Update describing the same
+	// merge may arrive before or after UnlockMutations (see Update).
 	LockMutations()
 	UnlockMutations(conflicted map[string]bool)
 	// PauseWatcher and ResumeWatcher bracket the merge, which rewrites the
