@@ -45,6 +45,9 @@ func TestDisplayWidth(t *testing.T) {
 		{eAcute, 1},
 		{cjk, 4},
 		{"a日b", 4},
+		{"\t", 0}, // tabs are expanded by the renderer, not here
+		{"a\tb", 2},
+		{"\x1b", 0},
 	}
 	for _, tt := range tests {
 		if got := DisplayWidth(tt.in); got != tt.want {

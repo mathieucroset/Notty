@@ -23,7 +23,9 @@ func graphemeCount(s string) int {
 }
 
 // DisplayWidth returns the number of terminal cells s occupies
-// (CJK and emoji are 2 cells wide).
+// (CJK and emoji are 2 cells wide). Tabs and other control characters count
+// as width 0: DisplayWidth knows nothing about tab stops, so the renderer
+// must expand tabs itself before (or while) measuring.
 func DisplayWidth(s string) int {
 	return uniseg.StringWidth(s)
 }
