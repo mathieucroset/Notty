@@ -146,7 +146,8 @@ func (m Model) SetTheme(styles theme.Styles, palette theme.Palette) (Model, tea.
 	m.styles, m.palette = styles, palette
 	m.gen++
 	m.needTick = false
-	return m, m.requestRender()
+	cmd := m.requestRender()
+	return m, cmd
 }
 
 // SetOverlayOpen swaps images for chips while an overlay is open, since
@@ -164,7 +165,8 @@ func (m Model) SetTerminalReady() (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.ready = true
-	return m, m.syncKitty()
+	cmd := m.syncKitty()
+	return m, cmd
 }
 
 // ResetKittyState forgets every transmitted image and holds transmissions
@@ -189,6 +191,12 @@ func (m Model) KittyCleanup() string {
 }
 
 // Update handles the render pipeline messages and, in ModeFull, keys.
+//
+// The parent must forward every message the preview's commands produce
+// (render ticks and results) to Update, including while an overlay is open
+// or another view has focus: a dropped result leaves the pipeline waiting
+// for it and the preview stops re-rendering. Keys should only be forwarded
+// when the preview has focus.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	if m.needTick {
@@ -308,7 +316,8 @@ func (m Model) applyRender(msg renderedMsg) (Model, tea.Cmd) {
 		m.imgIdx = len(m.doc.images) - 1
 	}
 	m.clampOffset()
-	return m, m.syncKitty()
+	cmd := m.syncKitty()
+	return m, cmd
 }
 
 // syncKitty makes the terminal's images match the current document, as
