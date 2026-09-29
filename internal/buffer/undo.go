@@ -16,6 +16,12 @@ type change struct {
 type step struct {
 	changes       []change
 	before, after uint64
+
+	// cursor is where Undo puts the cursor when hasCursor is set (the
+	// position passed to BeginGroupAt); otherwise Undo uses the start of the
+	// change.
+	cursor    Pos
+	hasCursor bool
 }
 
 // history holds the undo machinery; it is embedded in Buffer.
@@ -24,6 +30,10 @@ type history struct {
 	pending    *step // open group's step, nil until its first edit
 	groupDepth int
 
+	// cursor to restore on undo for the open group (BeginGroupAt)
+	groupCursor    Pos
+	groupHasCursor bool
+
 	state     uint64 // id of the current state
 	saved     uint64 // id of the state last marked saved
 	lastState uint64 // highest state id handed out
@@ -31,7 +41,23 @@ type history struct {
 
 // BeginGroup opens an undo group. Groups nest; all edits until the matching
 // outermost EndGroup undo as a single step.
-func (b *Buffer) BeginGroup() { b.groupDepth++ }
+func (b *Buffer) BeginGroup() {
+	if b.groupDepth == 0 {
+		b.groupHasCursor = false
+	}
+	b.groupDepth++
+}
+
+// BeginGroupAt is BeginGroup that also records cursor as the position to
+// restore when the group's step is undone (an editor passes the cursor from
+// before the change, so undo returns there even if the change started
+// elsewhere). Inside an already open group, cursor is ignored.
+func (b *Buffer) BeginGroupAt(cursor Pos) {
+	if b.groupDepth == 0 {
+		b.groupCursor, b.groupHasCursor = cursor, true
+	}
+	b.groupDepth++
+}
 
 // EndGroup closes an undo group. Unbalanced calls are ignored.
 func (b *Buffer) EndGroup() {
@@ -68,6 +94,7 @@ func (b *Buffer) record(c change) {
 	if b.groupDepth > 0 {
 		if b.pending == nil {
 			b.pending = b.newStep()
+			b.pending.cursor, b.pending.hasCursor = b.groupCursor, b.groupHasCursor
 		} else {
 			b.lastState++
 			b.pending.after = b.lastState
@@ -81,9 +108,9 @@ func (b *Buffer) record(c change) {
 	b.undo = append(b.undo, s)
 }
 
-// Undo reverts the most recent step and returns the start of the change,
-// which also becomes the cursor. It reports false if there is nothing to
-// undo. Calling Undo inside an open group first closes off that group's
+// Undo reverts the most recent step and returns the start of the change (or
+// the cursor recorded by BeginGroupAt), which also becomes the cursor. It
+// reports false if there is nothing to undo. Calling Undo inside an open group first closes off that group's
 // edits as their own step.
 func (b *Buffer) Undo() (Pos, bool) {
 	b.commitPending()
@@ -99,6 +126,10 @@ func (b *Buffer) Undo() (Pos, bool) {
 	}
 	b.state = s.before
 	b.redo = append(b.redo, s)
+	if s.hasCursor {
+		b.cursor = b.Clamp(s.cursor)
+		return b.cursor, true
+	}
 	return b.restoreCursor(s), true
 }
 
