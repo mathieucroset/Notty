@@ -95,7 +95,7 @@ func TestAcquireLockHeld(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer l.Release()
+				defer func() { _ = l.Release() }()
 			} else {
 				writeLock(t, root, tt.content)
 			}
@@ -141,7 +141,7 @@ func TestAcquireLockStale(t *testing.T) {
 			if err != nil {
 				t.Fatalf("AcquireLock over stale lock: %v", err)
 			}
-			defer l.Release()
+			defer func() { _ = l.Release() }()
 			if got := readLock(t, root); got != ours() {
 				t.Errorf("lock content = %q, want %q", got, ours())
 			}
@@ -172,7 +172,7 @@ func TestAcquireLockDanglingSymlinkIsStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcquireLock over dangling symlink: %v", err)
 	}
-	defer l.Release()
+	defer func() { _ = l.Release() }()
 	fi, err := os.Lstat(lockPath(root))
 	if err != nil || !fi.Mode().IsRegular() {
 		t.Fatalf("lock is not a regular file: %v", err)
@@ -202,7 +202,7 @@ func TestAcquireLockWaits(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer l.Release()
+		defer func() { _ = l.Release() }()
 		start := time.Now()
 		_, err = AcquireLock(root, 300*time.Millisecond)
 		elapsed := time.Since(start)

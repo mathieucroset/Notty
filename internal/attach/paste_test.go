@@ -25,7 +25,7 @@ func TestParsePastedPath(t *testing.T) {
 	if err := os.WriteFile(homeImg, []byte("x"), 0o644); err != nil {
 		t.Skipf("cannot write to home dir: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(homeImg) })
+	t.Cleanup(func() { _ = os.Remove(homeImg) })
 
 	exists := func(p string) bool {
 		_, err := os.Stat(p)
