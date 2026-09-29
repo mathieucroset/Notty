@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,9 @@ type Config struct {
 	LineNumbers bool `toml:"line_numbers"`
 	Editor      string
 	AutosaveMS  int `toml:"autosave_ms"`
+	// Icons is the glyph set the UI draws with: "nerd" (needs a Nerd
+	// Font), "unicode" (the default), or "ascii".
+	Icons string `toml:"icons"`
 
 	Sync struct {
 		Enabled        bool `toml:"enabled"`
@@ -52,6 +56,7 @@ func Default() Config {
 	c.LineNumbers = false
 	c.Editor = ""
 	c.AutosaveMS = 1000
+	c.Icons = "unicode"
 	c.Sync.Enabled = true
 	c.Sync.CommitDelayS = 5
 	c.Sync.FetchIntervalM = 5
@@ -99,7 +104,8 @@ type overlay struct {
 	Vim         *bool
 	LineNumbers *bool `toml:"line_numbers"`
 	Editor      *string
-	AutosaveMS  *int `toml:"autosave_ms"`
+	AutosaveMS  *int    `toml:"autosave_ms"`
+	Icons       *string `toml:"icons"`
 
 	Sync struct {
 		Enabled        *bool `toml:"enabled"`
@@ -142,6 +148,9 @@ func applyOverlay(c *Config, ov overlay) {
 	}
 	if ov.AutosaveMS != nil {
 		c.AutosaveMS = *ov.AutosaveMS
+	}
+	if ov.Icons != nil {
+		c.Icons = *ov.Icons
 	}
 	if ov.Sync.Enabled != nil {
 		c.Sync.Enabled = *ov.Sync.Enabled
@@ -210,8 +219,15 @@ func Load(localPath string, vaultRoot string) (Config, error) {
 	}
 	applyOverlay(&c, localOv)
 
+	if !slices.Contains(IconSets, c.Icons) {
+		return Config{}, fmt.Errorf("config: icons must be one of %s, not %q", strings.Join(IconSets, ", "), c.Icons)
+	}
 	return c, nil
 }
+
+// IconSets are the accepted values of the icons key, in the order the
+// README lists them.
+var IconSets = []string{"nerd", "unicode", "ascii"}
 
 // validConfigKeys is the exact set of keys SetKey accepts, matching the
 // Config schema (spec §10): bare top-level keys, and dotted "table.field"
@@ -223,6 +239,7 @@ var validConfigKeys = map[string]bool{
 	"line_numbers":          true,
 	"editor":                true,
 	"autosave_ms":           true,
+	"icons":                 true,
 	"sync.enabled":          true,
 	"sync.commit_delay_s":   true,
 	"sync.fetch_interval_m": true,
