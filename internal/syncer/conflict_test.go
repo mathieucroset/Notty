@@ -97,6 +97,83 @@ func TestTextConflictEntersConflict(t *testing.T) {
 	h.wantState(Conflict)
 }
 
+// failPathConflicts makes auto-resolution fail.
+type failPathConflicts struct{ *spyRepo }
+
+func (r *failPathConflicts) PathConflicts() ([]gitsync.PathConflict, []gitsync.Conflict, error) {
+	return nil, nil, errors.New("boom")
+}
+
+// failConflictedFiles fails the first n ConflictedFiles calls (n < 0: all).
+type failConflictedFiles struct {
+	*spyRepo
+	n int
+}
+
+func (r *failConflictedFiles) ConflictedFiles() ([]gitsync.Conflict, error) {
+	if r.n != 0 {
+		r.n--
+		return nil, errors.New("ls-files failed")
+	}
+	return r.spyRepo.ConflictedFiles()
+}
+
+func TestConflictedSetSurvivesFailures(t *testing.T) {
+	tests := []struct {
+		name       string
+		wrap       func(*spyRepo) repoAPI
+		wantUnlock map[string]bool
+	}{
+		{"auto-resolve fails", func(r *spyRepo) repoAPI { return &failPathConflicts{r} }, map[string]bool{"note.md": true}},
+		{"listing fails once", func(r *spyRepo) repoAPI { return &failConflictedFiles{r, 1} }, map[string]bool{"note.md": true}},
+		{"listing always fails", func(r *spyRepo) repoAPI { return &failConflictedFiles{r, -1} }, map[string]bool{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := gittest.New(t)
+			shareBase(t, env, func(r *gitsync.Repo) { gittest.Write(t, r, "note.md", "line\n") })
+			h := newHarness(t, env.Laptop)
+			h.start()
+			h.s.repo = tt.wrap(h.repo)
+			deskPush(t, env, func(r *gitsync.Repo) { gittest.Write(t, r, "note.md", "desktop\n") })
+			gittest.Write(t, env.Laptop, "note.md", "laptop\n")
+			h.host.reset()
+			h.s.NoteChanged("note.md")
+			h.advance(5 * time.Second)
+
+			h.wantState(Conflict)
+			if !env.Laptop.MergeInProgress() {
+				t.Fatalf("merge not in progress")
+			}
+			if len(h.host.unlocks) != 1 || !maps.Equal(h.host.unlocks[0], tt.wantUnlock) {
+				t.Fatalf("UnlockMutations got %v, want [%v]", h.host.unlocks, tt.wantUnlock)
+			}
+			if got := h.clock.Pending(); len(got) != 0 {
+				t.Fatalf("timers pending in Conflict: %v", got)
+			}
+		})
+	}
+}
+
+func TestStartConflictWhenListingFails(t *testing.T) {
+	env := gittest.New(t)
+	shareBase(t, env, func(r *gitsync.Repo) { gittest.Write(t, r, "note.md", "line\n") })
+	deskPush(t, env, func(r *gitsync.Repo) { gittest.Write(t, r, "note.md", "desktop\n") })
+	gittest.Write(t, env.Laptop, "note.md", "laptop\n")
+	gittest.CommitAll(t, env.Laptop, "Update note.md · laptop")
+	if err := env.Laptop.Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_ = env.Laptop.Merge("origin/main", false)
+	h := newHarness(t, reopen(env.Laptop))
+	h.s.repo = &failConflictedFiles{h.repo, -1}
+	h.start()
+	h.wantState(Conflict)
+	if h.repo.addAlls.Load() != 0 {
+		t.Fatalf("AddAll called during a merge")
+	}
+}
+
 func TestQuitDuringConflictDoesNotCommit(t *testing.T) {
 	env, h := conflictHarness(t)
 	before := head(t, env.Laptop)

@@ -548,11 +548,8 @@ func (s *Syncer) armFetch() {
 // stopped before committing the merge) it commits the merge and returns true.
 func (s *Syncer) concludeMerge() bool {
 	paths, err := s.conflictedPaths()
-	if err != nil {
-		s.fail(err)
-		return false
-	}
-	if len(paths) > 0 {
+	if err != nil || len(paths) > 0 {
+		// Unknown conflicts are still conflicts: stay safe in Conflict.
 		s.enterConflict(Update{}, paths)
 		return false
 	}
@@ -756,6 +753,15 @@ func (s *Syncer) mergeSection() (outcome mergeOutcome, err error) {
 	s.host.LockMutations()
 	s.host.PauseWatcher()
 	defer func() {
+		// Safety net: never unlock a merge in progress with an empty set
+		// when git can still list the conflicted files.
+		if len(conflictSet) == 0 && s.repo.MergeInProgress() {
+			if cs, err := s.repo.ConflictedFiles(); err == nil {
+				for _, c := range cs {
+					conflictSet[c.Path] = true
+				}
+			}
+		}
 		s.host.ResumeWatcher()
 		s.host.UnlockMutations(conflictSet)
 	}()
@@ -783,18 +789,21 @@ func (s *Syncer) mergeSection() (outcome mergeOutcome, err error) {
 	if err != nil && !stopped {
 		return merged, fmt.Errorf("syncer: merge: %w", err)
 	}
+	// Once the merge has stopped with conflicts, nothing may return before
+	// the conflicted set is known: the UI must learn which notes to protect.
 	var paths []string
+	listFailed := false
 	if stopped {
-		if err := s.autoResolve(); err != nil {
-			return merged, err
-		}
-		if paths, err = s.conflictedPaths(); err != nil {
-			return merged, err
-		}
+		// Best effort: whatever auto-resolution cannot handle is left to the
+		// resolver.
+		_ = s.autoResolve()
+		var lerr error
+		paths, lerr = s.conflictedPaths()
+		listFailed = lerr != nil
 	}
 	reindex, reload := s.reindex()
 	u := Update{Reindex: reindex, Reload: reload}
-	if len(paths) > 0 {
+	if len(paths) > 0 || listFailed {
 		for _, p := range paths {
 			conflictSet[p] = true
 		}
