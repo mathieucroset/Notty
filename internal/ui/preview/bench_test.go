@@ -117,6 +117,26 @@ func TestPiecesRenderLikeTheWholeBlock(t *testing.T) {
 	}
 }
 
+func TestImageBetweenListPiecesKeepsSeparator(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	m, _ = setContent(t, m, "n.md", repeat(40, func(i int) string {
+		if i == 20 {
+			return "- item 20 ![pic](p.png)\n"
+		}
+		return fmt.Sprintf("- item %d\n", i)
+	}))
+	if len(m.doc.images) != 1 {
+		t.Fatalf("%d images, want 1", len(m.doc.images))
+	}
+	below := m.doc.imgTop[0] + m.doc.imgRows[0]
+	if got := strings.TrimSpace(ansi.Strip(m.doc.lines[below].text)); got != "" {
+		t.Fatalf("row under the image block = %q, want a blank separator", got)
+	}
+	if got := ansi.Strip(m.doc.lines[below+1].text); !strings.Contains(got, "item 32") {
+		t.Fatalf("row after the separator = %q, want the next list piece", got)
+	}
+}
+
 func TestOrderedListOfOnesKeepsNumbering(t *testing.T) {
 	m := newTest(t, imgrender.ProtoOff, t.TempDir())
 	m, _ = setContent(t, m, "n.md", repeat(40, func(int) string { return "1. x\n" }))

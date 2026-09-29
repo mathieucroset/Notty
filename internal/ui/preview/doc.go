@@ -56,7 +56,10 @@ func (d *doc) layout() {
 	for si, seg := range d.segs {
 		b := d.blocks[si]
 		if seg.Kind == Text {
-			if len(b.text) > 0 && !seg.cont {
+			// A list piece sits right under the previous piece, but an image
+			// block in between keeps its blank row.
+			underPiece := seg.cont && si > 0 && d.segs[si-1].Kind == Text
+			if len(b.text) > 0 && !underPiece {
 				sep()
 			}
 			d.segTop[si] = len(d.lines)
