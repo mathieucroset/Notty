@@ -1,10 +1,13 @@
 package finder
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mathieucroset/notty/internal/index"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 )
 
@@ -168,5 +171,78 @@ func TestFullTextEmptyQueryClearsHitsWithoutDebounce(t *testing.T) {
 	}
 	if m.searching {
 		t.Error("searching should be false for an empty query")
+	}
+}
+
+// TestFullTextHitRowsShowContext checks spec §8: each full-text hit shows
+// one line of context (hit.Context, dimmed) in addition to its location and
+// matching text, so each item occupies 3 rows.
+func TestFullTextHitRowsShowContext(t *testing.T) {
+	if got := (Model{mode: FullText}).rowHeight(); got != 3 {
+		t.Fatalf("rowHeight() for FullText = %d, want 3", got)
+	}
+	if got := (Model{mode: Fuzzy}).rowHeight(); got != 2 {
+		t.Fatalf("rowHeight() for Fuzzy = %d, want 2", got)
+	}
+
+	n := note("notes.md", "# Notes\n\nFirst context line\nShipped the auth flow today.\nAfter line\n")
+	m := New(FullText, []*index.Note{n}, nil, testStyles(t), testPalette(t))
+	m = m.SetSize(100, 40)
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "auth"})
+	dm := cmd().(debounceMsg)
+	m, searchCmd := m.Update(dm)
+	res := searchCmd().(ftResultMsg)
+	m, _ = m.Update(res)
+
+	if len(m.hits) != 1 {
+		t.Fatalf("hits = %+v, want exactly 1", m.hits)
+	}
+	if m.hits[0].Context != "After line" {
+		t.Fatalf("hit.Context = %q, want %q", m.hits[0].Context, "After line")
+	}
+
+	rows := m.hitItemLines(0, 40, false)
+	if len(rows) != 3 {
+		t.Fatalf("hitItemLines returned %d rows, want 3 (loc, text, context)", len(rows))
+	}
+	loc, text, context := ansi.Strip(rows[0]), ansi.Strip(rows[1]), ansi.Strip(rows[2])
+	if !strings.Contains(loc, "notes.md:4") {
+		t.Errorf("row 0 (location) = %q, want it to contain %q", loc, "notes.md:4")
+	}
+	if !strings.Contains(text, "Shipped the auth flow today.") {
+		t.Errorf("row 1 (text) = %q, want it to contain the matching line", text)
+	}
+	if !strings.Contains(context, "After line") {
+		t.Errorf("row 2 (context) = %q, want it to contain the context line %q", context, "After line")
+	}
+}
+
+// TestListPaneGroupsFullTextHitsInThrees checks that the list pane lays out
+// full-text results 3 lines per item (not 2, as for fuzzy).
+func TestListPaneGroupsFullTextHitsInThrees(t *testing.T) {
+	n := note("notes.md", "alpha match\nbeta match\ngamma match\ndelta match\n")
+	m := New(FullText, []*index.Note{n}, nil, testStyles(t), testPalette(t))
+	m = m.SetSize(100, 40)
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 'm', Text: "match"})
+	dm := cmd().(debounceMsg)
+	m, searchCmd := m.Update(dm)
+	res := searchCmd().(ftResultMsg)
+	m, _ = m.Update(res)
+	if len(m.hits) < 2 {
+		t.Fatalf("expected at least 2 hits, got %d", len(m.hits))
+	}
+
+	lines := m.listPane(40, m.bodyHeight())
+	// The second item's location line must be exactly rowHeight (3) lines
+	// after the first item's.
+	firstLoc := ansi.Strip(lines[0])
+	secondLoc := ansi.Strip(lines[3])
+	if !strings.Contains(firstLoc, ":1") {
+		t.Errorf("line 0 = %q, want the first hit's location (line 1)", firstLoc)
+	}
+	if !strings.Contains(secondLoc, ":2") {
+		t.Errorf("line 3 = %q, want the second hit's location (line 2), i.e. rows are grouped in 3s", secondLoc)
 	}
 }

@@ -104,10 +104,11 @@ func (m Model) fullTextStatus() string {
 	return strconv.Itoa(len(m.hits)) + " results"
 }
 
-// hitItemLines renders hit i's two lines: the dim "path:line" location and
-// the matching line text with its matches highlighted, truncated around the
-// first match when the line is too long for width.
-func (m Model) hitItemLines(i, width int, selected bool) (string, string) {
+// hitItemLines renders hit i's three lines (spec §8): the dim "path:line"
+// location, the matching line text with its matches highlighted (truncated
+// around the first match when the line is too long for width), and one line
+// of dim context.
+func (m Model) hitItemLines(i, width int, selected bool) []string {
 	h := m.hits[i]
 	base := m.bgStyle(lipgloss.NewStyle(), selected)
 	match := m.bgStyle(m.styles.Match, selected)
@@ -115,5 +116,6 @@ func (m Model) hitItemLines(i, width int, selected bool) (string, string) {
 
 	loc := " " + dim.Render(h.Path+":"+strconv.Itoa(h.Line+1))
 	text := " " + highlightAround(h.Text, h.Matches, max(width-1, 0), base, match, dim)
-	return padLine(loc, width), padLine(text, width)
+	context := " " + highlightAround(h.Context, nil, max(width-1, 0), dim, dim, dim)
+	return []string{padLine(loc, width), padLine(text, width), padLine(context, width)}
 }

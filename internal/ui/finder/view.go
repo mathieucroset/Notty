@@ -105,20 +105,19 @@ func (m Model) bodyRows(cw int, wrap func(string) string) []string {
 	return out
 }
 
-// listPane renders the results list body: itemLines lines per row, windowed
+// listPane renders the results list body: rowHeight lines per row, windowed
 // by m.offset, with a hint row when there are no results.
 func (m Model) listPane(width, height int) []string {
 	blank := m.bgStyle(lipgloss.NewStyle(), false).Render(strings.Repeat(" ", max(width, 0)))
 	out := make([]string, 0, height)
 
-	n, rows := m.itemCount(), height/itemLines
+	n, rows := m.itemCount(), height/m.rowHeight()
 	for r := 0; r < rows; r++ {
 		i := m.offset + r
 		if i >= n {
 			break
 		}
-		l1, l2 := m.resultLines(i, width)
-		out = append(out, l1, l2)
+		out = append(out, m.resultLines(i, width)...)
 	}
 	if n == 0 {
 		out = append(out, padLine(" "+m.bgStyle(m.styles.Muted, false).Render(m.emptyHint()), width))
@@ -139,8 +138,9 @@ func (m Model) emptyHint() string {
 	return "type to search"
 }
 
-// resultLines dispatches to the mode-specific row renderer for result i.
-func (m Model) resultLines(i, width int) (string, string) {
+// resultLines dispatches to the mode-specific row renderer for result i,
+// returning its rowHeight lines.
+func (m Model) resultLines(i, width int) []string {
 	selected := i == m.cursor
 	if m.mode == Fuzzy {
 		return m.fuzzyItemLines(i, width, selected)

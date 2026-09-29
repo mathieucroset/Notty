@@ -36,7 +36,7 @@ func (m Model) fuzzyStatus() string {
 // fuzzyItemLines renders result i's two lines: the title (with matched
 // runes highlighted) and the dim path underneath (with its own matches
 // highlighted).
-func (m Model) fuzzyItemLines(i, width int, selected bool) (string, string) {
+func (m Model) fuzzyItemLines(i, width int, selected bool) []string {
 	r := m.fuzzy[i]
 	base := m.bgStyle(lipgloss.NewStyle(), selected)
 	match := m.bgStyle(m.styles.Match, selected)
@@ -48,5 +48,8 @@ func (m Model) fuzzyItemLines(i, width int, selected bool) (string, string) {
 	}
 	line1 := " " + styleRuneIndexes(title, r.TitleMatches, base, match)
 	line2 := "  " + styleRuneIndexes(r.Path, r.PathMatches, dim, match)
-	return padLine(ansi.Truncate(line1, width, "…"), width), padLine(ansi.Truncate(line2, width, "…"), width)
+	return []string{
+		padLine(ansi.Truncate(line1, width, "…"), width),
+		padLine(ansi.Truncate(line2, width, "…"), width),
+	}
 }

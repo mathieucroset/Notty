@@ -47,11 +47,6 @@ const (
 	// list; the rest goes to the preview, minus the one-column separator.
 	listWidthPct = 45
 
-	// itemLines is the number of visual lines each result row occupies (a
-	// primary line and a secondary line), for both fuzzy results and
-	// full-text hits.
-	itemLines = 2
-
 	// fixedRows is the number of content rows that are always drawn
 	// regardless of body size: header, input, status, footer.
 	fixedRows = 4
@@ -157,10 +152,19 @@ func (m Model) bodyHeight() int {
 	return max(m.height-2-fixedRows, 0)
 }
 
-// listRows is the number of result rows (itemLines lines each) the list
-// pane can show at once.
+// rowHeight is the number of visual lines each result row occupies: two for
+// a fuzzy result (title, dim path), three for a full-text hit (path:line,
+// matching text, dim context line — spec §8).
+func (m Model) rowHeight() int {
+	if m.mode == FullText {
+		return 3
+	}
+	return 2
+}
+
+// listRows is the number of result rows the list pane can show at once.
 func (m Model) listRows() int {
-	return max(m.bodyHeight()/itemLines, 1)
+	return max(m.bodyHeight()/m.rowHeight(), 1)
 }
 
 // Update handles key presses, the full-text debounce tick and search
