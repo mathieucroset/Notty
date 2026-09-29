@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/glamour/v2"
+	chromastyles "github.com/alecthomas/chroma/v2/styles"
 )
 
 // wantModes is the fixed set of status-bar modes every palette's Styles must
@@ -155,6 +156,17 @@ func TestChromaStyleDoesNotLeakAcrossPalettes(t *testing.T) {
 	if mocha == latte {
 		t.Fatalf("rendered code block is identical between catppuccin-mocha and catppuccin-latte; chroma style is leaking across palettes")
 	}
+}
+
+func TestChromaStylesRegisteredAtInit(t *testing.T) {
+	// Package init must have registered every built-in palette's style,
+	// so rendering never writes chroma's (unlocked) registry.
+	for _, name := range Names() {
+		if _, ok := chromastyles.Registry["notty-"+name]; !ok {
+			t.Errorf("chroma style for %q not registered at init", name)
+		}
+	}
+	RegisterChromaStyles() // idempotent
 }
 
 func TestChromaStyleNameStableAndUnique(t *testing.T) {
