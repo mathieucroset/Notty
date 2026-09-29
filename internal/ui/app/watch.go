@@ -31,7 +31,7 @@ type watchErrMsg struct{ err error }
 type savedMsg struct {
 	path    string
 	content string
-	version int
+	version uint64
 	err     error
 	// restoredFrom is the short revision when the save restores a
 	// history version, so the toast waits for the save to succeed.
@@ -131,7 +131,7 @@ func (m *Model) closeWatcher() {
 
 // saveNoteCmd saves content to the note at p atomically, tells the watcher
 // the write is ours, and indexes the new content.
-func (m *Model) saveNoteCmd(p, content string, version int) tea.Cmd {
+func (m *Model) saveNoteCmd(p, content string, version uint64) tea.Cmd {
 	v, w, ix := m.opts.Vault, m.opts.Watcher, m.ix
 	if v == nil {
 		return nil
@@ -157,10 +157,8 @@ func (m *Model) handleSaved(msg savedMsg) tea.Cmd {
 		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s: %v", msg.path, msg.err))
 	}
 	m.queueReindex(msg.path)
-	if msg.path == m.note.path {
-		m.handleNoteReloaded(noteReloadedMsg{path: msg.path, content: msg.content})
-		m.note.dirty = false
-	}
+	m.editor = m.editor.MarkSaved(msg.path, msg.version)
+	m.sidebar.SetDirty(m.dirtyPath())
 	m.refreshIndexViews()
 	if msg.restoredFrom != "" {
 		return m.pushToast(msgs.ToastInfo, fmt.Sprintf("Restored %s from %s", displayName(msg.path), msg.restoredFrom))

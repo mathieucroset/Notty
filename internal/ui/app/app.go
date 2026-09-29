@@ -13,12 +13,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/mathieucroset/notty/internal/buffer"
 	"github.com/mathieucroset/notty/internal/config"
 	"github.com/mathieucroset/notty/internal/imgrender"
 	"github.com/mathieucroset/notty/internal/index"
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
 	"github.com/mathieucroset/notty/internal/ui/dialog"
+	"github.com/mathieucroset/notty/internal/ui/editor"
 	"github.com/mathieucroset/notty/internal/ui/history"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/sidebar"
@@ -55,6 +57,9 @@ type Options struct {
 	// ConfigPath is the local config.toml that palette settings are
 	// written to (config.ConfigPath() when empty).
 	ConfigPath string
+	// Clipboard is the system clipboard the editor pastes from
+	// (clipboard.Default() when nil).
+	Clipboard editor.Clipboard
 }
 
 // Focus is the pane with keyboard focus.
@@ -88,14 +93,11 @@ const (
 
 const sidebarTitle = "◆ Notty"
 
-// note is the open note. The content is a placeholder until the editor
-// component exists (Task 18).
+// note describes the open note; its text lives in the editor buffer.
 type note struct {
-	path    string
-	title   string
-	content string
-	words   int
-	dirty   bool
+	path  string
+	title string
+	words int
 }
 
 // Model is the root model.
@@ -148,6 +150,16 @@ type Model struct {
 	note        note
 	openSeq     int // number of the latest open request
 	sync        msgs.SyncStatusMsg
+
+	// editor holds the open note's buffer.
+	editor editor.Model
+	// editorStatus is the editor's last message (unknown command, search
+	// wrapped), shown in the status row until the next key.
+	editorStatus string
+
+	// deferred are commands produced by helpers that cannot return one
+	// (a resize, a theme change); Update batches them with its result.
+	deferred []tea.Cmd
 }
 
 // New builds the root model.
@@ -169,6 +181,7 @@ func New(opts Options) *Model {
 		localSaver:     &orderedSaver{},
 		tasks:          tasksview.New(opts.Styles, opts.Config.Tasks.DueSoonDays, opts.Config.Tasks.ShowDone),
 		trash:          trash.New(opts.Styles, opts.Palette),
+		editor:         newEditor(opts),
 	}
 	m.sidebar.SetExpanded(opts.Local.Expanded)
 	m.sidebar.SetPins(opts.Pins.Pins)
@@ -219,6 +232,15 @@ func (m *Model) reopenLastNoteCmd() tea.Cmd {
 
 // Update handles a message.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	_, cmd := m.update(msg)
+	if len(m.deferred) > 0 {
+		cmd = tea.Batch(append([]tea.Cmd{cmd}, m.deferred...)...)
+		m.deferred = nil
+	}
+	return m, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -244,12 +266,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.PasteMsg:
+		return m, m.handlePaste(msg)
+
 	case msgs.OpenNoteMsg:
-		if m.opts.Vault == nil {
-			return m, nil
-		}
-		m.openSeq++
-		return m, loadNoteCmd(m.opts.Vault, msg.Path, m.openSeq)
+		return m, m.openNote(msg)
 
 	case noteLoadedMsg:
 		if msg.seq != m.openSeq {
@@ -258,7 +279,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, errorToast("Could not open %s: %v", msg.path, msg.err)
 		}
-		return m, m.showNote(msg.path, msg.content)
+		return m, m.showNote(msg.path, msg.content, msg.line)
+
+	case editor.ChangedMsg:
+		return m, m.handleEditorChanged(msg)
+	case editor.AutosaveTickMsg:
+		var cmd tea.Cmd
+		m.editor, cmd = m.editor.Update(msg)
+		return m, cmd
+	case editor.StatusMsg:
+		m.editorStatus = msg.Text
+	case msgs.SaveRequestMsg:
+		return m, m.saveRequest()
 
 	case msgs.FocusMainMsg:
 		m.setFocus(FocusMain)
@@ -316,7 +348,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case externalDoneMsg:
 		return m, m.handleExternalDone(msg)
 	case noteReloadedMsg:
-		m.handleNoteReloaded(msg)
+		return m, m.handleNoteReloaded(msg)
 	case watchEventMsg:
 		return m, m.handleWatchEvent(msg)
 	case watchErrMsg:
@@ -343,10 +375,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd, ok := m.updateCommandMsg(msg); ok {
 			return m, cmd
 		}
-		// Toast expiry ticks.
-		var cmd tea.Cmd
-		m.toast, cmd = m.toast.Update(msg)
-		return m, cmd
+		// Everything else may belong to a component's own pipeline: the
+		// editor's timers and clipboard reads, toast expiry ticks.
+		var edCmd, toastCmd tea.Cmd
+		m.editor, edCmd = m.editor.Update(msg)
+		m.toast, toastCmd = m.toast.Update(msg)
+		return m, tea.Batch(edCmd, toastCmd)
 	}
 	return m, nil
 }
@@ -366,14 +400,24 @@ func (m *Model) quit() tea.Cmd {
 	return tea.Quit
 }
 
-// showNote records the open note and moves focus to the main pane.
-func (m *Model) showNote(p, content string) tea.Cmd {
-	m.note = note{
-		path:    p,
-		title:   vault.Title(content, p),
-		content: content,
-		words:   len(strings.Fields(content)),
+// showNote loads a note read from disk into the editor and moves focus to
+// the main pane. line is the line to put the cursor on, or -1 for the
+// cursor saved when the note was last left.
+func (m *Model) showNote(p, content string, line int) tea.Cmd {
+	cur := buffer.Pos{}
+	if line >= 0 {
+		cur.Line = line
+	} else if c, ok := m.opts.Local.Cursor[p]; ok {
+		cur = buffer.Pos{Line: c[0], Col: c[1]}
 	}
+	m.editor = m.editor.SetReadOnly(m.isConflicted(p), "").Load(p, content, cur)
+	m.editorStatus = ""
+	m.note = note{
+		path:  p,
+		title: vault.Title(content, p),
+		words: len(strings.Fields(content)),
+	}
+	m.sidebar.SetDirty("")
 	m.mainView = ViewNote
 	m.opts.Local.Touch(p)
 	m.sidebar.Select(p)
@@ -395,6 +439,7 @@ func (m *Model) setFocus(f Focus) {
 	}
 	m.focus = f
 	m.sidebar.SetFocused(f == FocusSidebar)
+	m.editor = m.editor.SetFocused(f == FocusMain)
 }
 
 func (m *Model) toggleSidebar() {
@@ -422,6 +467,7 @@ func (m *Model) relayout() {
 		h := m.history.SetSize(m.width, m.height)
 		m.history = &h
 	}
+	m.editor = m.editor.SetSize(l.Content.W, l.Content.H)
 	m.resizeOverlay()
 	m.status.SetSize(l.Status.W)
 }
@@ -447,16 +493,10 @@ func (m *Model) syncExpanded() tea.Cmd {
 	return m.saveLocalCmd()
 }
 
-func (m *Model) modeLabel() string {
-	if m.opts.Config.Vim {
-		return "NORMAL"
-	}
-	return "PLAIN"
-}
-
 // View renders the screen.
 func (m *Model) View() tea.View {
 	v := tea.NewView(m.render())
+	v.Cursor = m.cursor()
 	v.AltScreen = true
 	v.WindowTitle = "Notty"
 	return v
@@ -486,15 +526,7 @@ func (m *Model) render() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, panes...)
 
 	// Fill a copy of the status bar: rendering never changes the model.
-	status := m.status
-	status.Mode = m.modeLabel()
-	status.Path = m.note.path
-	if m.indexing {
-		status.Busy = "indexing…"
-	}
-	status.Words = m.note.words
-	status.Sync = m.sync
-	screen := status.View()
+	screen := m.statusRow()
 	if l.Main.H > 0 {
 		screen = body + "\n" + screen
 	}
@@ -533,7 +565,7 @@ func (m *Model) renderMain(l Layout) string {
 		case ViewPreview:
 			right = append(right, "preview")
 		}
-		if m.note.dirty {
+		if m.editor.Dirty() {
 			right = append(right, "●")
 		}
 	}
@@ -573,8 +605,7 @@ func (m *Model) emptyHint() string {
 	return "No note open"
 }
 
-// mainContent renders the placeholder main-pane content at w×h.
-// TODO(Task 18): replace with the editor, preview, Tasks and Trash views.
+// mainContent renders the main-pane content at w×h.
 func (m *Model) mainContent(w, h int) string {
 	st := m.opts.Styles
 	centered := func(s string) string {
@@ -590,6 +621,5 @@ func (m *Model) mainContent(w, h int) string {
 	if m.note.path == "" {
 		return centered(m.emptyHint())
 	}
-	text := strings.NewReplacer("\r", "", "\t", "    ").Replace(strings.TrimRight(m.note.content, "\n"))
-	return " " + strings.ReplaceAll(text, "\n", "\n ")
+	return m.editor.View()
 }

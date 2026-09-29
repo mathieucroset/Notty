@@ -123,9 +123,6 @@ func TestSaveNote(t *testing.T) {
 	if n, _ := m.ix.Get("ideas.md"); !index.HasTag(n, "kept") {
 		t.Error("saved content not indexed")
 	}
-	if !strings.Contains(screen(m), "saved #kept") {
-		t.Errorf("open note not updated:\n%s", screen(m))
-	}
 	// The command reports the version it saved.
 	if msg, ok := m.saveNoteCmd("ideas.md", "x", 9)().(savedMsg); !ok || msg.version != 9 || msg.err != nil {
 		t.Errorf("savedMsg = %+v", msg)

@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -63,6 +65,7 @@ func testOptions(t *testing.T) Options {
 		LocalPath:  localPath,
 		Pins:       &meta.State{Pins: []string{}},
 		ConfigPath: filepath.Join(t.TempDir(), "config.toml"),
+		Clipboard:  &fakeClipboard{},
 	}
 }
 
@@ -91,19 +94,50 @@ func run(t *testing.T, m *Model, msg tea.Msg) []tea.Msg {
 	return produced
 }
 
-// execCmd runs cmd, flattening batches and sequences.
+// cmdTimeout bounds each command run by execCmd: longer timers (autosave,
+// toast expiry) are dropped so the synchronous loop never stalls on them,
+// while the preview's 150ms debounce and the kitty ready tick still fire.
+var cmdTimeout = 200 * time.Millisecond
+
+// execCmd runs cmd, flattening batches (run concurrently) and sequences
+// (run in order). A command still running after cmdTimeout is dropped.
 func execCmd(cmd tea.Cmd) []tea.Msg {
 	if cmd == nil {
 		return nil
 	}
-	res := cmd()
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	var res tea.Msg
+	select {
+	case res = <-done:
+	case <-time.After(cmdTimeout):
+		return nil
+	}
 	switch r := res.(type) {
 	case nil:
 		return nil
 	case tea.BatchMsg:
+		results := make([][]tea.Msg, len(r))
+		var wg sync.WaitGroup
+		for i, c := range r {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				results[i] = execCmd(c)
+			}()
+		}
+		wg.Wait()
 		var out []tea.Msg
-		for _, c := range r {
-			out = append(out, execCmd(c)...)
+		for _, rs := range results {
+			out = append(out, rs...)
+		}
+		return out
+	}
+	// tea.Sequence returns an unexported []tea.Cmd type.
+	if v := reflect.ValueOf(res); v.Kind() == reflect.Slice && v.Type().Elem() == reflect.TypeFor[tea.Cmd]() {
+		var out []tea.Msg
+		for i := range v.Len() {
+			out = append(out, execCmd(v.Index(i).Interface().(tea.Cmd))...)
 		}
 		return out
 	}

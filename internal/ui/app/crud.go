@@ -304,11 +304,19 @@ func (m *Model) pathRenamed(oldPath, newPath string) tea.Cmd {
 	m.sidebar.SetPins(m.opts.Pins.Pins)
 	m.opts.Local.Rename(oldPath, newPath)
 	m.sidebar.SetExpanded(m.opts.Local.Expanded)
+	var rearm tea.Cmd
 	if m.note.path != "" && isUnder(m.note.path, oldPath) {
 		m.note.path = newPath + m.note.path[len(oldPath):]
-		m.note.title = vault.Title(m.note.content, m.note.path)
+		m.note.title = vault.Title(m.editor.Content(), m.note.path)
+		m.editor = m.editor.SetPath(m.note.path)
+		m.sidebar.SetDirty(m.dirtyPath())
+		if m.editor.Dirty() {
+			// The pending autosave tick names the old path: schedule
+			// a new one so the buffer is saved under the new name.
+			rearm = m.editor.ChangeCmd()
+		}
 	}
-	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd())
+	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd(), rearm)
 }
 
 // pathRemoved forgets p (and everything under it) in the pins, the local
@@ -321,8 +329,7 @@ func (m *Model) pathRemoved(p string) tea.Cmd {
 	// TODO(editor pass): keep a dirty buffer open (and offer to save it)
 	// when its file is deleted outside the app.
 	if m.note.path != "" && isUnder(m.note.path, p) {
-		m.note = note{}
-		m.openSeq++ // drop any load still in flight
+		m.closeNote()
 	}
 	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd())
 }

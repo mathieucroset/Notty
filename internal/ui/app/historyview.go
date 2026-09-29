@@ -37,7 +37,7 @@ func (m *Model) openHistory(p string) tea.Cmd {
 	if !strings.EqualFold(path.Ext(p), ".md") {
 		return m.pushToast(msgs.ToastInfo, "History is only available for notes")
 	}
-	v, current, open := m.opts.Vault, m.note.content, m.note.path == p
+	v, current, open := m.opts.Vault, m.editor.Content(), m.note.path == p
 	return func() tea.Msg {
 		if !gitsync.Available() {
 			return historyLoadedMsg{path: p, noGit: true}

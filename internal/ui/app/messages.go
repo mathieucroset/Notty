@@ -24,7 +24,9 @@ type noteLoadedMsg struct {
 	seq     int
 	path    string
 	content string
-	err     error
+	// line is the line to put the cursor on, or -1 for the saved cursor.
+	line int
+	err  error
 }
 
 func emit(msg tea.Msg) tea.Cmd {
@@ -60,15 +62,22 @@ func (m *Model) reloadNoteIf(paths ...string) tea.Cmd {
 	return nil
 }
 
-// handleNoteReloaded shows the re-read content of the open note. A note
-// that could not be read (deleted, say) keeps its last content.
-func (m *Model) handleNoteReloaded(msg noteReloadedMsg) {
-	if msg.err != nil || msg.path != m.note.path {
-		return
+// handleNoteReloaded shows the re-read content of the open note, keeping
+// the cursor on its line. A note that could not be read (deleted, say)
+// keeps its buffer.
+// TODO(external changes): ask before replacing a dirty buffer.
+func (m *Model) handleNoteReloaded(msg noteReloadedMsg) tea.Cmd {
+	if msg.err != nil || msg.path != m.note.path || msg.path != m.editor.Path() {
+		return nil
 	}
-	m.note.content = msg.content
+	if msg.content == m.editor.Content() || m.editor.Dirty() {
+		return nil
+	}
+	m.editor = m.editor.Reload(msg.content)
 	m.note.title = vault.Title(msg.content, msg.path)
 	m.note.words = len(strings.Fields(msg.content))
+	m.sidebar.SetDirty(m.dirtyPath())
+	return nil
 }
 
 // loadTreeCmd reads the vault tree off the UI goroutine.
@@ -80,10 +89,10 @@ func loadTreeCmd(v *vault.Vault) tea.Cmd {
 }
 
 // loadNoteCmd reads a note off the UI goroutine.
-func loadNoteCmd(v *vault.Vault, path string, seq int) tea.Cmd {
+func loadNoteCmd(v *vault.Vault, path string, line, seq int) tea.Cmd {
 	return func() tea.Msg {
 		content, err := v.Read(path)
-		return noteLoadedMsg{seq: seq, path: path, content: content, err: err}
+		return noteLoadedMsg{seq: seq, path: path, content: content, line: line, err: err}
 	}
 }
 

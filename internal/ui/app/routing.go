@@ -35,6 +35,9 @@ func (m *Model) keyContext() keys.Context {
 	if m.noteView == ViewPreview {
 		return keys.Preview
 	}
+	if m.note.path != "" {
+		return m.editorContext()
+	}
 	if m.opts.Config.Vim {
 		return keys.EditorNormal
 	}
@@ -82,14 +85,15 @@ func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
 		m.trash, cmd = m.trash.Update(k)
 		return cmd
 	}
+	if m.note.path != "" && m.noteView != ViewPreview {
+		return m.handleEditorKey(k)
+	}
 	switch k.String() {
 	case "tab":
 		return emit(msgs.FocusSidebarMsg{})
 	case "esc":
-		// The note view has no use for esc yet: it dismisses the newest
-		// error toast.
-		// TODO(editor pass): only when the editor does not use the esc
-		// (vim normal mode with nothing pending; never in insert mode).
+		// Nothing in the empty main pane uses esc: it dismisses the
+		// newest error toast.
 		m.dismissToast()
 	}
 	return nil
