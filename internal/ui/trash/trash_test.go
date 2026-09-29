@@ -359,3 +359,20 @@ func TestViewShowsLoadingBeforePreviewArrives(t *testing.T) {
 		t.Errorf("View() before the preview loads does not contain %q:\n%s", "loading", v)
 	}
 }
+
+func TestSetThemeRethemes(t *testing.T) {
+	m := newTest(t)
+	m = m.SetPreview("3", "# Standup\n\nbody")
+	before := m.View()
+	p, ok := theme.Get("catppuccin-latte")
+	if !ok {
+		t.Fatal("palette missing")
+	}
+	after := m.SetTheme(theme.NewStyles(p), p).View()
+	if before == after {
+		t.Error("SetTheme did not change the rendering")
+	}
+	if ansi.Strip(before) != ansi.Strip(after) {
+		t.Error("SetTheme changed the content")
+	}
+}

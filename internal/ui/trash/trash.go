@@ -82,6 +82,13 @@ func New(styles theme.Styles, palette theme.Palette) Model {
 	return Model{styles: styles, palette: palette}
 }
 
+// SetTheme re-themes the view (a live theme preview, say), re-rendering
+// the preview in the new palette.
+func (m Model) SetTheme(styles theme.Styles, palette theme.Palette) Model {
+	m.styles, m.palette = styles, palette
+	return m.refreshPreview()
+}
+
 // SetItems replaces the trash listing (newest first) and the reference time
 // used for relative timestamps. The current selection is kept by ID when
 // still present; otherwise the newest item is selected.

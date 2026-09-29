@@ -140,6 +140,9 @@ func New(styles theme.Styles) Model {
 	return m
 }
 
+// SetStyles re-themes the sidebar (a live theme preview, say).
+func (m *Model) SetStyles(styles theme.Styles) { m.styles = styles }
+
 // SetTree replaces the folder tree.
 func (m *Model) SetTree(root *vault.Node) {
 	m.root = root

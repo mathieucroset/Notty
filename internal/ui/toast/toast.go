@@ -54,6 +54,12 @@ func New(styles theme.Styles) Model {
 	return Model{styles: styles}
 }
 
+// SetStyles re-themes the toasts (a live theme preview, say).
+func (m Model) SetStyles(styles theme.Styles) Model {
+	m.styles = styles
+	return m
+}
+
 // Push adds a toast and logs it. Info and warning toasts return a tea.Tick
 // command that expires them after 4s; error toasts are sticky (nil command)
 // and stay until Dismiss.

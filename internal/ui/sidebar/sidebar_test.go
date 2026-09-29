@@ -540,3 +540,25 @@ func TestRenderSnapshot(t *testing.T) {
 		t.Errorf("snapshot mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
+
+func latteStyles(t *testing.T) theme.Styles {
+	t.Helper()
+	p, ok := theme.Get("catppuccin-latte")
+	if !ok {
+		t.Fatal("catppuccin-latte palette missing")
+	}
+	return theme.NewStyles(p)
+}
+
+func TestSetStylesRethemes(t *testing.T) {
+	m := newTest(t)
+	before := m.View()
+	m.SetStyles(latteStyles(t))
+	after := m.View()
+	if before == after {
+		t.Error("SetStyles did not change the rendering")
+	}
+	if ansi.Strip(before) != ansi.Strip(after) {
+		t.Error("SetStyles changed the content")
+	}
+}

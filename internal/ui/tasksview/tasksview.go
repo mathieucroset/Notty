@@ -111,6 +111,12 @@ func New(styles theme.Styles, dueSoonDays int, showDone bool) Model {
 	return m
 }
 
+// SetStyles re-themes the view (a live theme preview, say).
+func (m Model) SetStyles(styles theme.Styles) Model {
+	m.styles = styles
+	return m
+}
+
 // SetTasks rebuilds the groups from refs (typically index.AllTasks()) using
 // today as "today" for overdue / due-soon classification (only its calendar
 // date matters). The selection stays on the same (Path, Raw) task if it is

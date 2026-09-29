@@ -208,3 +208,24 @@ func TestNotVisibleWhenEmpty(t *testing.T) {
 		t.Fatalf("expected an empty view, got %q", m.View(80))
 	}
 }
+
+func latteStyles(t *testing.T) theme.Styles {
+	t.Helper()
+	p, ok := theme.Get("catppuccin-latte")
+	if !ok {
+		t.Fatal("catppuccin-latte palette missing")
+	}
+	return theme.NewStyles(p)
+}
+
+func TestSetStylesRethemes(t *testing.T) {
+	m, _ := New(testStyles(t)).Push(msgs.ToastError, "boom")
+	before := m.View(40)
+	after := m.SetStyles(latteStyles(t)).View(40)
+	if before == after {
+		t.Error("SetStyles did not change the rendering")
+	}
+	if ansi.Strip(before) != ansi.Strip(after) {
+		t.Error("SetStyles changed the content")
+	}
+}
