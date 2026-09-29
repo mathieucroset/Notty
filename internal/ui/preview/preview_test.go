@@ -326,9 +326,11 @@ func TestHalfBlockImageAndOverlayChips(t *testing.T) {
 	if !strings.Contains(v, "▀") {
 		t.Fatalf("no half-block image:\n%s", ansi.Strip(v))
 	}
-	// 160x96 px at 8x16 px cells is 20x6 cells.
-	if got := m.doc.imgRows[0]; got != 6 {
-		t.Fatalf("image rows = %d, want 6", got)
+	// 160x96 px (20x6 cells at 8x16 px) grows to the 58-column content
+	// width: 58x17 cells, within 60% of the 30-row pane and the 160x48
+	// half-block sample resolution.
+	if got := m.doc.imgRows[0]; got != 17 {
+		t.Fatalf("image rows = %d, want 17", got)
 	}
 	m = m.SetOverlayOpen(true)
 	ov := m.View()

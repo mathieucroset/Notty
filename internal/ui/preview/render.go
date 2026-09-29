@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -290,7 +291,7 @@ func (j renderJob) image(link links.ImageLink) *imgItem {
 		item.reason = decodeReason(err)
 		return item
 	}
-	cols, rows := j.fit(w, h)
+	cols, rows := j.fit(proto, w, h)
 	key := imgrender.CacheKey{Path: item.abs, ModTime: fi.ModTime().UnixNano(), Cols: cols, Rows: rows, Proto: proto}
 	r, cached := j.sh.imgCache.Get(key)
 	needTransmit := proto == imgrender.ProtoKitty && (!cached || !j.sent[r.KittyID])
@@ -337,18 +338,49 @@ func (j renderJob) image(link links.ImageLink) *imgItem {
 	return item
 }
 
-// fit sizes an image: the pane width (minus padding) and at most 60% of
-// the pane height, never larger than the image's own size in cells.
-func (j renderJob) fit(w, h int) (cols, rows int) {
-	cw, ch := j.caps.CellW, j.caps.CellH
-	if cw <= 0 {
-		cw = 8
+// fit sizes an image for the pane (imageCells).
+func (j renderJob) fit(proto imgrender.Protocol, w, h int) (cols, rows int) {
+	return imageCells(proto, w, h, contentWidth(j.width), j.height, j.caps.CellW, j.caps.CellH)
+}
+
+// Kitty upscaling floor: a small image grows to at least minKittyRows rows
+// or a quarter of the pane width, whichever it reaches first.
+const minKittyRows = 8
+
+// imageCells sizes a w×h pixel image in cells of cw×ch pixels (spec §6.4):
+// it fits the pane width paneCols and at most 60% of the pane height
+// paneRows, aspect ratio preserved. Past those caps the protocol decides
+// how far an image may grow:
+//
+//   - half-blocks draw one image pixel per column and two per row, so an
+//     image is never drawn larger than that sample resolution (imgW
+//     columns, ceil(imgH/2) rows), which is also never smaller than its
+//     physical size in cells;
+//   - Kitty shows it at its physical size in cells, but a small image is
+//     upscaled until it is minKittyRows rows tall or a quarter of the pane
+//     wide (the first reached), so it does not shrink to a few cells.
+func imageCells(proto imgrender.Protocol, w, h, paneCols, paneRows, cw, ch int) (cols, rows int) {
+	if cw <= 0 || ch <= 0 {
+		cw, ch = 8, 16
 	}
-	if ch <= 0 {
-		ch = 16
+	if w <= 0 || h <= 0 {
+		return 1, 1
 	}
-	maxCols := min(contentWidth(j.width), ceilDiv(w, cw))
-	maxRows := min(max(3, j.height*60/100), ceilDiv(h, ch))
+	maxCols := max(1, paneCols)
+	maxRows := max(3, paneRows*60/100)
+	switch proto {
+	case imgrender.ProtoKitty:
+		wc, hc := float64(w)/float64(cw), float64(h)/float64(ch)
+		limC, limR := ceilDiv(w, cw), ceilDiv(h, ch)
+		if limR < minKittyRows && limC < paneCols/4 {
+			s := math.Min(minKittyRows/hc, float64(paneCols)/4/wc)
+			limC = max(limC, int(math.Ceil(wc*s)))
+			limR = max(limR, int(math.Ceil(hc*s)))
+		}
+		maxCols, maxRows = min(maxCols, limC), min(maxRows, limR)
+	default:
+		maxCols, maxRows = min(maxCols, w), min(maxRows, ceilDiv(h, 2))
+	}
 	return imgrender.FitCells(w, h, max(1, maxCols), max(1, maxRows), cw, ch)
 }
 
