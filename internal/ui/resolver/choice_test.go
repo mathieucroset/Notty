@@ -97,8 +97,27 @@ func TestBinaryImagePreviews(t *testing.T) {
 		Theirs: pngBytes(t, 6, 3, color.RGBA{0, 0, 255, 255})}
 	m := newModel(t, 120, 40, f)
 	c := m.items[0].choice
-	if c.previews[0] == nil || c.previews[1] == nil {
-		t.Fatal("images not decoded")
+	if c.images != imagesPending || c.previews[0] != nil {
+		t.Fatal("images decoded eagerly")
+	}
+	m, cmd := m.LoadPreviews()
+	if cmd == nil || m.items[0].choice.images != imagesLoading {
+		t.Fatal("LoadPreviews did not start loading")
+	}
+	if !strings.Contains(plain(m), "loading preview") {
+		t.Error("no loading placeholder")
+	}
+	if _, again := m.LoadPreviews(); again != nil {
+		t.Error("LoadPreviews started a second load")
+	}
+	msg := cmd()
+	if !Owns(msg) {
+		t.Fatalf("preview message %T not owned", msg)
+	}
+	m, _ = m.Update(msg)
+	c = m.items[0].choice
+	if c.images != imagesLoaded || c.previews[0] == nil || c.previews[1] == nil {
+		t.Fatal("previews not stored")
 	}
 	v := m.View()
 	if !strings.Contains(v, "▀") || !strings.Contains(v, "38;2;255;0;0") || !strings.Contains(v, "38;2;0;0;255") {
@@ -110,14 +129,50 @@ func TestBinaryImagePreviews(t *testing.T) {
 	}
 	checkSize(t, m, 120, 40)
 	checkSize(t, m.SetSize(80, 24), 80, 24)
-	// Not an image by name: no decode.
+	// Not an image by name: nothing to load.
 	f.Path = "att/pic.bin"
-	if newModel(t, 120, 40, f).items[0].choice.previews[0] != nil {
-		t.Error("decoded a file whose name is not an image")
+	if _, cmd := newModel(t, 120, 40, f).LoadPreviews(); cmd != nil {
+		t.Error("loading previews for a file whose name is not an image")
 	}
-	// Garbage and oversized images are rejected.
 	if decodePreview([]byte("not an image")) != nil {
 		t.Error("garbage decoded")
+	}
+}
+
+func TestPreviewsLoadOnSelection(t *testing.T) {
+	img := File{Path: "pic.png", Kind: Binary, Ours: pngBytes(t, 2, 2, color.White), Theirs: pngBytes(t, 2, 2, color.Black)}
+	m := newModel(t, 120, 40, textFile("a.md", base1, ours1, theirs1), img)
+	m, cmd := m.Update(key("j"))
+	if cmd == nil {
+		t.Fatal("selecting an image file did not load its previews")
+	}
+	m, _ = drain(m, cmd)
+	if m.items[1].choice.images != imagesLoaded || m.items[1].choice.previews[0] == nil {
+		t.Fatal("previews not loaded after selection")
+	}
+	if _, cmd := m.Update(key("k")); cmd != nil {
+		t.Error("moving away produced a command")
+	}
+}
+
+func TestPreviewDownscaledAndCached(t *testing.T) {
+	p := decodePreview(pngBytes(t, 2000, 10, color.White))
+	if p == nil {
+		t.Fatal("not decoded")
+	}
+	if p.w != 2000 || p.h != 10 {
+		t.Errorf("original size %d×%d, want 2000×10", p.w, p.h)
+	}
+	if b := p.img.Bounds(); b.Dx() != previewMax || b.Dy() != 5 {
+		t.Errorf("kept image is %v, want %d×5", b, previewMax)
+	}
+	first := p.render(20, 5, 8, 16)
+	if again := p.render(20, 5, 8, 16); &again[0] != &first[0] {
+		t.Error("same size re-rendered")
+	}
+	other := p.render(10, 5, 8, 16)
+	if p.lastKey == [2]int{} || &other[0] == &first[0] {
+		t.Error("a new size did not replace the cached rendering")
 	}
 }
 

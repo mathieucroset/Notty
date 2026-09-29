@@ -34,6 +34,7 @@ type choiceState struct {
 	options  []option
 	selected int
 
+	images   imageState  // binary: whether the image previews are loaded
 	previews [2]*preview // binary: yours, theirs (nil when not an image)
 	sizes    [2]int      // binary: byte sizes, -1 when the side is absent
 
@@ -52,9 +53,9 @@ func newChoiceState(f File) *choiceState {
 			if b != nil {
 				c.sizes[i] = len(b)
 			}
-			if looksLikeImage(f.Path) {
-				c.previews[i] = decodePreview(b)
-			}
+		}
+		if looksLikeImage(f.Path) {
+			c.images = imagesPending
 		}
 	case ModifyDelete:
 		edited := f.Ours
@@ -149,19 +150,68 @@ func (m Model) scrollChoice(d int) Model {
 	})
 }
 
-// preview is a decoded image and its half-block renderings by size.
+// imageState tracks a binary file's image previews, decoded lazily.
+type imageState int
+
+const (
+	imagesNone    imageState = iota // not an image: no previews
+	imagesPending                   // an image, not requested yet
+	imagesLoading                   // being decoded by a command
+	imagesLoaded                    // decoded (previews may still be nil)
+)
+
+// previewMax is the longest side a decoded preview is kept at.
+const previewMax = 1024
+
+// previewMsg delivers the decoded previews of the file at path.
+type previewMsg struct {
+	path     string
+	previews [2]*preview
+}
+
+// preview is a downscaled image and its last half-block rendering.
 type preview struct {
-	img      image.Image
-	w, h     int
-	rendered map[[2]int][]string
+	img      image.Image // at most previewMax pixels on its longest side
+	w, h     int         // the original size
+	lastKey  [2]int
+	lastRows []string
 }
 
 var imageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true}
 
 func looksLikeImage(p string) bool { return imageExts[strings.ToLower(path.Ext(p))] }
 
+// LoadPreviews returns the command decoding the selected file's image
+// previews when they are not loaded yet (nil otherwise), and marks them
+// loading. Key navigation does this itself; the app calls it after New,
+// Select and MarkResolved, which cannot return commands.
+func (m Model) LoadPreviews() (Model, tea.Cmd) {
+	it := m.current()
+	if it == nil || it.choice == nil || it.choice.images != imagesPending {
+		return m, nil
+	}
+	m = m.mutateChoice(func(c *choiceState) { c.images = imagesLoading })
+	path, ours, theirs := it.file.Path, it.file.Ours, it.file.Theirs
+	return m, func() tea.Msg {
+		return previewMsg{path: path, previews: [2]*preview{decodePreview(ours), decodePreview(theirs)}}
+	}
+}
+
+// setPreviews stores decoded previews.
+func (m Model) setPreviews(msg previewMsg) Model {
+	return m.mutate(m.index(msg.path), func(it *item) {
+		if it.choice == nil {
+			return
+		}
+		it.choice = it.choice.clone()
+		it.choice.previews = msg.previews
+		it.choice.images = imagesLoaded
+	})
+}
+
 // decodePreview decodes b as an image, rejecting oversized ones from the
-// header before decoding any pixel data. It returns nil on failure.
+// header before decoding any pixel data, and downscales it right away so
+// only the small copy is kept. It returns nil on failure.
 func decodePreview(b []byte) *preview {
 	if len(b) == 0 {
 		return nil
@@ -176,22 +226,27 @@ func decodePreview(b []byte) *preview {
 	if err != nil {
 		return nil
 	}
-	return &preview{img: img, w: cfg.Width, h: cfg.Height, rendered: map[[2]int][]string{}}
+	if longest := max(cfg.Width, cfg.Height); longest > previewMax {
+		w := max(1, cfg.Width*previewMax/longest)
+		h := max(1, cfg.Height*previewMax/longest)
+		img = imgrender.Scale(img, w, h)
+	}
+	return &preview{img: img, w: cfg.Width, h: cfg.Height}
 }
 
-// render returns the image fitted into cols×rows cells as half blocks.
+// render returns the image fitted into cols×rows cells as half blocks,
+// reusing the last rendering when the size is unchanged.
 func (p *preview) render(cols, rows, cellW, cellH int) []string {
 	if cellW <= 0 || cellH <= 0 {
 		cellW, cellH = 8, 16
 	}
 	c, r := imgrender.FitCells(p.w, p.h, cols, rows, cellW, cellH)
 	key := [2]int{c, r}
-	if out, ok := p.rendered[key]; ok {
-		return out
+	if p.lastRows != nil && p.lastKey == key {
+		return p.lastRows
 	}
-	out := imgrender.HalfBlocks(p.img, c, r)
-	p.rendered[key] = out
-	return out
+	p.lastKey, p.lastRows = key, imgrender.HalfBlocks(p.img, c, r)
+	return p.lastRows
 }
 
 // humanSize formats a byte count.
@@ -263,6 +318,9 @@ func (m Model) binaryPreviews(c *choiceState, w, h int) []string {
 			head += " · " + humanSize(c.sizes[i])
 		}
 		col := []string{m.styles.PaneTitle.Render(head)}
+		if c.images == imagesLoading && c.sizes[i] >= 0 {
+			col = append(col, m.styles.Muted.Render(" loading preview…"))
+		}
 		if p := c.previews[i]; p != nil && m.caps.Inline != imgrender.ProtoOff && h > 1 && half > 1 {
 			for _, r := range p.render(half-1, h-1, m.caps.CellW, m.caps.CellH) {
 				col = append(col, " "+r)

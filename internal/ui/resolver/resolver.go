@@ -319,7 +319,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.editing {
 			return m.editKey(msg)
 		}
-		return m.navKey(msg)
+		m, cmd := m.navKey(msg)
+		m, load := m.LoadPreviews()
+		return m, tea.Batch(cmd, load)
 	case tea.PasteMsg:
 		if m.editing {
 			return m.forwardToEditor(msg)
@@ -327,6 +329,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case editorMsg:
 		return m.editorMessage(msg)
+	case previewMsg:
+		return m.setPreviews(msg), nil
 	}
 	return m, nil
 }
@@ -335,7 +339,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // app must route back to Update while the resolver is open.
 func Owns(msg tea.Msg) bool {
 	switch msg.(type) {
-	case editorMsg:
+	case editorMsg, previewMsg:
 		return true
 	}
 	return false
