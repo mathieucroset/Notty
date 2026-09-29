@@ -156,7 +156,7 @@ func (m Model) closeEditor() Model {
 // editorSize returns the embedded editor's size: the right pane below the
 // file header and the edit note, above the message line.
 func (m Model) editorSize() (int, int) {
-	_, _, rw := m.split()
+	_, rw := m.split()
 	return rw, max(0, m.bodyHeight()-3)
 }
 
@@ -166,9 +166,11 @@ func (m Model) CursorPosition() *tea.Cursor {
 	if !m.editing || m.w <= 0 || m.h <= 0 {
 		return nil
 	}
-	lw, sw, _ := m.split()
+	x := m.rightX()
+	_, rw := m.split()
 	if cl := m.ed.CommandLine(); cl != "" {
-		c := tea.NewCursor(lw+sw+min(ansi.StringWidth(cl), m.w-lw-sw-1), 1+m.bodyHeight()-1)
+		// The message line is the right pane's last row.
+		c := tea.NewCursor(x+min(ansi.StringWidth(cl), max(0, rw-1)), 1+m.bodyHeight()-1)
 		c.Shape = tea.CursorBar
 		return c
 	}
@@ -176,7 +178,7 @@ func (m Model) CursorPosition() *tea.Cursor {
 	if c == nil {
 		return nil
 	}
-	c.X += lw + sw
-	c.Y += 1 + 2 // title row, then the file header and the edit note
+	c.X += x
+	c.Y += 1 + 2 // the pane's top border, then the file header and the edit note
 	return c
 }

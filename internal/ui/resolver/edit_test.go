@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mathieucroset/notty/internal/imgrender"
 	"github.com/mathieucroset/notty/internal/ui/editor"
@@ -41,10 +42,13 @@ func TestEditPlainCtrlSAccepts(t *testing.T) {
 	if c == nil {
 		t.Fatal("no cursor while editing")
 	}
-	lw, sw, _ := m.split()
 	// The cursor starts on the current conflict: result line 1.
-	if c.X < lw+sw || c.Y != 3+1 {
-		t.Errorf("cursor at %d,%d, want x >= %d and y 4", c.X, c.Y, lw+sw)
+	if c.X < m.rightX() || c.Y != 3+1 {
+		t.Errorf("cursor at %d,%d, want x >= %d and y 4", c.X, c.Y, m.rightX())
+	}
+	// It sits on the cell showing that line's text ("A").
+	if row := strings.Split(plain(m), "\n")[c.Y]; ansi.Cut(row, c.X, c.X+1) != "A" {
+		t.Errorf("cursor cell in %q is %q, want %q", row, ansi.Cut(row, c.X, c.X+1), "A")
 	}
 	// Keys such as o, t, q and j go to the editor, not the resolver.
 	m = typeText(t, m, "Zq")
@@ -164,9 +168,12 @@ func TestCommandLineCursorUsesCellWidth(t *testing.T) {
 	m := newModelVim(t, true, 120, 40, textFile("n.md", base1, ours1, theirs1))
 	m, _ = press(t, m, "e", ":", "日")
 	c := m.CursorPosition()
-	lw, sw, _ := m.split()
-	if c == nil || c.X != lw+sw+3 || c.Y != m.bodyHeight() {
-		t.Fatalf("cursor %+v, want x %d y %d", c, lw+sw+3, m.bodyHeight())
+	if c == nil || c.X != m.rightX()+3 || c.Y != m.bodyHeight() {
+		t.Fatalf("cursor %+v, want x %d y %d", c, m.rightX()+3, m.bodyHeight())
+	}
+	// The command line is drawn on that row, inside the right pane.
+	if row := strings.Split(plain(m), "\n")[c.Y]; !strings.Contains(ansi.Cut(row, m.rightX(), m.w), ":日") {
+		t.Errorf("command line not on the cursor row: %q", row)
 	}
 }
 
