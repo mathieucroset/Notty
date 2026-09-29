@@ -86,9 +86,11 @@ func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
 	case "tab":
 		return emit(msgs.FocusSidebarMsg{})
 	case "esc":
-		if m.mainView != ViewNote {
-			m.mainView = ViewNote
-		}
+		// The note view has no use for esc yet: it dismisses the newest
+		// error toast.
+		// TODO(editor pass): only when the editor does not use the esc
+		// (vim normal mode with nothing pending; never in insert mode).
+		m.dismissToast()
 	}
 	return nil
 }

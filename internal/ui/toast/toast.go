@@ -22,6 +22,8 @@ const (
 	maxLog     = 100
 	ttl        = 4 * time.Second
 	boxWidth   = 48
+
+	dismissHint = "esc to dismiss"
 )
 
 // Entry is one logged toast.
@@ -196,6 +198,10 @@ func (m Model) renderToast(t toastItem, outerWidth int) string {
 			prefix = icon(t.level) + " "
 		}
 		wrapped[i] = textutil.PadLine(prefix+l, contentWidth)
+	}
+	if t.level == msgs.ToastError {
+		// Errors never expire: say how to get rid of them.
+		wrapped = append(wrapped, textutil.PadLine("  "+dismissHint, contentWidth))
 	}
 
 	return style.Width(outerWidth).Render(strings.Join(wrapped, "\n"))

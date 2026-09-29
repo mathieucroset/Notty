@@ -86,6 +86,32 @@ func TestEscDismissesStickyErrorBeforeClearingFilter(t *testing.T) {
 	}
 }
 
+func TestEscDismissesErrorInNoteView(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	run(t, m, msgs.OpenNoteMsg{Path: "ideas.md", Line: -1})
+	run(t, m, msgs.ToastMsg{Level: msgs.ToastError, Text: "Disk on fire"})
+	if !strings.Contains(screen(m), "esc to dismiss") {
+		t.Errorf("dismiss hint missing:\n%s", screen(m))
+	}
+	run(t, m, keyMsg("esc"))
+	if strings.Contains(screen(m), "Disk on fire") {
+		t.Errorf("esc in the note view did not dismiss the error:\n%s", screen(m))
+	}
+}
+
+func TestEscInTasksViewGoesBackAndKeepsError(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	run(t, m, msgs.ToastMsg{Level: msgs.ToastError, Text: "Disk on fire"})
+	run(t, m, msgs.ActivateEntryMsg{Entry: msgs.EntryTasks})
+	run(t, m, keyMsg("esc"))
+	if m.MainView() != ViewNote {
+		t.Errorf("esc in Tasks did not go back: %v", m.MainView())
+	}
+	if !strings.Contains(screen(m), "Disk on fire") {
+		t.Error("esc in Tasks dismissed the error instead of going back")
+	}
+}
+
 func TestInfoToastLogged(t *testing.T) {
 	m := start(t, testOptions(t), 120, 30)
 	run(t, m, msgs.ToastMsg{Level: msgs.ToastInfo, Text: "Saved"})

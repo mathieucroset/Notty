@@ -199,6 +199,20 @@ func TestViewSnapshotToastStack(t *testing.T) {
 	}
 }
 
+func TestErrorToastShowsDismissHint(t *testing.T) {
+	m, _ := New(testStyles(t)).Push(msgs.ToastWarn, "careful")
+	if strings.Contains(strip(m.View(48)), "esc to dismiss") {
+		t.Error("a warning toast shows the dismiss hint")
+	}
+	m, _ = m.Push(msgs.ToastError, "boom")
+	if !strings.Contains(strip(m.View(48)), "esc to dismiss") {
+		t.Errorf("error toast lacks the dismiss hint:\n%s", strip(m.View(48)))
+	}
+	if log := m.Log(); log[0].Text != "boom" {
+		t.Errorf("hint leaked into the log: %q", log[0].Text)
+	}
+}
+
 func TestNotVisibleWhenEmpty(t *testing.T) {
 	m := New(testStyles(t))
 	if m.Visible() {
