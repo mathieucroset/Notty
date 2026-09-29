@@ -86,6 +86,7 @@ type timerSlot struct {
 // Syncer runs the auto-sync state machine. Create it with New and call Start.
 type Syncer struct {
 	repo     repoAPI
+	raw      *gitsync.Repo // handed to RunSetup jobs
 	dir      string
 	hostname string
 	host     Host
@@ -121,6 +122,7 @@ type Syncer struct {
 	quitting     bool
 	cyclePending bool
 	authBlocked  bool // no automatic retries until a save or a manual sync
+	deferred     bool // a cycle was skipped while $EDITOR was open
 	backoffStep  int
 	commitTimer  timerSlot
 	fetchTimer   timerSlot
@@ -131,6 +133,7 @@ type Syncer struct {
 func New(repo *gitsync.Repo, cfg config.Config, host Host, clock Clock) *Syncer {
 	s := &Syncer{
 		repo:          repo,
+		raw:           repo,
 		dir:           repo.Dir,
 		hostname:      repo.Host,
 		host:          host,
@@ -195,6 +198,31 @@ func (s *Syncer) SyncNow() {
 	s.disarm(&s.commitTimer)
 	s.mu.Unlock()
 	s.requestCycle()
+}
+
+// ExternalEditDone runs the cycle deferred while $EDITOR was open, if any.
+func (s *Syncer) ExternalEditDone() {
+	s.mu.Lock()
+	deferred := s.deferred
+	s.deferred = false
+	s.mu.Unlock()
+	if deferred {
+		s.requestCycle()
+	}
+}
+
+// RunSetup runs job (the wizard's git steps, amendment A2) on the worker,
+// serialized with every other git operation, then re-runs the Start logic:
+// Conflict if a merge is in progress, a full cycle with a remote, else
+// LocalOnly. The channel receives the job's error.
+func (s *Syncer) RunSetup(setup func(*gitsync.Repo) error) <-chan error {
+	errc := make(chan error, 1)
+	s.ensureWorker(context.Background())
+	s.enqueue(job{fn: func() {
+		errc <- setup(s.raw)
+		s.startLogic()
+	}})
+	return errc
 }
 
 // ConflictResolved is called by the resolver after it committed the merge.
@@ -457,12 +485,29 @@ func (s *Syncer) startLogic() {
 	if s.repo.MergeInProgress() && !s.concludeMerge() {
 		return
 	}
+	s.mu.Lock()
+	if s.status.State == Conflict { // left over from before a RunSetup
+		s.status = Status{State: Idle}
+	}
+	s.mu.Unlock()
 	if localOnly {
 		s.setState(LocalOnly)
 		return
 	}
 	s.armFetch()
 	s.cycle()
+}
+
+// deferIfEditing reports whether $EDITOR is open, remembering that a cycle
+// must run when it closes (spec §7).
+func (s *Syncer) deferIfEditing() bool {
+	if !s.host.ExternalEditing() {
+		return false
+	}
+	s.mu.Lock()
+	s.deferred = true
+	s.mu.Unlock()
+	return true
 }
 
 // armFetch schedules the next fetch tick unless sync is local-only.
@@ -546,6 +591,9 @@ func (s *Syncer) cycle() {
 	if s.repo.MergeInProgress() && !s.concludeMerge() {
 		return
 	}
+	if s.deferIfEditing() {
+		return
+	}
 	s.setState(Committing)
 	_ = s.host.Flush()
 	if err := s.commitAll(); err != nil {
@@ -578,7 +626,7 @@ func (s *Syncer) fetchTick() {
 		return // the timer resumes when the conflict is resolved
 	}
 	defer s.armFetch()
-	if skip {
+	if skip || s.deferIfEditing() {
 		return
 	}
 	s.setState(Pulling)
