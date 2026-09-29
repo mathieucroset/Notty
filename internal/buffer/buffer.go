@@ -41,6 +41,8 @@ type Buffer struct {
 
 	version      uint64
 	firstChanged int // lowest line touched since ResetChanged, -1 if none
+
+	history
 }
 
 // normalizeNewlines converts CRLF line endings to LF.
@@ -201,8 +203,7 @@ func (b *Buffer) Delete(r Range) string {
 	if start == end {
 		return ""
 	}
-	removed := b.textBetween(start, end)
-	b.edit(start, end, "")
+	removed, _ := b.edit(start, end, "")
 	return removed
 }
 
@@ -214,7 +215,8 @@ func (b *Buffer) Replace(r Range, text string) Pos {
 	if start == end && text == "" {
 		return b.toPos(start)
 	}
-	return b.toPos(b.edit(start, end, text))
+	_, newEnd := b.edit(start, end, text)
+	return b.toPos(newEnd)
 }
 
 // TextIn returns the text in r (normalized and clamped).
@@ -224,8 +226,8 @@ func (b *Buffer) TextIn(r Range) string {
 }
 
 // SetText replaces the whole contents (e.g. on reload from disk) as one
-// change, keeping the cursor clamped. Identical text is a no-op. It does not
-// mark the buffer saved; callers do that if appropriate.
+// undoable change, keeping the cursor clamped. Identical text is a no-op. It
+// does not mark the buffer saved; callers do that if appropriate.
 func (b *Buffer) SetText(text string) {
 	body, trailing := splitText(text)
 	if trailing == b.trailingNewline && body == strings.Join(b.lines, "\n") {
@@ -235,14 +237,18 @@ func (b *Buffer) SetText(text string) {
 	b.editTrailing(bpos{}, bpos{line: last, off: len(b.lines[last])}, body, trailing)
 }
 
-// edit applies a primitive change that keeps the trailing-newline flag.
-func (b *Buffer) edit(start, end bpos, text string) bpos {
+// edit applies and records a primitive change that keeps the
+// trailing-newline flag.
+func (b *Buffer) edit(start, end bpos, text string) (removed string, newEnd bpos) {
 	return b.editTrailing(start, end, text, b.trailingNewline)
 }
 
-// editTrailing applies a primitive change and sets the trailing-newline flag.
-func (b *Buffer) editTrailing(start, end bpos, text string, trailing bool) bpos {
-	_, newEnd := b.replaceBytes(start, end, text)
+// editTrailing applies a primitive change, sets the trailing-newline flag and
+// records the change (with enough to invert it) for undo.
+func (b *Buffer) editTrailing(start, end bpos, text string, trailing bool) (removed string, newEnd bpos) {
+	before := b.trailingNewline
+	removed, newEnd = b.replaceBytes(start, end, text)
 	b.trailingNewline = trailing
-	return newEnd
+	b.record(change{start: start, removed: removed, inserted: text, trailBefore: before, trailAfter: trailing})
+	return removed, newEnd
 }
