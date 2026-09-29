@@ -372,3 +372,47 @@ func TestSetTextIdenticalIsNoOp(t *testing.T) {
 		t.Errorf("FirstChangedLine = %d, want -1", b.FirstChangedLine())
 	}
 }
+
+func TestInsertLineAfter(t *testing.T) {
+	tests := []struct {
+		name      string
+		initial   string
+		line      int
+		text      string
+		want      string
+		wantPos   Pos
+		wantLines int
+	}{
+		{"middle", "a\nb\nc", 0, "X", "a\nX\nb\nc", P(1, 0), 4},
+		{"after last line", "a\nb", 1, "X", "a\nb\nX", P(2, 0), 3},
+		{"after last keeps trailing newline", "a\nb\n", 1, "X", "a\nb\nX\n", P(2, 0), 3},
+		{"empty text opens blank line", "a", 0, "", "a\n", P(1, 0), 2},
+		{"multi-line text", "a\nb", 0, "X\nY", "a\nX\nY\nb", P(1, 0), 4},
+		{"crlf text normalizes", "a", 0, "X\r\nY", "a\nX\nY", P(1, 0), 3},
+		{"line past end clamps to last", "a", 5, "X", "a\nX", P(1, 0), 2},
+		{"negative line inserts above first", "a\nb", -1, "X", "X\na\nb", P(0, 0), 3},
+		{"empty buffer", "", 0, "X", "\nX", P(1, 0), 2},
+		{"after grapheme line", thumbsUp + eAcute, 0, cjk, thumbsUp + eAcute + "\n" + cjk, P(1, 0), 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := New(tt.initial)
+			pos := b.InsertLineAfter(tt.line, tt.text)
+			if got := b.String(); got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+			if pos != tt.wantPos {
+				t.Errorf("pos = %v, want %v", pos, tt.wantPos)
+			}
+			if got := b.LineCount(); got != tt.wantLines {
+				t.Errorf("LineCount() = %d, want %d", got, tt.wantLines)
+			}
+			if _, ok := b.Undo(); !ok || b.String() != tt.initial {
+				t.Errorf("undo: ok=%v String() = %q, want %q", ok, b.String(), tt.initial)
+			}
+			if _, ok := b.Undo(); ok {
+				t.Error("InsertLineAfter took more than one undo step")
+			}
+		})
+	}
+}

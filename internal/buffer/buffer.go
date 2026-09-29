@@ -205,6 +205,23 @@ func (b *Buffer) Insert(p Pos, text string) Pos {
 	return b.Replace(Range{Start: p, End: p}, text)
 }
 
+// InsertLineAfter inserts text as one or more new lines below line (vim `o`
+// and linewise put) as a single undoable edit, and returns the start of the
+// first new line. line is clamped to the last line, so inserting after the
+// last line works; a negative line inserts above the first line. Empty text
+// opens one blank line.
+func (b *Buffer) InsertLineAfter(line int, text string) Pos {
+	text = normalizeNewlines(text)
+	if line < 0 {
+		b.edit(bpos{}, bpos{}, text+"\n")
+		return Pos{}
+	}
+	line = min(line, len(b.lines)-1)
+	eol := bpos{line: line, off: len(b.lines[line])}
+	b.edit(eol, eol, "\n"+text)
+	return Pos{Line: line + 1}
+}
+
 // Delete removes the text in r (normalized and clamped; may span lines) and
 // returns it.
 func (b *Buffer) Delete(r Range) string {
