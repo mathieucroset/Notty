@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/mathieucroset/notty/internal/gitsync"
@@ -87,7 +85,7 @@ func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.R
 	switch s.Kind {
 	case StepWriteGitignore, StepFetch, StepPush:
 		want = 0
-	case StepClone:
+	case StepClone, StepMergeUnrelated:
 		want = 2
 	}
 	if len(s.Args) != want || slices.Contains(s.Args, "") {
@@ -109,7 +107,7 @@ func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.R
 		_, err := vault.EnsureGitignore(dir)
 		return repo, false, err
 	case StepCommitAll:
-		if err := addAllExceptJunk(ctx, repo); err != nil {
+		if err := addAllExceptJunk(repo); err != nil {
 			return repo, false, err
 		}
 		_, err := repo.Commit(arg)
@@ -121,17 +119,16 @@ func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.R
 		}
 		return r, false, nil
 	case StepRemoteAdd:
-		if repo.HasRemote() {
-			cur, err := localGit(ctx, dir, "config", "--get", "remote.origin.url")
-			if err != nil {
-				return repo, false, fmt.Errorf("read origin url: %w", err)
-			}
-			if cur != arg {
-				return repo, false, fmt.Errorf("%w (%s)", ErrRemoteExists, cur)
-			}
-			return repo, false, nil
+		cur, err := repo.RemoteURL()
+		switch {
+		case errors.Is(err, gitsync.ErrNoRemote):
+			return repo, false, repo.RemoteAdd(arg)
+		case err != nil:
+			return repo, false, err
+		case !SameURL(cur, arg):
+			return repo, false, fmt.Errorf("%w (%s)", ErrRemoteExists, cur)
 		}
-		return repo, false, repo.RemoteAdd(arg)
+		return repo, false, nil
 	case StepFetch:
 		return repo, false, repo.Fetch(ctx)
 	case StepRenameBranch:
@@ -142,12 +139,9 @@ func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.R
 		if cur == arg {
 			return repo, false, nil
 		}
-		if _, err := localGit(ctx, dir, "rev-parse", "-q", "--verify", "refs/heads/"+arg); err == nil {
-			return repo, false, fmt.Errorf("a local branch %s already exists next to %s", arg, cur)
-		}
-		return repo, false, repo.RenameBranch(arg)
+		return repo, false, repo.RenameBranch(arg) // refuses to overwrite a branch
 	case StepMergeUnrelated:
-		err := repo.Merge(arg, true)
+		err := repo.MergeWithMessage(arg, true, s.Args[1])
 		if errors.Is(err, gitsync.ErrConflict) && repo.MergeInProgress() {
 			return repo, true, writeGitignoreDuringMerge(repo)
 		}
@@ -194,35 +188,23 @@ func writeGitignoreDuringMerge(repo *gitsync.Repo) error {
 	return err
 }
 
-// junkPatterns returns the lines vault.EnsureGitignore guarantees, by
-// letting it write a .gitignore in a scratch directory.
-var junkPatterns = sync.OnceValues(func() (string, error) {
-	tmp, err := os.MkdirTemp("", "notty-setup-")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(tmp)
-	if _, err := vault.EnsureGitignore(tmp); err != nil {
-		return "", err
-	}
-	b, err := os.ReadFile(filepath.Join(tmp, ".gitignore"))
-	return string(b), err
-})
+// SameURL reports whether two remote URLs name the same repository,
+// ignoring surrounding space, trailing slashes and a ".git" suffix.
+func SameURL(a, b string) bool { return normalizeURL(a) == normalizeURL(b) }
+
+func normalizeURL(u string) string {
+	u = strings.TrimRight(strings.TrimSpace(u), "/")
+	return strings.TrimRight(strings.TrimSuffix(u, ".git"), "/")
+}
 
 // addAllExceptJunk runs `git add -A` with Notty's .gitignore entries added
 // to .git/info/exclude for the duration, so a commit made before .gitignore
 // is written never picks up .notty/lock, recovery files or OS junk.
-func addAllExceptJunk(ctx context.Context, repo *gitsync.Repo) (err error) {
-	junk, err := junkPatterns()
+func addAllExceptJunk(repo *gitsync.Repo) (err error) {
+	junk := strings.Join(vault.GitignoreEntries(), "\n") + "\n"
+	p, err := repo.GitPath("info/exclude")
 	if err != nil {
-		return fmt.Errorf("gitignore entries: %w", err)
-	}
-	p, err := localGit(ctx, repo.Dir, "rev-parse", "--git-path", "info/exclude")
-	if err != nil {
-		return fmt.Errorf("locate info/exclude: %w", err)
-	}
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(repo.Dir, p)
+		return err
 	}
 	orig, rerr := os.ReadFile(p)
 	existed := rerr == nil
@@ -357,22 +339,4 @@ func moveUnique(from, to string) error {
 		target = fmt.Sprintf("%s.%d", to, i)
 	}
 	return os.Rename(from, target)
-}
-
-// localGit runs a read-only local git command that gitsync has no API for
-// and returns its trimmed stdout.
-func localGit(ctx context.Context, dir string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
-	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
-		name, _, _ := strings.Cut(kv, "=")
-		return slices.Contains([]string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "LC_ALL"}, name)
-	})
-	cmd.Env = append(env, "LC_ALL=C", "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return strings.TrimSpace(string(out)), nil
 }

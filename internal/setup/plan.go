@@ -94,8 +94,9 @@ const (
 	StepFetch
 	// StepRenameBranch renames the current branch to Args[0] if it differs.
 	StepRenameBranch
-	// StepMergeUnrelated merges Args[0] with --allow-unrelated-histories;
-	// conflicts stop the plan with the merge left in progress.
+	// StepMergeUnrelated merges Args[0] with --allow-unrelated-histories and
+	// commit message Args[1]; conflicts stop the plan with the merge left in
+	// progress.
 	StepMergeUnrelated
 	// StepPush pushes the current branch to origin and sets its upstream.
 	StepPush
@@ -246,7 +247,7 @@ func Plan(req Request, vs VaultState, rs RemoteState) ([]Step, error) {
 		remoteAdd := step(StepRemoteAdd, "Adding remote origin "+req.URL, req.URL)
 		push := step(StepPush, "Pushing to origin")
 		fetch := step(StepFetch, "Fetching from origin")
-		merge := step(StepMergeUnrelated, "Merging origin/"+def, "origin/"+def)
+		merge := step(StepMergeUnrelated, "Merging origin/"+def, "origin/"+def, "Merge · "+host)
 		switch {
 		case !isRepo && vs != FilesNoRepo && rs.HasHistory:
 			add(step(StepClone, "Cloning "+req.URL, req.URL, def), ensure)

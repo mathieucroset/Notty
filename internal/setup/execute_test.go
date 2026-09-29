@@ -344,6 +344,9 @@ func TestExecuteFilesWithHistory(t *testing.T) {
 	if n := gittest.Git(t, vault, "rev-list", "--count", "--merges", "HEAD"); n != "1" {
 		t.Errorf("merge commits = %s, want 1", n)
 	}
+	if s := gittest.Git(t, vault, "log", "-1", "--merges", "--format=%s"); s != "Merge · box" {
+		t.Errorf("merge subject = %q", s)
+	}
 }
 
 func TestExecuteFilesWithHistoryConflict(t *testing.T) {
@@ -580,6 +583,16 @@ func TestExecuteRetryIsIdempotent(t *testing.T) {
 	}
 	assertSynced(t, vault, remote, "main")
 
+	// The same URL spelled differently counts as the same origin.
+	same := setup.Request{Vault: vault, Choice: setup.ExistingURL, URL: remote + "/", Host: "box"}
+	steps, err = setup.Plan(same, setup.Repo, setup.RemoteState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setup.Execute(context.Background(), same, steps, nil, nil); err != nil {
+		t.Fatalf("same origin with a trailing slash: %v", err)
+	}
+
 	// A different origin is never replaced silently.
 	other := setup.Request{Vault: vault, Choice: setup.ExistingURL, URL: gittest.NewEmptyRemote(t), Host: "box"}
 	identity(t)
@@ -662,6 +675,25 @@ func TestJobRunsOnGivenRepoAndLeavesConflictToSyncer(t *testing.T) {
 	}
 	if n != 5 { // commit, remote add, fetch, rename, merge
 		t.Errorf("progress calls = %d, want 5", n)
+	}
+}
+
+func TestSameURL(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"git@github.com:me/notes.git", "git@github.com:me/notes", true},
+		{"https://github.com/me/notes", "https://github.com/me/notes.git/", true},
+		{"https://github.com/me/notes/", " https://github.com/me/notes ", true},
+		{"/srv/notes.git", "/srv/notes.git/", true},
+		{"git@github.com:me/notes.git", "git@github.com:me/other.git", false},
+		{"https://github.com/me/notes", "https://github.com/you/notes", false},
+	}
+	for _, tt := range tests {
+		if got := setup.SameURL(tt.a, tt.b); got != tt.want {
+			t.Errorf("SameURL(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
 	}
 }
 
