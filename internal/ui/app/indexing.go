@@ -90,9 +90,10 @@ func (m *Model) savePinsCmd() tea.Cmd {
 		return nil
 	}
 	snap := &meta.State{Pins: append([]string{}, m.opts.Pins.Pins...)}
-	root := m.opts.Vault.Root
+	root, saver := m.opts.Vault.Root, m.pinsSaver
+	seq := saver.ticket()
 	return func() tea.Msg {
-		if err := snap.Save(root); err != nil {
+		if err := saver.save(seq, func() error { return snap.Save(root) }); err != nil {
 			return msgs.ToastMsg{Level: msgs.ToastError, Text: fmt.Sprintf("Could not save pins: %v", err)}
 		}
 		return nil

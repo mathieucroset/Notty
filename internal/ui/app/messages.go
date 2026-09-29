@@ -88,8 +88,9 @@ func loadNoteCmd(v *vault.Vault, path string, seq int) tea.Cmd {
 }
 
 // saveLocalCmd writes a snapshot of the local state, so the command never
-// races with later changes made in Update.
-func saveLocalCmd(s *localstate.State, path string) tea.Cmd {
+// races with later changes made in Update; snapshots land in order.
+func (m *Model) saveLocalCmd() tea.Cmd {
+	s, path, saver := m.opts.Local, m.opts.LocalPath, m.localSaver
 	if s == nil || path == "" {
 		return nil
 	}
@@ -102,8 +103,9 @@ func saveLocalCmd(s *localstate.State, path string) tea.Cmd {
 	for k, v := range s.Cursor {
 		snap.Cursor[k] = v
 	}
+	seq := saver.ticket()
 	return func() tea.Msg {
-		if err := snap.Save(path); err != nil {
+		if err := saver.save(seq, func() error { return snap.Save(path) }); err != nil {
 			return msgs.ToastMsg{Level: msgs.ToastWarn, Text: fmt.Sprintf("Could not save local state: %v", err)}
 		}
 		return nil

@@ -100,6 +100,7 @@ func (m *Model) saveNoteCmd(p, content string, version int) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
+		defer lockFile(v.Abs(p))()
 		if err := v.Save(p, content); err != nil {
 			return savedMsg{path: p, version: version, err: err}
 		}

@@ -118,6 +118,9 @@ type Model struct {
 	// overlays is the overlay stack, top last.
 	overlays []*overlayState
 
+	// pinsSaver and localSaver keep snapshot writes in order.
+	pinsSaver, localSaver *orderedSaver
+
 	// ix is the note index, nil until the startup build finishes.
 	ix       *index.Index
 	indexing bool
@@ -158,6 +161,8 @@ func New(opts Options) *Model {
 		sidebar:        sidebar.New(opts.Styles),
 		status:         statusbar.New(opts.Styles),
 		toast:          toast.New(opts.Styles),
+		pinsSaver:      &orderedSaver{},
+		localSaver:     &orderedSaver{},
 		tasks:          tasksview.New(opts.Styles, opts.Config.Tasks.DueSoonDays, opts.Config.Tasks.ShowDone),
 		trash:          trash.New(opts.Styles, opts.Palette),
 	}
@@ -332,7 +337,9 @@ func (m *Model) quit() tea.Cmd {
 	m.closeWatcher()
 	if m.opts.LocalPath != "" && !m.opts.WizardNeeded {
 		m.syncExpandedState()
-		_ = m.opts.Local.Save(m.opts.LocalPath) // nowhere left to report it
+		local, path := m.opts.Local, m.opts.LocalPath
+		// Nowhere left to report an error.
+		_ = m.localSaver.save(m.localSaver.ticket(), func() error { return local.Save(path) })
 	}
 	return tea.Quit
 }
@@ -350,7 +357,7 @@ func (m *Model) showNote(p, content string) tea.Cmd {
 	m.sidebar.Select(p)
 	m.setFocus(FocusMain)
 	m.syncExpandedState()
-	return saveLocalCmd(m.opts.Local, m.opts.LocalPath)
+	return m.saveLocalCmd()
 }
 
 // sidebarShown reports whether the sidebar is actually drawn: it is
@@ -414,7 +421,7 @@ func (m *Model) syncExpanded() tea.Cmd {
 	if !m.syncExpandedState() {
 		return nil
 	}
-	return saveLocalCmd(m.opts.Local, m.opts.LocalPath)
+	return m.saveLocalCmd()
 }
 
 func (m *Model) modeLabel() string {

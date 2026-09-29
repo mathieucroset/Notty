@@ -300,7 +300,7 @@ func (m *Model) pathRenamed(oldPath, newPath string) tea.Cmd {
 		m.note.path = newPath + m.note.path[len(oldPath):]
 		m.note.title = vault.Title(m.note.content, m.note.path)
 	}
-	return tea.Batch(m.savePinsCmd(), saveLocalCmd(m.opts.Local, m.opts.LocalPath))
+	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd())
 }
 
 // pathRemoved forgets p (and everything under it) in the pins, the local
@@ -313,7 +313,7 @@ func (m *Model) pathRemoved(p string) tea.Cmd {
 		m.note = note{}
 		m.openSeq++ // drop any load still in flight
 	}
-	return tea.Batch(m.savePinsCmd(), saveLocalCmd(m.opts.Local, m.opts.LocalPath))
+	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd())
 }
 
 // editorCommand builds the $EDITOR command for the file at abs.

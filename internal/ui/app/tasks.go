@@ -87,6 +87,7 @@ func (m *Model) toggleTask(msg msgs.ToggleTaskMsg) tea.Cmd {
 // if the number drifted), toggles it, saves atomically and re-indexes.
 func toggleTaskCmd(v *vault.Vault, w *watcher.Watcher, ix *index.Index, msg msgs.ToggleTaskMsg) tea.Cmd {
 	return func() tea.Msg {
+		defer lockFile(v.Abs(msg.Path))()
 		content, err := v.Read(msg.Path)
 		if err != nil {
 			return taskToggledMsg{path: msg.Path, err: err}
