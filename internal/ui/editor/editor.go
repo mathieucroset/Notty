@@ -6,6 +6,7 @@
 package editor
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -270,10 +271,26 @@ func (m Model) rawLine(i int) bool {
 	return i == m.buf.Cursor().Line
 }
 
-// lineUnits returns the display units of line i and its row starts.
+// lineUnits returns the display units of line i and its row starts. The
+// result is memoized until the buffer changes (see aux.layout); callers must
+// not modify the returned slices.
 func (m Model) lineUnits(i int) ([]unit, []int) {
-	units := m.displayUnits(i, m.rawLine(i))
-	return units, wrapGraphemes(graphemesOf(units), m.lay.width)
+	l := m.lineLayout(i)
+	return l.units, l.starts
+}
+
+// lineLayout returns the memoized layout of line i.
+func (m Model) lineLayout(i int) *lineLayout {
+	key := layoutKey{text: m.buf.Line(i), raw: m.rawLine(i), width: m.lay.width}
+	if l := m.aux.layout(m.buf, i, key, m.h); l != nil {
+		return l
+	}
+	m.aux.builds++
+	units := m.displayUnits(i, key.raw)
+	gs := graphemesOf(units)
+	l := &lineLayout{key: key, units: units, gs: gs, starts: wrapGraphemes(gs, key.width)}
+	m.aux.memo[i] = l
+	return l
 }
 
 // rows returns the number of screen rows of line i.
@@ -285,9 +302,8 @@ func (m Model) rows(i int) int {
 // cursorAnchor returns the screen row of the cursor and its cell column.
 func (m Model) cursorAnchor() (anchor, int) {
 	p := m.buf.Cursor()
-	gs := buffer.Graphemes(m.buf.Line(p.Line))
-	starts := wrapGraphemes(gs, m.lay.width)
-	return anchor{line: p.Line, row: rowOf(starts, p.Col)}, cellX(gs, starts, p.Col, m.lay.width)
+	l := m.lineLayout(p.Line) // the cursor line is raw: one unit per grapheme
+	return anchor{line: p.Line, row: rowOf(l.starts, p.Col)}, cellX(l.gs, l.starts, p.Col, m.lay.width)
 }
 
 // ensureVisible scrolls so the cursor keeps the scroll margin.
@@ -376,6 +392,7 @@ func (m Model) View() string {
 		if hasSel {
 			if from, to, e, ok := selectionIn(sel, a.line, m.buf.LineLen(a.line)); ok {
 				eol = e
+				units = slices.Clone(units) // the memoized units are shared
 				for k := range units {
 					if units[k].src >= from && units[k].src < to {
 						units[k].st.sel = true

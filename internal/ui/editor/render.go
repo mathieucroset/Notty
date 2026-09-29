@@ -178,9 +178,49 @@ type aux struct {
 	progVersion uint64
 	prog        map[int][2]int // heading line -> done, total
 	lines       []string
+
+	// Line layout memo, valid for one buffer version: ensureVisible, View
+	// and CursorPosition all need the same lines within one frame.
+	memoBuf     *buffer.Buffer
+	memoVersion uint64
+	memo        map[int]*lineLayout
+	builds      int // layouts computed (for tests)
+}
+
+// layoutKey is what a line's layout depends on besides the buffer version.
+type layoutKey struct {
+	text  string
+	raw   bool
+	width int
+}
+
+// lineLayout is the display form of a line and its soft-wrap rows.
+type lineLayout struct {
+	key    layoutKey
+	units  []unit
+	gs     []string // graphemes of units
+	starts []int
 }
 
 func newAux() *aux { return &aux{dims: map[string]dim{}} }
+
+// layout returns the memoized layout of line i when it is still valid for
+// key, or nil. It resets the memo when the buffer changed or when it grew
+// well past a screenful (scrolling through a long note).
+func (a *aux) layout(b *buffer.Buffer, i int, key layoutKey, height int) *lineLayout {
+	if a.memoBuf != b || a.memoVersion != b.Version() || a.memo == nil || len(a.memo) > 4*height+64 {
+		a.memoBuf, a.memoVersion = b, b.Version()
+		a.memo = map[int]*lineLayout{}
+		return nil
+	}
+	if l := a.memo[i]; l != nil && l.key == key {
+		return l
+	}
+	return nil
+}
+
+// invalidate drops the layout memo (image sizes or the theme changed).
+func (a *aux) invalidate() { a.memo = nil }
 
 // linesOf returns the buffer's lines, cached per buffer version.
 func (a *aux) linesOf(b *buffer.Buffer) []string {
@@ -219,6 +259,7 @@ func (a *aux) dimensions(full string) dim {
 
 // forgetMissing drops cached misses so images added since are picked up.
 func (a *aux) forgetMissing() {
+	a.invalidate()
 	for k, d := range a.dims {
 		if !d.ok {
 			delete(a.dims, k)

@@ -214,3 +214,18 @@ func TestControlCharsArePlaceholders(t *testing.T) {
 		}
 	}
 }
+
+func TestLongLineLaidOutOncePerKey(t *testing.T) {
+	long := strings.Repeat("word ", 20000) // 100KB on one line
+	m := newModel(t, testOptions(t), long, buffer.Pos{Col: 50000}, 100, 40)
+	m, _ = typeKeys(m, "i")
+	for range 3 {
+		before := m.aux.builds
+		m, _ = typeKeys(m, "x")
+		_ = m.View()
+		_ = m.CursorPosition()
+		if n := m.aux.builds - before; n != 1 {
+			t.Fatalf("the long line was laid out %d times for one key", n)
+		}
+	}
+}
