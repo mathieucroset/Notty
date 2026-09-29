@@ -34,7 +34,9 @@ type Effect struct {
 	NeedClipboard bool
 	// PasteBefore is passed back to PasteClipboard ("+P).
 	PasteBefore bool
-	// ToggleTask reports that a task toggle was applied to the buffer.
+	// ToggleTask reports that a task toggle (normal space, insert or plain
+	// ctrl+t) has ALREADY been applied to the buffer as one undo step. It is
+	// informational (e.g. to re-index); the UI must not toggle the line again.
 	ToggleTask              bool
 	FocusSidebar, FocusMain bool
 	// Blocked reports an edit attempted in read-only mode.

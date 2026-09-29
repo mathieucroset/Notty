@@ -41,7 +41,8 @@ func parseListItem(line string) (listItem, bool) {
 // bullet, the next number for a numbered item, and an unchecked box for a
 // task ("- [x] a" -> "- [ ] "). For an empty item ("- ", "- [ ] ", "4. ")
 // it returns endList: the caller clears the marker instead of adding a line.
-// Lines that are not list items return "", false.
+// Lines that are not list items return "", false. Insert-mode enter, plain
+// enter and o use it; O does not continue lists.
 func ContinueList(line string) (prefix string, endList bool) {
 	it, ok := parseListItem(line)
 	if !ok {

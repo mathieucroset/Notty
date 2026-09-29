@@ -17,8 +17,9 @@ func (m *Machine) startInsert(b *buffer.Buffer, p buffer.Pos, repeat int) {
 	m.curswant = cursorCell(b)
 }
 
-// openLine implements o (below) and O (above), keeping the indentation of
-// the current line; o also continues a markdown list.
+// openLine implements o (below) and O (above). Both keep the indentation of
+// the current line; o also continues a markdown list (ContinueList), while O
+// deliberately does not: it opens a line with the indentation only.
 func (m *Machine) openLine(b *buffer.Buffer, l int, above bool) {
 	line := b.Line(l)
 	prefix := leadingWS(line)
