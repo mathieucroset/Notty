@@ -384,6 +384,12 @@ var pairOf = map[string]struct {
 	"{": {"}", 1}, "}": {"{", -1},
 }
 
+// anglePair is matched by the i< / a< text objects only (not by %).
+var anglePair = map[string]struct {
+	other string
+	dir   int
+}{"<": {">", 1}, ">": {"<", -1}}
+
 // matchPair implements %: find the first bracket at or after the cursor on
 // the line and jump to its match (which may be on another line).
 func (t *text) matchPair(p buffer.Pos) (buffer.Pos, bool) {
@@ -404,7 +410,13 @@ func (t *text) matchPair(p buffer.Pos) (buffer.Pos, bool) {
 // findMatch returns the bracket matching the one at q, counting nesting.
 func (t *text) findMatch(q buffer.Pos) (buffer.Pos, bool) {
 	open := t.at(q)
-	pr := pairOf[open]
+	pr, ok := pairOf[open]
+	if !ok {
+		pr, ok = anglePair[open]
+	}
+	if !ok {
+		return q, false
+	}
 	depth := 0
 	for {
 		var r int

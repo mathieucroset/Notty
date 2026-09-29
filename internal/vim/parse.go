@@ -1,6 +1,9 @@
 package vim
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // cmd is one parsed normal- or visual-mode command:
 //
@@ -32,11 +35,11 @@ func (c cmd) String() string {
 		sb.WriteString(`"` + c.reg)
 	}
 	if c.count1 > 0 {
-		sb.WriteString(itoa(c.count1))
+		sb.WriteString(strconv.Itoa(c.count1))
 	}
 	sb.WriteString(c.op)
 	if c.count2 > 0 {
-		sb.WriteString(itoa(c.count2))
+		sb.WriteString(strconv.Itoa(c.count2))
 	}
 	sb.WriteString(c.name)
 	sb.WriteString(c.arg)
@@ -199,22 +202,4 @@ func parseOperator(toks []string, i int, c cmd) (cmd, parseStatus) {
 	name, arg, st := parseMotion(toks, i)
 	c.name, c.arg = name, arg
 	return c, st
-}
-
-func parseTextObject(toks []string, i int, c cmd) (cmd, parseStatus) {
-	return c, parseBad
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
 }
