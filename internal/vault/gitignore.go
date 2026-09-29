@@ -19,6 +19,11 @@ var gitignoreEntries = []string{
 	".notty/lock",
 }
 
+// GitignoreEntries returns a copy of the lines EnsureGitignore guarantees.
+func GitignoreEntries() []string {
+	return append([]string(nil), gitignoreEntries...)
+}
+
 // EnsureGitignore makes sure the .gitignore at root lists the OS junk
 // files, save temp files, .notty/recovery/ and .notty/lock. Missing lines
 // are appended (matching ignores surrounding whitespace); existing content
