@@ -526,10 +526,10 @@ func writeConfigFile(path string, content string) error {
 		return fmt.Errorf("creating temp config file in %s: %w", dir, err)
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op once the rename below succeeds
+	defer func() { _ = os.Remove(tmpPath) }() // no-op once the rename below succeeds
 
 	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("writing config %s: %w", path, err)
 	}
 	if err := tmp.Close(); err != nil {
