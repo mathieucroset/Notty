@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
@@ -42,25 +43,25 @@ func New(styles theme.Styles) Model {
 // SetSize sets the width of the bar in columns.
 func (m *Model) SetSize(width int) { m.width = width }
 
-// SyncText returns the status-bar text for a sync state (spec §4.3), or ""
-// when the state is unknown.
-func SyncText(st msgs.SyncStatusMsg) string {
+// SyncText returns the status-bar text for a sync state (spec §4.3), drawn
+// with set's glyphs, or "" when the state is unknown.
+func SyncText(set icons.Set, st msgs.SyncStatusMsg) string {
 	switch st.State {
 	case msgs.SyncSynced:
-		return "✓ synced"
+		return set.Synced + " synced"
 	case msgs.SyncSyncing:
-		return "↻ syncing…"
+		return set.Syncing + " syncing…"
 	case msgs.SyncOffline:
-		return fmt.Sprintf("⊘ offline (%d pending)", st.Pending)
+		return fmt.Sprintf("%s offline (%d pending)", set.Offline, st.Pending)
 	case msgs.SyncConflict:
 		if st.Conflicts == 1 {
-			return "⚠ 1 conflict"
+			return set.SyncConflict + " 1 conflict"
 		}
-		return fmt.Sprintf("⚠ %d conflicts", st.Conflicts)
+		return fmt.Sprintf("%s %d conflicts", set.SyncConflict, st.Conflicts)
 	case msgs.SyncError:
-		return "✗ sync error"
+		return set.SyncError + " sync error"
 	case msgs.SyncLocalOnly:
-		return "○ local only"
+		return set.LocalOnly + " local only"
 	}
 	return ""
 }
@@ -115,7 +116,7 @@ func (m Model) View() string {
 	left := pill + on(lipgloss.NewStyle()).Render(" ")
 	leftW := lipgloss.Width(left)
 
-	syncText := SyncText(m.Sync)
+	syncText := SyncText(m.styles.Icons, m.Sync)
 	if m.Busy != "" {
 		syncText = strings.TrimSpace(m.Busy + "   " + syncText)
 	}

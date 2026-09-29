@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
@@ -20,23 +21,42 @@ func styles(t *testing.T) theme.Styles {
 }
 
 func TestSyncText(t *testing.T) {
+	nerd, _ := icons.Get("nerd")
+	ascii, _ := icons.Get("ascii")
 	tests := []struct {
+		set  icons.Set
 		st   msgs.SyncStatusMsg
 		want string
 	}{
-		{msgs.SyncStatusMsg{State: msgs.SyncSynced}, "✓ synced"},
-		{msgs.SyncStatusMsg{State: msgs.SyncSyncing}, "↻ syncing…"},
-		{msgs.SyncStatusMsg{State: msgs.SyncOffline, Pending: 3}, "⊘ offline (3 pending)"},
-		{msgs.SyncStatusMsg{State: msgs.SyncConflict, Conflicts: 2}, "⚠ 2 conflicts"},
-		{msgs.SyncStatusMsg{State: msgs.SyncConflict, Conflicts: 1}, "⚠ 1 conflict"},
-		{msgs.SyncStatusMsg{State: msgs.SyncError}, "✗ sync error"},
-		{msgs.SyncStatusMsg{State: msgs.SyncLocalOnly}, "○ local only"},
-		{msgs.SyncStatusMsg{}, ""},
+		{icons.Default(), msgs.SyncStatusMsg{State: msgs.SyncSynced}, "✓ synced"},
+		{icons.Default(), msgs.SyncStatusMsg{State: msgs.SyncSyncing}, "↻ syncing…"},
+		{icons.Default(), msgs.SyncStatusMsg{State: msgs.SyncOffline, Pending: 3}, "⊘ offline (3 pending)"},
+		{icons.Default(), msgs.SyncStatusMsg{State: msgs.SyncConflict, Conflicts: 2}, "⚠ 2 conflicts"},
+		{icons.Default(), msgs.SyncStatusMsg{State: msgs.SyncConflict, Conflicts: 1}, "⚠ 1 conflict"},
+		{icons.Default(), msgs.SyncStatusMsg{State: msgs.SyncError}, "✗ sync error"},
+		{icons.Default(), msgs.SyncStatusMsg{State: msgs.SyncLocalOnly}, "○ local only"},
+		{icons.Default(), msgs.SyncStatusMsg{}, ""},
+		{nerd, msgs.SyncStatusMsg{State: msgs.SyncSynced}, nerd.Synced + " synced"},
+		{nerd, msgs.SyncStatusMsg{State: msgs.SyncOffline, Pending: 1}, nerd.Offline + " offline (1 pending)"},
+		{ascii, msgs.SyncStatusMsg{State: msgs.SyncSyncing}, "~ syncing…"},
+		{ascii, msgs.SyncStatusMsg{State: msgs.SyncConflict, Conflicts: 2}, "! 2 conflicts"},
+		{ascii, msgs.SyncStatusMsg{State: msgs.SyncError}, "x sync error"},
+		{ascii, msgs.SyncStatusMsg{State: msgs.SyncLocalOnly}, "o local only"},
 	}
 	for _, tt := range tests {
-		if got := SyncText(tt.st); got != tt.want {
-			t.Errorf("SyncText(%+v) = %q, want %q", tt.st, got, tt.want)
+		if got := SyncText(tt.set, tt.st); got != tt.want {
+			t.Errorf("SyncText(%s, %+v) = %q, want %q", tt.set.Name, tt.st, got, tt.want)
 		}
+	}
+}
+
+func TestViewUsesTheIconSet(t *testing.T) {
+	ascii, _ := icons.Get("ascii")
+	m := New(styles(t).WithIcons(ascii))
+	m.SetSize(80)
+	m.Sync = msgs.SyncStatusMsg{State: msgs.SyncLocalOnly}
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "o local only") {
+		t.Errorf("view %q lacks the ascii sync glyph", got)
 	}
 }
 
@@ -53,7 +73,7 @@ func TestViewPerSyncState(t *testing.T) {
 			if w := ansi.StringWidth(got); w != 80 {
 				t.Errorf("width = %d, want 80: %q", w, got)
 			}
-			for _, want := range []string{"NORMAL", "Work/Standup notes.md", "· 142 words", SyncText(m.Sync), "F1 help"} {
+			for _, want := range []string{"NORMAL", "Work/Standup notes.md", "· 142 words", SyncText(icons.Default(), m.Sync), "F1 help"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("view %q missing %q", got, want)
 				}
@@ -120,7 +140,7 @@ func TestViewKeepsUrgentSyncText(t *testing.T) {
 		if w := ansi.StringWidth(got); w != tt.width {
 			t.Errorf("width %d: rendered width %d: %q", tt.width, w, got)
 		}
-		for _, want := range []string{"NORMAL", SyncText(tt.st)} {
+		for _, want := range []string{"NORMAL", SyncText(icons.Default(), tt.st)} {
 			if !strings.Contains(got, want) {
 				t.Errorf("%s at width %d: %q missing %q", tt.st.State, tt.width, got, want)
 			}
