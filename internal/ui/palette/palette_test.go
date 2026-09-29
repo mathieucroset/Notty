@@ -380,7 +380,6 @@ func findMsg[T any](list []tea.Msg) (T, bool) {
 	return zero, false
 }
 
-
 func latteStyles(t *testing.T) theme.Styles {
 	t.Helper()
 	p, ok := theme.Get("catppuccin-latte")

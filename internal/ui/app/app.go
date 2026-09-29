@@ -4,10 +4,10 @@ package app
 
 import (
 	"path"
-	"time"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -138,9 +138,9 @@ type Model struct {
 	// history is the full-screen History view, or nil when closed.
 	history     *history.Model
 	historyPath string
-	note    note
-	openSeq int // number of the latest open request
-	sync    msgs.SyncStatusMsg
+	note        note
+	openSeq     int // number of the latest open request
+	sync        msgs.SyncStatusMsg
 }
 
 // New builds the root model.
