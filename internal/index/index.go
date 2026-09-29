@@ -150,25 +150,35 @@ func newNote(rel, content string, mod time.Time) *Note {
 	}
 }
 
-// Update re-reads the file at rel. The entry is removed when the file is
-// missing, is not a regular .md file, or lies in a hidden location; a folder
-// path only drops an entry with that exact path, never its children. Other
-// read errors are returned (and recorded in Problems), leaving any existing
-// entry untouched.
+// Update re-reads the file at rel. When nothing exists at rel any more, the
+// entry and every note under rel are removed, since the watcher reports a
+// folder rename or deletion under the folder path only. When rel exists but
+// is not a regular .md file (for example a folder), or lies in a hidden
+// location, only an entry with that exact path is dropped, never children.
+// Other read errors are returned (and recorded in Problems), leaving any
+// existing entry untouched. Updating the vault root is a no-op.
 func (ix *Index) Update(v *vault.Vault, rel string) error {
 	rel = clean(rel)
+	if rel == "" {
+		return nil
+	}
+	if _, err := os.Lstat(v.Abs(rel)); errors.Is(err, fs.ErrNotExist) {
+		ix.Remove(rel)
+		return nil
+	}
 	if !isNotePath(rel) {
-		ix.mu.Lock()
-		delete(ix.notes, rel)
-		delete(ix.problems, rel)
-		ix.mu.Unlock()
+		ix.dropExact(rel)
 		return nil
 	}
 	n, err := load(v, rel)
+	if errors.Is(err, fs.ErrNotExist) { // vanished since the Lstat above
+		ix.Remove(rel)
+		return nil
+	}
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 	switch {
-	case errors.Is(err, fs.ErrNotExist) || (n == nil && err == nil):
+	case n == nil && err == nil: // not a regular file
 		delete(ix.notes, rel)
 		delete(ix.problems, rel)
 		return nil
@@ -183,6 +193,14 @@ func (ix *Index) Update(v *vault.Vault, rel string) error {
 		delete(ix.problems, rel)
 	}
 	return nil
+}
+
+// dropExact removes the entry at exactly rel, if any.
+func (ix *Index) dropExact(rel string) {
+	ix.mu.Lock()
+	delete(ix.notes, rel)
+	delete(ix.problems, rel)
+	ix.mu.Unlock()
 }
 
 // UpdateContent indexes content (typically the editor buffer) as the note

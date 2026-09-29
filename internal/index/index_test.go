@@ -244,6 +244,58 @@ func TestUpdate(t *testing.T) {
 	}
 }
 
+func TestUpdateVanishedPathRemovesSubtree(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(t *testing.T, v *vault.Vault)
+		rel    string
+		want   []string
+	}{
+		{
+			name: "folder renamed on disk",
+			change: func(t *testing.T, v *vault.Vault) {
+				if err := os.Rename(v.Abs("Folder"), v.Abs("Moved")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			rel:  "Folder",
+			want: []string{"FolderNote.md", "top.md"},
+		},
+		{
+			name: "folder deleted on disk",
+			change: func(t *testing.T, v *vault.Vault) {
+				if err := os.RemoveAll(v.Abs("Folder/Sub")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			rel:  "Folder/Sub",
+			want: []string{"Folder/a.md", "FolderNote.md", "top.md"},
+		},
+		{
+			name:   "existing folder keeps children",
+			change: func(t *testing.T, v *vault.Vault) {},
+			rel:    "Folder",
+			want:   []string{"Folder/Sub/b.md", "Folder/a.md", "FolderNote.md", "top.md"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := newVault(t, map[string]string{
+				"top.md": "# T\n", "FolderNote.md": "# FN\n",
+				"Folder/a.md": "# A\n", "Folder/Sub/b.md": "# B\n",
+			})
+			ix := build(t, v)
+			tt.change(t, v)
+			if err := ix.Update(v, tt.rel); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			if got := paths(ix.Notes()); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("paths = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUpdateReplacesNotMutates(t *testing.T) {
 	v := newVault(t, map[string]string{"a.md": "# A\n"})
 	ix := build(t, v)
