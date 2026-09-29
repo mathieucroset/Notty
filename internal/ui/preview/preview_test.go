@@ -1,0 +1,423 @@
+package preview
+
+import (
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/mathieucroset/notty/internal/imgrender"
+	"github.com/mathieucroset/notty/internal/ui/theme"
+)
+
+// --- helpers ---------------------------------------------------------------
+
+func testPalette(t *testing.T) theme.Palette {
+	t.Helper()
+	p, ok := theme.Get("catppuccin-mocha")
+	if !ok {
+		t.Fatal("palette missing")
+	}
+	return p
+}
+
+func newTest(t *testing.T, proto imgrender.Protocol, vault string) Model {
+	t.Helper()
+	p := testPalette(t)
+	m := New(theme.NewStyles(p), p, imgrender.Caps{Inline: proto, CellW: 8, CellH: 16}, vault)
+	m.debounce = time.Millisecond
+	return m.SetSize(60, 30)
+}
+
+// run executes cmd and everything it leads to: preview messages are fed
+// back into Update, tea.Raw payloads are collected in raws, anything else
+// (messages for the app) in out.
+func run(m Model, cmd tea.Cmd) (Model, []string, []tea.Msg) {
+	var raws []string
+	var out []tea.Msg
+	queue := []tea.Cmd{cmd}
+	for len(queue) > 0 {
+		c := queue[0]
+		queue = queue[1:]
+		if c == nil {
+			continue
+		}
+		switch msg := c().(type) {
+		case tea.BatchMsg:
+			queue = append(queue, msg...)
+		case tea.RawMsg:
+			raws = append(raws, fmt.Sprint(msg.Msg))
+		case renderTickMsg, renderedMsg:
+			var next tea.Cmd
+			m, next = m.Update(msg)
+			queue = append(queue, next)
+		default:
+			out = append(out, msg)
+		}
+	}
+	return m, raws, out
+}
+
+func setContent(t *testing.T, m Model, path, content string) (Model, []string) {
+	t.Helper()
+	m, cmd := m.SetContent(path, content)
+	m, raws, _ := run(m, cmd)
+	return m, raws
+}
+
+func writePNG(t *testing.T, path string, w, h int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			img.Set(x, y, color.RGBA{uint8(x * 7), uint8(y * 5), 200, 255})
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// lineOf returns the index of the first view line containing s, or -1.
+func lineOf(view, s string) int {
+	for i, l := range strings.Split(ansi.Strip(view), "\n") {
+		if strings.Contains(l, s) {
+			return i
+		}
+	}
+	return -1
+}
+
+func checkDims(t *testing.T, view string, w, h int) {
+	t.Helper()
+	lines := strings.Split(view, "\n")
+	if len(lines) != h {
+		t.Fatalf("view has %d lines, want %d", len(lines), h)
+	}
+	for i, l := range lines {
+		if got := ansi.StringWidth(l); got != w {
+			t.Fatalf("line %d has width %d, want %d: %q", i, got, w, l)
+		}
+	}
+}
+
+// --- rendering -------------------------------------------------------------
+
+func TestRenderShowsGlamourText(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	m, _ = setContent(t, m, "n.md", "# Hello\n\nSome **bold** text.")
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "Hello") || !strings.Contains(v, "Some bold text.") {
+		t.Fatalf("view misses rendered text:\n%s", v)
+	}
+	if strings.Contains(v, "**") {
+		t.Fatalf("markdown not rendered:\n%s", v)
+	}
+}
+
+func TestSegmentCacheReuse(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	m, _ = setContent(t, m, "n.md", "# A\n\npara b\n\npara c")
+	if got := m.sh.glamourCalls.Load(); got != 3 {
+		t.Fatalf("first render: %d glamour calls, want 3", got)
+	}
+	m, _ = setContent(t, m, "n.md", "# A\n\npara b changed\n\npara c")
+	if got := m.sh.glamourCalls.Load(); got != 4 {
+		t.Fatalf("after one change: %d glamour calls, want 4", got)
+	}
+	m, _ = setContent(t, m, "n.md", "# A\n\npara b changed\n\npara c")
+	if got := m.sh.glamourCalls.Load(); got != 4 {
+		t.Fatalf("unchanged content: %d glamour calls, want 4", got)
+	}
+	// A new width renders everything again.
+	m = m.SetSize(40, 30)
+	m, cmd := m.Refresh()
+	m, _, _ = run(m, cmd)
+	if got := m.sh.glamourCalls.Load(); got != 7 {
+		t.Fatalf("after resize: %d glamour calls, want 7", got)
+	}
+	// And the theme is part of the key.
+	p, _ := theme.Get("catppuccin-latte")
+	m, cmd = m.SetTheme(theme.NewStyles(p), p)
+	_, _, _ = run(m, cmd)
+	if got := m.sh.glamourCalls.Load(); got != 10 {
+		t.Fatalf("after theme change: %d glamour calls, want 10", got)
+	}
+}
+
+func TestSetContentIsDebouncedAndStaleRendersDropped(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	m, first := m.SetContent("n.md", "old text")
+	m, second := m.SetContent("n.md", "new text")
+	m, _, _ = run(m, first) // stale tick: nothing renders
+	if m.doc != nil {
+		t.Fatal("stale tick rendered")
+	}
+	m, _, _ = run(m, second)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "new text") || strings.Contains(v, "old text") {
+		t.Fatalf("view:\n%s", v)
+	}
+}
+
+func TestStaleRenderResultDropped(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	m, _ = m.SetContent("n.md", "first")
+	stale := m.startRender()().(renderedMsg)
+	m, _ = m.SetContent("n.md", "second")
+	m, _ = m.Update(stale)
+	if m.doc != nil {
+		t.Fatal("stale render applied")
+	}
+}
+
+func TestSizeChangeRerendersOnNextUpdate(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	m, _ = setContent(t, m, "n.md", strings.Repeat("word ", 30))
+	m = m.SetSize(30, 10)
+	m, cmd := m.Update(struct{}{})
+	if cmd == nil {
+		t.Fatal("no render scheduled after resize")
+	}
+	m, _, _ = run(m, cmd)
+	if m.doc.width != 30 {
+		t.Fatalf("doc width %d, want 30", m.doc.width)
+	}
+}
+
+func TestMissingImageRendersWarningChip(t *testing.T) {
+	for _, proto := range []imgrender.Protocol{imgrender.ProtoKitty, imgrender.ProtoHalfBlocks} {
+		m := newTest(t, proto, t.TempDir())
+		m, _ = setContent(t, m, "notes/n.md", "![x](nope.png)\n\n![y](https://example.com/y.png)")
+		v := ansi.Strip(m.View())
+		if !strings.Contains(v, "🖼 nope.png  (missing)") {
+			t.Fatalf("%v: no missing chip:\n%s", proto, v)
+		}
+		if !strings.Contains(v, "🖼 y.png  (external)") {
+			t.Fatalf("%v: no external chip:\n%s", proto, v)
+		}
+	}
+}
+
+func TestUndecodableImageRendersWarningChip(t *testing.T) {
+	vault := t.TempDir()
+	if err := os.WriteFile(filepath.Join(vault, "bad.png"), []byte("not a png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newTest(t, imgrender.ProtoHalfBlocks, vault)
+	m, _ = setContent(t, m, "n.md", "![](/bad.png)")
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "🖼 bad.png  (unreadable)") {
+		t.Fatalf("no unreadable chip:\n%s", v)
+	}
+}
+
+func TestHalfBlockImageAndOverlayChips(t *testing.T) {
+	vault := t.TempDir()
+	writePNG(t, filepath.Join(vault, "img", "pic.png"), 160, 96)
+	m := newTest(t, imgrender.ProtoHalfBlocks, vault)
+	m, raws := setContent(t, m, "notes/n.md", "Intro\n\n![pic](../img/pic.png)\n\nOutro")
+	if len(raws) != 0 {
+		t.Fatalf("half-blocks sent raw output: %q", raws)
+	}
+	v := m.View()
+	if !strings.Contains(v, "▀") {
+		t.Fatalf("no half-block image:\n%s", ansi.Strip(v))
+	}
+	// 160x96 px at 8x16 px cells is 20x6 cells.
+	if got := m.doc.imgRows[0]; got != 6 {
+		t.Fatalf("image rows = %d, want 6", got)
+	}
+	m = m.SetOverlayOpen(true)
+	ov := m.View()
+	if strings.Contains(ov, "▀") {
+		t.Fatal("image still drawn while overlay open")
+	}
+	if !strings.Contains(ansi.Strip(ov), "🖼 pic.png") {
+		t.Fatalf("no chip while overlay open:\n%s", ansi.Strip(ov))
+	}
+	if lineOf(ov, "Outro") != lineOf(v, "Outro") || lineOf(v, "Outro") < 0 {
+		t.Fatal("overlay swap moved the layout")
+	}
+	m = m.SetOverlayOpen(false)
+	if !strings.Contains(m.View(), "▀") {
+		t.Fatal("image not back after overlay closed")
+	}
+}
+
+func TestImagesCappedAtPaneWidthAndSixtyPercentHeight(t *testing.T) {
+	vault := t.TempDir()
+	writePNG(t, filepath.Join(vault, "wide.png"), 1600, 200)
+	writePNG(t, filepath.Join(vault, "tall.png"), 200, 1600)
+	m := newTest(t, imgrender.ProtoHalfBlocks, vault)
+	m, _ = setContent(t, m, "n.md", "![](wide.png)\n\n![](tall.png)")
+	cols := ansi.StringWidth(m.doc.images[0].rows[0])
+	if cols != 58 {
+		t.Fatalf("wide image %d cols, want 58 (pane 60 - 2)", cols)
+	}
+	if got := m.doc.imgRows[1]; got != 18 {
+		t.Fatalf("tall image %d rows, want 18 (60%% of 30)", got)
+	}
+}
+
+func TestImagesOffRenderPlainChips(t *testing.T) {
+	vault := t.TempDir()
+	writePNG(t, filepath.Join(vault, "pic.png"), 32, 32)
+	m := newTest(t, imgrender.ProtoOff, vault)
+	m, _ = setContent(t, m, "n.md", "![](pic.png)")
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "🖼 pic.png") || strings.Contains(v, "(missing)") {
+		t.Fatalf("view:\n%s", v)
+	}
+}
+
+func TestInlineImageKeepsGlamourChipAndAddsBlock(t *testing.T) {
+	vault := t.TempDir()
+	writePNG(t, filepath.Join(vault, "pic.png"), 32, 32)
+	m := newTest(t, imgrender.ProtoHalfBlocks, vault)
+	m, _ = setContent(t, m, "n.md", "look ![alt](pic.png) here")
+	v := m.View()
+	if !strings.Contains(ansi.Strip(v), "look") || !strings.Contains(v, "▀") {
+		t.Fatalf("view:\n%s", ansi.Strip(v))
+	}
+}
+
+// --- kitty -----------------------------------------------------------------
+
+func kittyNote(t *testing.T) (Model, string) {
+	t.Helper()
+	vault := t.TempDir()
+	writePNG(t, filepath.Join(vault, "attachments", "a.png"), 64, 64)
+	m := newTest(t, imgrender.ProtoKitty, vault)
+	return m, "text\n\n![](/attachments/a.png)"
+}
+
+func TestKittyTransmitHeldUntilTerminalReady(t *testing.T) {
+	m, content := kittyNote(t)
+	m, raws := setContent(t, m, "n.md", content)
+	if len(raws) != 0 {
+		t.Fatalf("transmitted before the terminal was ready: %d raws", len(raws))
+	}
+	if !strings.ContainsRune(m.View(), '\U0010EEEE') {
+		t.Fatal("no placeholder cells in the view")
+	}
+	id := m.doc.images[0].kittyID
+	if id == 0 || id > imgrender.MaxDynamicKittyID {
+		t.Fatalf("kitty id %d outside the dynamic range", id)
+	}
+
+	m, cmd := m.SetTerminalReady()
+	m, raws, _ = run(m, cmd)
+	want := fmt.Sprintf("a=T,f=100,q=2,i=%d,", id)
+	if len(raws) != 1 || !strings.Contains(raws[0], want) {
+		t.Fatalf("after ready: raws %d, want one transmit containing %q", len(raws), want)
+	}
+	if _, cmd := m.SetTerminalReady(); cmd != nil {
+		t.Fatal("second SetTerminalReady transmitted again")
+	}
+
+	// Re-rendering the same note does not re-send.
+	m, raws = setContent(t, m, "n.md", content+"\n\nmore")
+	if len(raws) != 0 {
+		t.Fatalf("re-render re-sent %d raws", len(raws))
+	}
+
+	// After tea.Exec the terminal lost its images: re-transmit.
+	m, cmd = m.ResetKittyState()
+	m, raws, _ = run(m, cmd)
+	if len(raws) != 1 || !strings.Contains(raws[0], want) {
+		t.Fatalf("ResetKittyState: raws %d, want one re-transmit", len(raws))
+	}
+
+	if got, want := m.KittyCleanup(), imgrender.KittyDelete(id); got != want {
+		t.Fatalf("KittyCleanup = %q, want %q", got, want)
+	}
+}
+
+func TestKittyTransmitAfterReadyGoesOutWithRender(t *testing.T) {
+	m, content := kittyNote(t)
+	m, _ = m.SetTerminalReady()
+	m, raws := setContent(t, m, "n.md", content)
+	if len(raws) != 1 || !strings.Contains(raws[0], "\x1b_Ga=T") {
+		t.Fatalf("raws = %d, want one transmit", len(raws))
+	}
+}
+
+func TestKittyEvictionDeletesImage(t *testing.T) {
+	vault := t.TempDir()
+	writePNG(t, filepath.Join(vault, "a.png"), 32, 32)
+	writePNG(t, filepath.Join(vault, "b.png"), 32, 32)
+	m := newTest(t, imgrender.ProtoKitty, vault)
+	m.sh.imgCache = imgrender.NewCache(1)
+	m, _ = m.SetTerminalReady()
+	m, _ = setContent(t, m, "n.md", "![](a.png)")
+	idA := m.doc.images[0].kittyID
+	m, raws := setContent(t, m, "n.md", "![](b.png)")
+	idB := m.doc.images[0].kittyID
+	all := strings.Join(raws, "")
+	if !strings.Contains(all, imgrender.KittyDelete(idA)) {
+		t.Fatal("evicted image not deleted")
+	}
+	if !strings.Contains(all, fmt.Sprintf("i=%d,", idB)) {
+		t.Fatal("new image not transmitted")
+	}
+	if got := m.KittyCleanup(); got != imgrender.KittyDelete(idB) {
+		t.Fatalf("KittyCleanup = %q, want only b", got)
+	}
+}
+
+func TestKittyTmuxWrapping(t *testing.T) {
+	m, content := kittyNote(t)
+	m.caps.TmuxPassthrough = true
+	m, _ = m.SetTerminalReady()
+	m, raws := setContent(t, m, "n.md", content)
+	if len(raws) != 1 || !strings.HasPrefix(raws[0], "\x1bPtmux;") {
+		t.Fatalf("transmit not wrapped for tmux")
+	}
+	if !strings.HasPrefix(m.KittyCleanup(), "\x1bPtmux;") {
+		t.Fatal("delete not wrapped for tmux")
+	}
+}
+
+// --- view geometry ---------------------------------------------------------
+
+func TestViewAlwaysExactSize(t *testing.T) {
+	vault := t.TempDir()
+	writePNG(t, filepath.Join(vault, "pic.png"), 400, 300)
+	content := "# Title that is rather long and will need wrapping somewhere\n\n" +
+		"```\n" + strings.Repeat("x", 200) + "\n```\n\n" +
+		"| a | b |\n|---|---|\n| " + strings.Repeat("c", 90) + " | d |\n\n" +
+		"![](pic.png)\n\n![](missing-with-a-very-long-file-name-that-overflows-the-pane.png)\n\n- [ ] task"
+	sizes := [][2]int{{60, 30}, {20, 5}, {3, 4}, {2, 2}, {1, 3}, {80, 100}}
+	for _, proto := range []imgrender.Protocol{imgrender.ProtoKitty, imgrender.ProtoHalfBlocks, imgrender.ProtoOff} {
+		m := newTest(t, proto, vault)
+		checkDims(t, m.View(), 60, 30) // before any render
+		for _, sz := range sizes {
+			m = m.SetSize(sz[0], sz[1])
+			checkDims(t, m.View(), sz[0], sz[1]) // stale render cropped
+			m, _ = setContent(t, m, "n.md", content)
+			checkDims(t, m.View(), sz[0], sz[1])
+			m = m.SetOverlayOpen(true)
+			checkDims(t, m.View(), sz[0], sz[1])
+			m = m.SetOverlayOpen(false)
+		}
+	}
+	m := newTest(t, imgrender.ProtoOff, vault).SetSize(10, 0)
+	if m.View() != "" {
+		t.Fatal("zero height view not empty")
+	}
+}
