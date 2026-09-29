@@ -2,22 +2,22 @@
 │ # Standup notes                                                    │
 │  ╭─────────────────────────────────────────────────────────────╮   │
 │ -│                                                             │   │
-│ ☐│  G L O B A L                                                │   │
-│ ☑│  ctrl+p fuzzy finder                                        │   │
+│ ☐│  Keyboard shortcuts  j/k scroll · esc close                 │   │
+│ ☑│                                                             │   │
+│  │  G L O B A L                                                │   │
+│ ▎│  ctrl+p fuzzy finder                                        │   │
 │  │  ctrl+f full-text search                                    │   │
-│ ▎│  ctrl+k command palette                                     │   │
+│ #│  ctrl+k command palette                                     │   │
 │  │  ctrl+b toggle sidebar (zen layout)                         │   │
-│ #│  ctrl+g cycle editor / split / preview                      │   │
+│ P│  ctrl+g cycle editor / split / preview                      │   │
 │  │  ctrl+s save                                                │   │
-│ P│  ctrl+e open note in $EDITOR                                │   │
+│  │  ctrl+e open note in $EDITOR                                │   │
 │  │  ctrl+q quit                                                │   │
 │  │  F1     help                                                │   │
 │  │                                                             │   │
 │  │  S I D E B A R                                              │   │
 │  │  j/↓   move down                                            │   │
 │  │  k/↑   move up                                              │   │
-│  │  h/←   collapse folder / go to parent                       │   │
-│  │  l/→   expand folder                                        │   │
 │  │                                                             │   │
 │  ╰─────────────────────────────────────────────────────────────╯   │
 ╰────────────────────────────────────────────────────────────────────╯

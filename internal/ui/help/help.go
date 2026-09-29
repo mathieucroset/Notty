@@ -89,7 +89,29 @@ func (m Model) View() string {
 	for len(visible) < viewport {
 		visible = append(visible, padLine("", width))
 	}
-	return m.styles.Dialog.Width(m.width).Height(m.height).Render(strings.Join(visible, "\n"))
+	rows := visible
+	if m.showsHeader() {
+		rows = append([]string{m.header(width), padLine("", width)}, visible...)
+	}
+	return m.styles.Dialog.Width(m.width).Height(m.height).Render(strings.Join(rows, "\n"))
+}
+
+// showsHeader reports whether the overlay is tall enough for the header
+// and at least one row of shortcuts.
+func (m Model) showsHeader() bool { return m.height-2-2 > headerRows }
+
+// headerRows is the number of rows above the shortcuts: the title with its
+// key hint, then a blank row.
+const headerRows = 2
+
+// header is the overlay's title with its key hint, like the error log's;
+// the scroll keys are offered only when there is more to see.
+func (m Model) header(width int) string {
+	hint := "esc close"
+	if m.maxOffset() > 0 {
+		hint = "j/k scroll · " + hint
+	}
+	return padLine(m.styles.DialogTitle.Render("Keyboard shortcuts")+"  "+m.styles.Muted.Render(hint), width)
 }
 
 // renderContent builds the full (unscrolled) list of content lines, in one
@@ -227,6 +249,9 @@ func (m Model) innerWidth() int {
 // style's border and padding.
 func (m Model) innerHeight() int {
 	h := m.height - 2 - 2 // border (2) + vertical padding (2)
+	if m.showsHeader() {
+		h -= headerRows
+	}
 	if h < 1 {
 		h = 1
 	}

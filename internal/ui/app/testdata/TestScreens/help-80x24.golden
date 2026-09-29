@@ -2,22 +2,22 @@
 │  P I N N E D             ││ # Standup notes                                  │
 │  ★╭──────────────────────────────────────────────────────────────────────╮   │
 │   │                                                                      │   │
-│  N│  G L O B A L                                                         │   │
-│  ▸│  ctrl+p fuzzy finder                                                 │   │
-│  ▾│  ctrl+f full-text search                                             │   │
+│  N│  Keyboard shortcuts  j/k scroll · esc close                          │   │
+│  ▸│                                                                      │   │
+│  ▾│  G L O B A L                                                         │   │
+│   │  ctrl+p fuzzy finder                                                 │   │
+│  •│  ctrl+f full-text search                                             │   │
 │   │  ctrl+k command palette                                              │   │
-│  •│  ctrl+b toggle sidebar (zen layout)                                  │   │
+│  T│  ctrl+b toggle sidebar (zen layout)                                  │   │
 │   │  ctrl+g cycle editor / split / preview                               │   │
-│  T│  ctrl+s save                                                         │   │
+│   │  ctrl+s save                                                         │   │
 │   │  ctrl+e open note in $EDITOR                                         │   │
-│   │  ctrl+q quit                                                         │   │
-│   │  F1     help                                                         │   │
-│  ☐│                                                                      │   │
-│  ⌫│  S I D E B A R                                                       │   │
+│  ☐│  ctrl+q quit                                                         │   │
+│  ⌫│  F1     help                                                         │   │
+│   │                                                                      │   │
+│   │  S I D E B A R                                                       │   │
 │   │  j/↓   move down                                                     │   │
 │   │  k/↑   move up                                                       │   │
-│   │  h/←   collapse folder / go to parent                                │   │
-│   │  l/→   expand folder                                                 │   │
 │   │                                                                      │   │
 │   ╰──────────────────────────────────────────────────────────────────────╯   │
 ╰──────────────────────────╯╰──────────────────────────────────────────────────╯

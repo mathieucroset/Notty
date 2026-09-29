@@ -3,17 +3,19 @@
 │  ★ Standup notes         ││                                                                                          │
 │     ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────╮     │
 │  N O│                                                                                                          │     │
-│  ▸ P│  G L O B A L                                        E D I T O R   ·   R E A D - O N L Y                  │     │
-│  ▾ W│  ctrl+p fuzzy finder                                motions move and scroll                              │     │
-│    •│  ctrl+f full-text search                            /       search                                       │     │
-│  • i│  ctrl+k command palette                             y       yank / copy                                  │     │
-│     │  ctrl+b toggle sidebar (zen layout)                 tab     focus sidebar                                │     │
-│  T A│  ctrl+g cycle editor / split / preview              c       open resolver on this file                   │     │
-│   #d│  ctrl+s save                                                                                             │     │
-│   #t│  ctrl+e open note in $EDITOR                        P R E V I E W                                        │     │
-│     │  ctrl+q quit                                        j/k      scroll                                      │     │
-│  ☐ T│  F1     help                                        ctrl+d/u half-page down / up                         │     │
-│  ⌫ T│                                                     gg G     top / bottom                                │     │
+│  ▸ P│  Keyboard shortcuts  j/k scroll · esc close                                                              │     │
+│  ▾ W│                                                                                                          │     │
+│    •│  G L O B A L                                        E D I T O R   ·   R E A D - O N L Y                  │     │
+│  • i│  ctrl+p fuzzy finder                                motions move and scroll                              │     │
+│     │  ctrl+f full-text search                            /       search                                       │     │
+│  T A│  ctrl+k command palette                             y       yank / copy                                  │     │
+│   #d│  ctrl+b toggle sidebar (zen layout)                 tab     focus sidebar                                │     │
+│   #t│  ctrl+g cycle editor / split / preview              c       open resolver on this file                   │     │
+│     │  ctrl+s save                                                                                             │     │
+│  ☐ T│  ctrl+e open note in $EDITOR                        P R E V I E W                                        │     │
+│  ⌫ T│  ctrl+q quit                                        j/k      scroll                                      │     │
+│     │  F1     help                                        ctrl+d/u half-page down / up                         │     │
+│     │                                                     gg G     top / bottom                                │     │
 │     │  S I D E B A R                                      ]t [t    next / previous task                        │     │
 │     │  j/↓   move down                                    space    toggle highlighted task                     │     │
 │     │  k/↑   move up                                      ]i [i    next / previous image                       │     │
@@ -31,8 +33,6 @@
 │     │  #     filter by tag                                T R A S H                                            │     │
 │     │  esc   clear tag filter                             j/k   move                                           │     │
 │     │  c     open resolver                                enter restore                                        │     │
-│     │  !     error log                                    D     delete permanently                             │     │
-│     │  ?     help                                         E     empty trash                                    │     │
 │     │                                                                                                          │     │
 │     ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────╯     │
 │                          ││                                                                                          │
