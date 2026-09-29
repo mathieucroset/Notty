@@ -1,8 +1,10 @@
 package merge
 
 import (
+	"fmt"
 	"math/rand"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -159,6 +161,85 @@ func TestDiffLarge(t *testing.T) {
 	b := randLines(r, 3000, "abcdefghij")
 	if got := applyOps(t, a, b, Diff(a, b)); !reflect.DeepEqual(got, b) && len(b) > 0 {
 		t.Fatal("large diff does not reproduce b")
+	}
+}
+
+func TestDiffBudgetFallbackIsValid(t *testing.T) {
+	r := rand.New(rand.NewSource(5))
+	for iter := 0; iter < 2000; iter++ {
+		// Up to 120 lines so regions often exceed smallRegion and fall back.
+		a := randLines(r, 60, "abcd")
+		b := randLines(r, 60, "abcd")
+		for _, budget := range []int{0, 1, 10, 100, 1000} {
+			ops, _ := diff(a, b, budget)
+			if got := applyOps(t, a, b, ops); !reflect.DeepEqual(got, b) && len(b) > 0 {
+				t.Fatalf("budget %d: apply(diff(%v,%v)) = %v", budget, a, b, got)
+			}
+		}
+	}
+}
+
+func numbered(prefix string, n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("%s%d", prefix, i)
+	}
+	return out
+}
+
+func TestDiffDisjointIsBounded(t *testing.T) {
+	const n = 16000
+	a, b := numbered("a", n), numbered("b", n)
+	budget := diffBudget(2 * n)
+	ops, steps := diff(a, b, budget)
+	want := []Op{{Delete, 0, n, 0, 0}, {Insert, n, n, 0, n}}
+	if !reflect.DeepEqual(ops, want) {
+		t.Fatalf("disjoint diff = %v, want %v", ops, want)
+	}
+	// Past the budget, only small subproblems (bounded by smallRegion) may
+	// still run exactly, so total work stays linear in the budget and input.
+	if limit := budget + smallRegion*2*n; steps > limit {
+		t.Fatalf("disjoint diff used %d steps, limit %d", steps, limit)
+	}
+}
+
+func TestDiffScatteredEditsStayMinimal(t *testing.T) {
+	const n, edits = 16000, 200
+	a := numbered("line", n)
+	b := slices.Clone(a)
+	r := rand.New(rand.NewSource(6))
+	for _, i := range r.Perm(n)[:edits] {
+		b[i] = fmt.Sprintf("edited%d", i)
+	}
+	ops := Diff(a, b)
+	applyOps(t, a, b, ops)
+	got := 0
+	for _, op := range ops {
+		if op.Kind != Equal {
+			got += op.A1 - op.A0 + op.B1 - op.B0
+		}
+	}
+	if got != 2*edits {
+		t.Fatalf("scattered edits: %d changed lines, want minimal %d", got, 2*edits)
+	}
+}
+
+func BenchmarkDiffDisjoint16k(b *testing.B) {
+	x, y := numbered("a", 16000), numbered("b", 16000)
+	for b.Loop() {
+		Diff(x, y)
+	}
+}
+
+func BenchmarkDiffScattered16k(b *testing.B) {
+	x := numbered("line", 16000)
+	y := slices.Clone(x)
+	r := rand.New(rand.NewSource(7))
+	for _, i := range r.Perm(len(x))[:200] {
+		y[i] = fmt.Sprintf("edited%d", i)
+	}
+	for b.Loop() {
+		Diff(x, y)
 	}
 }
 

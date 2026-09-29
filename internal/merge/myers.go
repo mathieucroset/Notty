@@ -37,11 +37,34 @@ type Op struct {
 	B0, B1 int
 }
 
-// Diff returns a minimal edit script turning a into b, computed with the
+// Diff returns an edit script turning a into b, computed with the
 // linear-space variant of Myers' O(ND) algorithm. Consecutive ops of the same
 // kind are coalesced; within a changed region, the Delete comes before the
 // Insert. The result is deterministic and nil when both inputs are empty.
+//
+// The script is minimal unless the inputs are so different that the work
+// exceeds a step budget linear in len(a)+len(b); past that point, remaining
+// large differing regions are reported as a whole Delete plus Insert. This
+// bounds the worst case (e.g. two unrelated 16k-line files) to milliseconds.
 func Diff(a, b []string) []Op {
+	ops, _ := diff(a, b, diffBudget(len(a)+len(b)))
+	return ops
+}
+
+const (
+	// budgetPerLine and minBudget size the step budget of Diff.
+	budgetPerLine = 64
+	minBudget     = 1 << 20
+	// smallRegion is the largest subproblem (lines in a plus b) that is still
+	// diffed exactly once the budget is spent; its cost is at most quadratic
+	// in this constant, so total work stays linear in the input.
+	smallRegion = 64
+)
+
+func diffBudget(lines int) int { return max(lines*budgetPerLine, minBudget) }
+
+// diff is Diff with an explicit step budget; it also returns the steps used.
+func diff(a, b []string, budget int) ([]Op, int) {
 	// Intern lines so the core loop compares ints.
 	ids := make(map[string]int, len(a)+len(b))
 	intern := func(ls []string) []int {
@@ -57,16 +80,17 @@ func Diff(a, b []string) []Op {
 		return out
 	}
 	d := &differ{
-		a:  intern(a),
-		b:  intern(b),
-		ca: make([]bool, len(a)),
-		cb: make([]bool, len(b)),
+		a:      intern(a),
+		b:      intern(b),
+		ca:     make([]bool, len(a)),
+		cb:     make([]bool, len(b)),
+		budget: budget,
 	}
 	n := len(a) + len(b)
 	d.vf = make([]int, n+3)
 	d.vb = make([]int, n+3)
 	d.compare(0, len(a), 0, len(b))
-	return d.ops()
+	return d.ops(), d.steps
 }
 
 // differ marks changed lines in ca (deleted from a) and cb (inserted in b).
@@ -74,6 +98,8 @@ type differ struct {
 	a, b   []int
 	ca, cb []bool
 	vf, vb []int // scratch V arrays, indexed by diagonal + offset
+	budget int   // steps allowed before large regions fall back
+	steps  int   // steps (diagonal visits plus snake moves) used so far
 }
 
 func (d *differ) compare(aLo, aHi, bLo, bHi int) {
@@ -98,7 +124,17 @@ func (d *differ) compare(aLo, aHi, bLo, bHi int) {
 		}
 		return
 	}
-	x, y, u, v := d.middleSnake(aLo, aHi, bLo, bHi)
+	x, y, u, v, ok := d.middleSnake(aLo, aHi, bLo, bHi)
+	if !ok {
+		// Over budget: report the whole region as changed.
+		for i := aLo; i < aHi; i++ {
+			d.ca[i] = true
+		}
+		for j := bLo; j < bHi; j++ {
+			d.cb[j] = true
+		}
+		return
+	}
 	d.compare(aLo, x, bLo, y)
 	d.compare(u, aHi, v, bHi)
 }
@@ -108,8 +144,11 @@ func (d *differ) compare(aLo, aHi, bLo, bHi int) {
 // start (x, y) and end (u, v) in absolute coordinates. Both ranges must be
 // non-empty and must differ in their first and last lines, which guarantees
 // an edit distance of at least 2 and therefore strictly smaller subproblems.
-func (d *differ) middleSnake(aLo, aHi, bLo, bHi int) (x, y, u, v int) {
+// It reports ok=false, without a snake, when the step budget runs out on a
+// region larger than smallRegion.
+func (d *differ) middleSnake(aLo, aHi, bLo, bHi int) (x, y, u, v int, ok bool) {
 	n, m := aHi-aLo, bHi-bLo
+	limited := n+m > smallRegion
 	delta := n - m
 	odd := delta&1 != 0
 	maxD := (n + m + 1) / 2
@@ -118,6 +157,9 @@ func (d *differ) middleSnake(aLo, aHi, bLo, bHi int) (x, y, u, v int) {
 	vf[off+1] = 0
 	vb[off+1] = 0
 	for dd := 0; dd <= maxD; dd++ {
+		if limited && d.steps > d.budget {
+			return 0, 0, 0, 0, false
+		}
 		// Forward search: vf[k] is the furthest x on diagonal k = x - y.
 		for k := -dd; k <= dd; k += 2 {
 			var px int
@@ -133,10 +175,11 @@ func (d *differ) middleSnake(aLo, aHi, bLo, bHi int) (x, y, u, v int) {
 				py++
 			}
 			vf[off+k] = px
+			d.steps += 1 + px - sx
 			if odd {
 				rk := delta - k // matching reverse diagonal
 				if rk >= -(dd-1) && rk <= dd-1 && px+vb[off+rk] >= n {
-					return aLo + sx, bLo + sy, aLo + px, bLo + py
+					return aLo + sx, bLo + sy, aLo + px, bLo + py, true
 				}
 			}
 		}
@@ -156,16 +199,17 @@ func (d *differ) middleSnake(aLo, aHi, bLo, bHi int) (x, y, u, v int) {
 				py++
 			}
 			vb[off+k] = px
+			d.steps += 1 + px - sx
 			if !odd {
 				fk := delta - k // matching forward diagonal
 				if fk >= -dd && fk <= dd && vf[off+fk]+px >= n {
-					return aHi - px, bHi - py, aHi - sx, bHi - sy
+					return aHi - px, bHi - py, aHi - sx, bHi - sy, true
 				}
 			}
 		}
 	}
 	// Unreachable: a path of length n+m always exists.
-	return aLo, bLo, aHi, bHi
+	return 0, 0, 0, 0, false
 }
 
 // ops converts the change marks into a coalesced edit script.
