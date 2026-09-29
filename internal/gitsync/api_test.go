@@ -581,6 +581,9 @@ func TestMergeConflictAndAbort(t *testing.T) {
 	if err := env.Laptop.AddAll(); !errors.Is(err, gitsync.ErrConflict) {
 		t.Fatalf("AddAll during merge err = %v, want ErrConflict refusal", err)
 	}
+	if err := env.Laptop.Merge("origin/main", false); !errors.Is(err, gitsync.ErrConflict) {
+		t.Fatalf("Merge during merge err = %v, want ErrConflict", err)
+	}
 	if err := env.Laptop.CommitMerge("Merge · laptop"); err == nil {
 		t.Fatalf("CommitMerge with unresolved conflicts succeeded")
 	}

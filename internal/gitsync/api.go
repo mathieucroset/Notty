@@ -371,11 +371,15 @@ func (r *Repo) hasCommit(rev string) bool {
 // Merge merges ref into the current branch without opening an editor.
 // Fast-forwards are allowed and rename detection is always on. It returns an
 // error wrapping ErrConflict when the merge stopped with conflicts (the merge
-// stays in progress) or ErrLocalChanges when git refused to start because
-// uncommitted changes would be overwritten.
+// stays in progress) or when a merge is already in progress, and
+// ErrLocalChanges when git refused to start because uncommitted changes would
+// be overwritten.
 func (r *Repo) Merge(ref string, allowUnrelated bool) error {
 	if err := checkArg("ref", ref); err != nil {
 		return err
+	}
+	if r.MergeInProgress() {
+		return fmt.Errorf("gitsync: merge %s refused, a merge is already in progress: %w", ref, ErrConflict)
 	}
 	args := []string{"merge", "--no-edit", "--ff", "--no-autostash", "-Xfind-renames"}
 	if allowUnrelated {
@@ -383,15 +387,18 @@ func (r *Repo) Merge(ref string, allowUnrelated bool) error {
 	}
 	args = append(args, ref)
 	res, err := r.git(noHooks(args...)...)
-	r.recordMerge(string(res.Stdout) + "\n" + string(res.Stderr))
+	if errors.Is(err, ErrConflict) {
+		r.recordMerge(string(res.Stdout) + "\n" + string(res.Stderr))
+	} else {
+		r.clearMergeRecord()
+	}
 	if err != nil {
 		return fmt.Errorf("gitsync: merge %s: %w", ref, err)
 	}
 	return nil
 }
 
-// recordMerge keeps the output of a merge that left a merge in progress, for
-// PathConflicts.
+// recordMerge keeps the output of a conflicted merge for PathConflicts.
 func (r *Repo) recordMerge(output string) {
 	rec := mergeRecord{head: r.revParse("HEAD"), mergeHead: r.revParse("MERGE_HEAD"), output: output}
 	if rec.mergeHead == "" {

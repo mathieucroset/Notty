@@ -127,6 +127,18 @@ func TestBinaryConflict(t *testing.T) {
 	}
 }
 
+func TestIsBinaryWhenOnlyTheirsIsBinary(t *testing.T) {
+	env := gittest.New(t)
+	err := diverge(t, env,
+		func(r *gitsync.Repo) { gittest.Write(t, r, "attachments/file", "text base\n") },
+		func(r *gitsync.Repo) { gittest.Write(t, r, "attachments/file", "text laptop\n") },
+		func(r *gitsync.Repo) { gittest.Write(t, r, "attachments/file", "\x00binary desktop") })
+	mustConflict(t, err)
+	if !env.Laptop.IsBinary("attachments/file") {
+		t.Fatalf("IsBinary = false although the theirs stage is binary")
+	}
+}
+
 func TestModifyDeleteConflicts(t *testing.T) {
 	t.Run("UD: we modified, they deleted", func(t *testing.T) {
 		env := gittest.New(t)
@@ -222,6 +234,21 @@ func TestPathConflicts(t *testing.T) {
 					gittest.Write(t, r, "other.md", "other desktop\n")
 				})
 			mustConflict(t, err)
+
+			// Raw git view: DD at the original, AU at ours, UA at theirs.
+			raw := conflictMap(t, env.Laptop)
+			for path, kind := range map[string]gitsync.ConflictKind{orig: gitsync.BothDeleted, tt.lapTo: gitsync.AddedByUs, tt.deskTo: gitsync.AddedByThem} {
+				if raw[path].Kind != kind {
+					t.Fatalf("ConflictedFiles[%q].Kind = %q, want %q (all: %+v)", path, raw[path].Kind, kind, raw)
+				}
+			}
+			if raw[orig].Blob[1] == "" || raw[tt.lapTo].Blob[2] == "" || raw[tt.deskTo].Blob[3] == "" {
+				t.Fatalf("missing stage blobs: %+v", raw)
+			}
+			// A refused second merge keeps the recorded output.
+			if err := env.Laptop.Merge("origin/main", false); !errors.Is(err, gitsync.ErrConflict) {
+				t.Fatalf("second Merge err = %v, want ErrConflict", err)
+			}
 
 			check := func(t *testing.T, r *gitsync.Repo) {
 				t.Helper()

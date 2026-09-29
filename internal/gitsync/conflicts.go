@@ -146,13 +146,20 @@ func (r *Repo) catBlob(obj string) ([]byte, error) {
 }
 
 // IsBinary reports whether path looks binary: a NUL byte in the first 8000
-// bytes of its stage-2 content, else its stage-3 content, else the working
-// file. It returns false when none of them can be read.
+// bytes of any of its index stages (base, ours, theirs), or of the working
+// file when it has no stages. It returns false when nothing can be read.
 func (r *Repo) IsBinary(path string) bool {
-	for _, stage := range []int{2, 3} {
+	staged := false
+	for _, stage := range []int{1, 2, 3} {
 		if b, err := r.Show(stage, path); err == nil {
-			return looksBinary(b)
+			if looksBinary(b) {
+				return true
+			}
+			staged = true
 		}
+	}
+	if staged {
+		return false
 	}
 	f, err := os.Open(filepath.Join(r.Dir, filepath.FromSlash(path)))
 	if err != nil {
