@@ -13,22 +13,35 @@ import (
 var wantModes = []string{"NORMAL", "INSERT", "VISUAL", "COMMAND", "PLAIN", "READ-ONLY"}
 
 func TestNamesStable(t *testing.T) {
-	want := []string{
-		"catppuccin-mocha",
-		"catppuccin-latte",
-		"tokyo-night",
-		"tokyo-night-day",
-		"rose-pine",
-		"rose-pine-dawn",
-		"nord",
-	}
 	got := Names()
-	if len(got) != len(want) {
-		t.Fatalf("Names() = %v, want %v", got, want)
+
+	// Set equality against the registered palettes themselves (the single
+	// source of truth in palettes.go), so this test never duplicates the
+	// literal name list and stays correct as palettes are added or removed.
+	if len(got) != len(palettes) {
+		t.Fatalf("Names() returned %d names, want %d (len(palettes)): %v", len(got), len(palettes), got)
 	}
-	for i, name := range want {
-		if got[i] != name {
-			t.Fatalf("Names()[%d] = %q, want %q (order must be stable)", i, got[i], name)
+	seen := make(map[string]bool, len(got))
+	for _, name := range got {
+		if _, ok := palettes[name]; !ok {
+			t.Errorf("Names() contains %q, which is not a registered palette", name)
+		}
+		if seen[name] {
+			t.Errorf("Names() contains duplicate name %q", name)
+		}
+		seen[name] = true
+	}
+	for name := range palettes {
+		if !seen[name] {
+			t.Errorf("Names() is missing registered palette %q", name)
+		}
+	}
+
+	// Stable ordering: repeated calls must return names in the same order.
+	again := Names()
+	for i := range got {
+		if got[i] != again[i] {
+			t.Fatalf("Names() order is not stable across calls: %v then %v", got, again)
 		}
 	}
 }
