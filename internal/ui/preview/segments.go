@@ -131,14 +131,21 @@ func Split(content string) []Segment {
 // re-renders its own piece.
 const chunkLines = 32
 
-// chunks cuts the block lines[start..end] into inclusive line ranges. A cut
-// is made only before a top-level list item that directly follows another
-// item line or an item's indented continuation, outside fenced code, once
-// the current chunk has chunkLines lines: the pieces render exactly like
-// the whole list.
+// chunks cuts the block lines[start..end] into inclusive line ranges, so
+// that the pieces render exactly like the whole block. Only a tight list
+// is cut: the block must start with a top-level list item and hold no
+// blank line outside fenced code (a blank line makes the list loose). A
+// cut is made, once the current piece has chunkLines lines, before a
+// top-level item of the same list (same bullet, or same ordered
+// delimiter) that directly follows an item line or an item's indented
+// continuation. An ordered item is cut before only when its written
+// number is the one the list would give it (start + items so far), since
+// a piece renders its first number as written.
 func chunks(lines []string, start, end int) [][2]int {
-	var out [][2]int
-	from := start
+	whole := [][2]int{{start, end}}
+	if _, ok := parseItem(lines[start]); !ok {
+		return whole
+	}
 	inFence := false
 	var fenceMark byte
 	for i := start; i <= end; i++ {
@@ -150,34 +157,83 @@ func chunks(lines []string, start, end int) [][2]int {
 			}
 			continue
 		}
-		if inFence || i-from < chunkLines || !listItem(lines[i]) {
+		if !inFence && strings.TrimSpace(lines[i]) == "" {
+			return whole
+		}
+	}
+
+	var out [][2]int
+	from := start
+	inFence = false
+	var list item // the current top-level list: its first item
+	count := 0    // items of the current list seen so far
+	inList := false
+	for i := start; i <= end; i++ {
+		if ch, ok := fenceDelim(lines[i]); ok {
+			if !inFence {
+				inFence, fenceMark = true, ch
+			} else if ch == fenceMark {
+				inFence = false
+			}
+			continue
+		}
+		if inFence {
+			continue
+		}
+		it, isItem := parseItem(lines[i])
+		if !isItem {
+			if !indented(lines[i]) {
+				inList = false // a lazy line or the end of the list
+			}
+			continue
+		}
+		if !inList || it.marker != list.marker {
+			list, count, inList = it, 1, true
 			continue
 		}
 		prev := lines[i-1]
-		if strings.TrimSpace(prev) == "" || (!listItem(prev) && !indented(prev)) {
-			continue
+		follows := isItemLine(prev) || indented(prev)
+		numbered := !it.ordered || it.number == list.number+count
+		count++
+		if i-from >= chunkLines && follows && numbered {
+			out = append(out, [2]int{from, i - 1})
+			from = i
 		}
-		out = append(out, [2]int{from, i - 1})
-		from = i
 	}
 	return append(out, [2]int{from, end})
 }
 
-// listItem reports whether line starts a list item at column 0: "-", "*"
-// or "+", or a number followed by "." or ")", then a space or tab.
-func listItem(line string) bool {
+// item is a parsed top-level list item marker.
+type item struct {
+	ordered bool
+	marker  byte // '-', '*', '+', or the ordered delimiter '.' / ')'
+	number  int
+}
+
+// parseItem parses a list item starting at column 0: "-", "*" or "+", or
+// a number (at most 9 digits) followed by "." or ")", then a space or tab.
+func parseItem(line string) (item, bool) {
 	if len(line) < 2 {
-		return false
+		return item{}, false
 	}
 	switch line[0] {
 	case '-', '*', '+':
-		return line[1] == ' ' || line[1] == '\t'
+		return item{marker: line[0]}, line[1] == ' ' || line[1] == '\t'
 	}
-	i := 0
+	n, i := 0, 0
 	for i < len(line) && i < 9 && line[i] >= '0' && line[i] <= '9' {
+		n = n*10 + int(line[i]-'0')
 		i++
 	}
-	return i > 0 && i+1 < len(line) && (line[i] == '.' || line[i] == ')') && (line[i+1] == ' ' || line[i+1] == '\t')
+	if i == 0 || i+1 >= len(line) || (line[i] != '.' && line[i] != ')') || (line[i+1] != ' ' && line[i+1] != '\t') {
+		return item{}, false
+	}
+	return item{ordered: true, marker: line[i], number: n}, true
+}
+
+func isItemLine(line string) bool {
+	_, ok := parseItem(line)
+	return ok
 }
 
 // indented reports whether line starts with a space or a tab.

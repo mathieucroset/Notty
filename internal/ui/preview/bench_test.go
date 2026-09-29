@@ -35,33 +35,93 @@ func TestBigTaskListMapsEveryTask(t *testing.T) {
 	}
 }
 
-func TestLongListPiecesRenderLikeTheWholeList(t *testing.T) {
+// repeat builds n lines from f.
+func repeat(n int, f func(i int) string) string {
 	var b strings.Builder
-	for i := range 120 {
-		if i < 60 {
-			fmt.Fprintf(&b, "- entry %d\n  - [ ] nested %d\n", i, i)
-		} else {
-			fmt.Fprintf(&b, "%d. entry %d\n     wrapped **line** %d\n", i+1, i, i)
-		}
+	for i := range n {
+		b.WriteString(f(i))
 	}
-	content := strings.TrimSuffix(b.String(), "\n")
+	return b.String()
+}
+
+func TestPiecesRenderLikeTheWholeBlock(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		cut     bool // expect the block to be cut into pieces
+	}{
+		{"nested mixed lists", repeat(120, func(i int) string {
+			if i < 60 {
+				return fmt.Sprintf("- entry %d\n  - [ ] nested %d\n", i, i)
+			}
+			return fmt.Sprintf("%d. entry %d\n     wrapped **line** %d\n", i+1, i, i)
+		}), true},
+		{"ordered all ones", repeat(40, func(int) string { return "1. lazy\n" }), false},
+		{"ordered in sequence", repeat(40, func(i int) string { return fmt.Sprintf("%d. seq\n", i+1) }), true},
+		{"ordered from 5", repeat(40, func(i int) string { return fmt.Sprintf("%d. seq\n", i+5) }), true},
+		{"loose early", repeat(40, func(i int) string {
+			if i == 2 {
+				return "- item 2\n\n  para inside\n"
+			}
+			return fmt.Sprintf("- item %d\n", i)
+		}), false},
+		{"loose late", repeat(40, func(i int) string {
+			if i == 36 {
+				return "- item 36\n\n  para inside\n"
+			}
+			return fmt.Sprintf("- item %d\n", i)
+		}), false},
+		{"paragraph then list", "Para intro\n" + repeat(40, func(i int) string { return fmt.Sprintf("- item %d\n", i) }), false},
+		{"paragraph then ordered", "Para start\n" + repeat(34, func(i int) string { return fmt.Sprintf("  cont %d\n", i) }) + "33. not an item\n", false},
+		{"lazy continuations", repeat(40, func(i int) string { return fmt.Sprintf("- item %d\nlazy continuation %d\n", i, i) }), false},
+		{"quote then list", "> quote\n" + repeat(40, func(i int) string { return fmt.Sprintf("- item %d\n", i) }), false},
+		{"nested tasks", repeat(40, func(i int) string { return fmt.Sprintf("- [x] item %d\n    - sub %d\n", i, i) }), true},
+		{"star bullets", repeat(40, func(i int) string { return fmt.Sprintf("* item %d\n", i) }), true},
+		{"bullet change", repeat(40, func(i int) string {
+			if i < 33 {
+				return fmt.Sprintf("- item %d\n", i)
+			}
+			return fmt.Sprintf("* item %d\n", i)
+		}), true}, // cut inside the second list, not at the change
+		{"trailing rule", repeat(40, func(i int) string { return fmt.Sprintf("- item %d\n", i) }) + "---\n", true},
+		{"trailing lazy line", repeat(40, func(i int) string { return fmt.Sprintf("- item %d\n", i) }) + "Setext\n", true},
+		{"html block", "<div>\n" + repeat(40, func(i int) string { return fmt.Sprintf("- item %d\n", i) }) + "</div>\n", false},
+		{"table", "| a | b |\n|---|---|\n" + repeat(40, func(i int) string { return fmt.Sprintf("| x%d | y |\n", i) }), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			content := strings.TrimSuffix(c.content, "\n")
+			m := newTest(t, imgrender.ProtoOff, t.TempDir())
+			m, _ = setContent(t, m, "n.md", content)
+			if got := len(m.doc.segs) > 1; got != c.cut {
+				t.Fatalf("cut = %v (%d segments), want %v", got, len(m.doc.segs), c.cut)
+			}
+			tr, err := glamour.NewTermRenderer(glamour.WithStyles(theme.GlamourStyle(m.palette)), glamour.WithWordWrap(contentWidth(m.width)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			whole := renderJob{sh: m.sh}.glamour(tr, content)
+			for i := range max(len(whole), len(m.doc.lines)) {
+				var want, got string
+				if i < len(whole) {
+					want = ansi.Strip(whole[i])
+				}
+				if i < len(m.doc.lines) {
+					got = ansi.Strip(m.doc.lines[i].text)
+				}
+				if got != want {
+					t.Fatalf("row %d = %q, want %q (rows: pieces %d, whole %d)", i, got, want, len(m.doc.lines), len(whole))
+				}
+			}
+		})
+	}
+}
+
+func TestOrderedListOfOnesKeepsNumbering(t *testing.T) {
 	m := newTest(t, imgrender.ProtoOff, t.TempDir())
-	m, _ = setContent(t, m, "n.md", content)
-	if len(m.doc.segs) < 2 {
-		t.Fatal("list not cut into pieces")
-	}
-	tr, err := glamour.NewTermRenderer(glamour.WithStyles(theme.GlamourStyle(m.palette)), glamour.WithWordWrap(58))
-	if err != nil {
-		t.Fatal(err)
-	}
-	whole := renderJob{sh: m.sh}.glamour(tr, content)
-	if len(whole) != len(m.doc.lines) {
-		t.Fatalf("pieces give %d rows, whole list %d", len(m.doc.lines), len(whole))
-	}
-	for i := range whole {
-		if got, want := ansi.Strip(m.doc.lines[i].text), ansi.Strip(whole[i]); got != want {
-			t.Fatalf("row %d = %q, want %q", i, got, want)
-		}
+	m, _ = setContent(t, m, "n.md", repeat(40, func(int) string { return "1. x\n" }))
+	if got := ansi.Strip(m.doc.lines[32].text); !strings.HasPrefix(got, "33.") {
+		t.Fatalf("row 32 = %q, want it numbered 33.", got)
 	}
 }
 
