@@ -1,7 +1,9 @@
 package imgrender
 
 import (
+	"errors"
 	"io"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -88,8 +90,12 @@ var (
 // Inside tmux (TMUX set), run("tmux", "show", "-gv", "allow-passthrough")
 // must print "on" or "all"; otherwise everything falls back to half-blocks.
 //
-// When tty does not implement SetReadDeadline, replies are read by a goroutine
-// that may stay blocked in Read after Detect returns; closing tty releases it.
+// Reads from tty are always bounded, so no Read is ever left pending after
+// Detect returns (the tty stays usable for Bubble Tea): a tty implementing
+// SetReadDeadline is read with a deadline; otherwise a tty exposing Fd() is
+// polled (poll(2), select(2) on macOS) before each Read. A tty offering
+// neither, or an fd on a platform without polling, is not queried at all and
+// only steps 1 and 2 apply.
 func Detect(cfgProtocol string, env func(string) string, tty io.ReadWriter, run func(name string, args ...string) ([]byte, error)) Caps {
 	if env == nil {
 		env = func(string) string { return "" }
@@ -192,68 +198,72 @@ type readDeadliner interface {
 	SetReadDeadline(t time.Time) error
 }
 
+type fder interface {
+	Fd() uintptr
+}
+
+// errReadTimeout reports that a bounded read reached its deadline.
+var errReadTimeout = errors.New("tty read timed out")
+
+// boundedReader returns a function that reads from tty but gives up at the
+// deadline instead of blocking, and a cleanup to call when done. It returns
+// nil when tty offers no way to bound a read.
+func boundedReader(tty io.Reader) (read func(p []byte, deadline time.Time) (int, error), cleanup func()) {
+	if d, ok := tty.(readDeadliner); ok && d.SetReadDeadline(time.Now().Add(queryTimeout)) == nil {
+		read = func(p []byte, deadline time.Time) (int, error) {
+			if err := d.SetReadDeadline(deadline); err != nil {
+				return 0, err //nolint:wrapcheck // internal
+			}
+			n, err := tty.Read(p)
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				err = errReadTimeout
+			}
+			return n, err //nolint:wrapcheck // internal
+		}
+		return read, func() { _ = d.SetReadDeadline(time.Time{}) }
+	}
+	if f, ok := tty.(fder); ok && pollSupported {
+		fd := f.Fd()
+		read = func(p []byte, deadline time.Time) (int, error) {
+			ready, err := waitReadable(fd, time.Until(deadline))
+			if err != nil {
+				return 0, err
+			}
+			if !ready {
+				return 0, errReadTimeout
+			}
+			return tty.Read(p) //nolint:wrapcheck // internal
+		}
+		return read, func() {}
+	}
+	return nil, nil
+}
+
 // queryTTY writes the capability queries and collects the replies until the
-// DA1 answer arrives or queryTimeout passes.
+// DA1 answer arrives or queryTimeout passes. It never leaves a Read pending
+// and does not query a tty whose reads it cannot bound.
 func queryTTY(tty io.ReadWriter) ttyReplies {
-	if _, err := io.WriteString(tty, kittyQuery+cellQuery+da1Query); err != nil {
+	read, cleanup := boundedReader(tty)
+	if read == nil {
+		return ttyReplies{}
+	}
+	defer cleanup()
+	if _, err := tty.Write([]byte(kittyQuery + cellQuery + da1Query)); err != nil {
 		return ttyReplies{}
 	}
 	deadline := time.Now().Add(queryTimeout)
 	var got strings.Builder
 	buf := make([]byte, 256)
-
-	if d, ok := tty.(readDeadliner); ok && d.SetReadDeadline(deadline) == nil {
-		defer d.SetReadDeadline(time.Time{}) //nolint:errcheck // best effort reset
-		for time.Now().Before(deadline) {
-			n, err := tty.Read(buf)
-			got.Write(buf[:n])
-			if r, done := parseReplies(got.String()); done {
-				return r
-			}
-			if err != nil {
-				break
-			}
-		}
-		r, _ := parseReplies(got.String())
-		return r
-	}
-
-	chunks := make(chan []byte)
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() {
-		defer close(chunks)
-		for {
-			b := make([]byte, 256)
-			n, err := tty.Read(b)
-			if n > 0 {
-				select {
-				case chunks <- b[:n]:
-				case <-stop:
-					return
-				}
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	timer := time.NewTimer(queryTimeout)
-	defer timer.Stop()
-	for {
-		select {
-		case b, ok := <-chunks:
-			if !ok {
-				r, _ := parseReplies(got.String())
-				return r
-			}
-			got.Write(b)
-			if r, done := parseReplies(got.String()); done {
-				return r
-			}
-		case <-timer.C:
-			r, _ := parseReplies(got.String())
+	for time.Now().Before(deadline) {
+		n, err := read(buf, deadline)
+		got.Write(buf[:n])
+		if r, done := parseReplies(got.String()); done {
 			return r
 		}
+		if err != nil {
+			break
+		}
 	}
+	r, _ := parseReplies(got.String())
+	return r
 }

@@ -3,7 +3,6 @@ package imgrender
 import (
 	"bytes"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -37,15 +36,19 @@ func (f *fakeTTY) Read(p []byte) (int, error) {
 
 func (f *fakeTTY) Write(p []byte) (int, error) { return f.written.Write(p) }
 
-// silentTTY never answers: Read blocks until closed.
-type silentTTY struct{ closed chan struct{} }
+// SetReadDeadline lets Detect query the fake; its reads never block.
+func (f *fakeTTY) SetReadDeadline(time.Time) error { return nil }
 
-func (s *silentTTY) Read([]byte) (int, error) { <-s.closed; return 0, io.EOF }
-func (s *silentTTY) Write(p []byte) (int, error) {
-	return len(p), nil
+// unboundedTTY offers neither SetReadDeadline nor Fd: Detect cannot bound a
+// Read on it and must not query it.
+type unboundedTTY struct{ written bytes.Buffer }
+
+func (u *unboundedTTY) Read([]byte) (int, error) {
+	panic("Read on a tty that cannot be bounded")
 }
+func (u *unboundedTTY) Write(p []byte) (int, error) { return u.written.Write(p) }
 
-// deadlineTTY blocks like silentTTY but honours SetReadDeadline.
+// deadlineTTY never answers but honours SetReadDeadline.
 type deadlineTTY struct {
 	deadline time.Time
 	set      int
@@ -158,16 +161,14 @@ func TestDetectTTY(t *testing.T) {
 }
 
 func TestDetectTTYTimeout(t *testing.T) {
-	t.Run("goroutine fallback", func(t *testing.T) {
-		tty := &silentTTY{closed: make(chan struct{})}
-		defer close(tty.closed)
-		start := time.Now()
-		got := Detect("auto", envMap(), tty, noRun(t))
-		if el := time.Since(start); el > 500*time.Millisecond {
-			t.Errorf("Detect took %v, want about 100ms", el)
+	t.Run("unbounded tty is not queried", func(t *testing.T) {
+		tty := &unboundedTTY{}
+		got := Detect("auto", envMap("TERM", "xterm-kitty"), tty, noRun(t))
+		if tty.written.Len() != 0 {
+			t.Errorf("queried a tty it cannot bound: wrote %q", tty.written.String())
 		}
-		if got.Inline != ProtoHalfBlocks || got.CellW != 8 {
-			t.Errorf("got %+v", got)
+		if got.Inline != ProtoKitty || got.CellW != 8 {
+			t.Errorf("got %+v, want env detection only", got)
 		}
 	})
 	t.Run("read deadline", func(t *testing.T) {
