@@ -34,8 +34,16 @@ func (k BlockKind) String() string {
 
 // Block is one region of a merge. Base, Ours and Theirs hold that region's
 // lines in each version, so concatenating a field over all blocks rebuilds
-// the corresponding input (Base is nil for blocks from Diff2). The slices
-// alias the inputs but are capacity-capped, so appending to them is safe.
+// the corresponding input (Base is nil for blocks from Diff2).
+//
+// The slices are sub-slices of the inputs, not copies. Where a side is
+// unchanged, its field aliases the base slice rather than that side's input:
+// in a Stable block from Diff3, Base, Ours and Theirs all share base's
+// backing array; in an Ours block, Theirs is the Base slice; in a Theirs
+// block, Ours is the Base slice. Changed sides (and every Diff2 field)
+// alias their own input. Every slice is capacity-capped, so appending to
+// one never overwrites an input, but callers must not modify elements in
+// place if they still need the inputs intact.
 type Block struct {
 	Kind   BlockKind
 	Base   []string
@@ -100,6 +108,12 @@ func sideRange(lo, hi int, hs []hunk) (int, int) {
 // identical changes become Both, and different changes to overlapping base
 // regions (including different insertions at the same position) become
 // Conflict. Edits that are merely adjacent merge cleanly.
+//
+// Diff3 works on lines only and knows nothing about the files' final
+// newlines: reconciling them is the caller's job. Split each version with
+// SplitLines, record HasTrailingNewline for each, pick the result's
+// trailing newline (e.g. keep the base's unless exactly one side changed
+// it), and write the result with JoinLines.
 func Diff3(base, ours, theirs []string) []Block {
 	ho := hunks(Diff(base, ours))
 	ht := hunks(Diff(base, theirs))
@@ -197,7 +211,11 @@ func Diff2(ours, theirs []string) []Block {
 // Resolve builds the merged lines. Non-conflict blocks use their
 // auto-applied content (Stable and Both: the shared lines, Ours: ours,
 // Theirs: theirs); for each Conflict block, choose is called with the
-// block's index and the block, and its return value is used.
+// block's index and the block, and its return value is used. The result is
+// a fresh slice that never aliases the blocks or the inputs.
+//
+// Like Diff3, Resolve returns lines without terminators; the caller decides
+// the trailing newline (see HasTrailingNewline) and writes with JoinLines.
 func Resolve(blocks []Block, choose func(i int, b Block) []string) []string {
 	out := []string{}
 	for i, b := range blocks {
