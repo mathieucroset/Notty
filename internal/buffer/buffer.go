@@ -136,9 +136,18 @@ func (b *Buffer) toBpos(p Pos) bpos {
 	return bpos{line: p.Line, off: ColToByte(b.lines[p.Line], p.Col)}
 }
 
-// toPos converts byte coordinates to a grapheme position.
+// toPos converts byte coordinates to a grapheme position, rounding an offset
+// inside a cluster down to that cluster (used for the start of a change).
 func (b *Buffer) toPos(bp bpos) Pos {
 	return Pos{Line: bp.line, Col: ByteToCol(b.lines[bp.line], bp.off)}
+}
+
+// toPosCeil is toPos rounding up, used for the end of inserted text: when
+// the text merged with the following cluster (e.g. "e" typed before a lone
+// combining mark) the end lies after the merged cluster, so the next insert
+// at that position goes after it.
+func (b *Buffer) toPosCeil(bp bpos) Pos {
+	return Pos{Line: bp.line, Col: byteToColCeil(b.lines[bp.line], bp.off)}
 }
 
 // bRange converts r to normalized, clamped byte coordinates.
@@ -216,7 +225,7 @@ func (b *Buffer) Replace(r Range, text string) Pos {
 		return b.toPos(start)
 	}
 	_, newEnd := b.edit(start, end, text)
-	return b.toPos(newEnd)
+	return b.toPosCeil(newEnd)
 }
 
 // TextIn returns the text in r (normalized and clamped).

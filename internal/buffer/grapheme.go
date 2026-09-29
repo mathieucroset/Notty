@@ -69,3 +69,24 @@ func ByteToCol(s string, byteOff int) int {
 	}
 	return col
 }
+
+// byteToColCeil is ByteToCol rounding up: an offset inside a cluster maps to
+// the column just after that cluster.
+func byteToColCeil(s string, byteOff int) int {
+	if byteOff <= 0 {
+		return 0
+	}
+	if byteOff >= len(s) {
+		return graphemeCount(s)
+	}
+	col, off := 0, 0
+	rest := s
+	state := -1
+	for off < byteOff {
+		var cluster string
+		cluster, rest, _, state = uniseg.FirstGraphemeClusterInString(rest, state)
+		off += len(cluster)
+		col++
+	}
+	return col
+}

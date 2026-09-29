@@ -127,6 +127,9 @@ func TestInsert(t *testing.T) {
 		{"insert emoji", "ab", P(0, 1), thumbsUp, "a" + thumbsUp + "b", P(0, 2)},
 		{"crlf in text normalizes", "ab", P(0, 1), "1\r\n2", "a1\n2b", P(1, 1)},
 		{"empty text no-op", "ab", P(0, 1), "", "ab", P(0, 1)},
+		{"before lone combining mark rounds up", "\u0301", P(0, 0), "e", "e\u0301", P(0, 1)},
+		{"before lone regional indicator rounds up", "\U0001F1EB", P(0, 0), "\U0001F1F7", "\U0001F1F7\U0001F1EB", P(0, 1)},
+		{"multi-line ending before lone mark", "\u0301", P(0, 0), "a\ne", "a\ne\u0301", P(1, 1)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -139,6 +142,21 @@ func TestInsert(t *testing.T) {
 				t.Errorf("end = %v, want %v", end, tt.wantEnd)
 			}
 		})
+	}
+}
+
+// Regression: typing a base character before a lone combining mark merges
+// the two; the next character typed at the returned position must go after
+// the merged cluster, not before the mark.
+func TestTypingBeforeCombiningMark(t *testing.T) {
+	b := New("\u0301")
+	p := b.Insert(P(0, 0), "e")
+	p = b.Insert(p, "x")
+	if got, want := b.String(), "e\u0301x"; got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+	if p != P(0, 2) {
+		t.Errorf("end = %v, want %v", p, P(0, 2))
 	}
 }
 

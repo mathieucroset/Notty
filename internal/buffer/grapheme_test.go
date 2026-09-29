@@ -114,3 +114,28 @@ func TestColByteRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestByteToColCeil(t *testing.T) {
+	s := "a" + thumbsUp + eAcute // bytes: a=1, thumbs=8, eAcute=3
+	tests := []struct {
+		name string
+		off  int
+		want int
+	}{
+		{"negative", -1, 0},
+		{"zero", 0, 0},
+		{"cluster boundary", 1, 1},
+		{"inside emoji rounds up", 4, 2},
+		{"after emoji", 9, 2},
+		{"inside combining rounds up", 10, 3},
+		{"at end", 12, 3},
+		{"past end", 50, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := byteToColCeil(s, tt.off); got != tt.want {
+				t.Errorf("byteToColCeil(%q, %d) = %d, want %d", s, tt.off, got, tt.want)
+			}
+		})
+	}
+}
