@@ -48,26 +48,30 @@ func (m Model) copyCmd(text string) tea.Cmd {
 func (m Model) readClipboardCmd(before bool) tea.Cmd {
 	cb, p := m.opts.Clipboard, m.path
 	if cb == nil {
-		return emit(msgs.ToastMsg{Level: msgs.ToastWarn, Text: "No clipboard available"})
+		return m.emit(msgs.ToastMsg{Level: msgs.ToastWarn, Text: "No clipboard available"})
 	}
-	return func() tea.Msg {
-		data, err := cb.ReadImage()
-		if err == nil && len(data) > 0 {
-			return clipboardImageMsg{path: p, data: data}
-		}
-		var noTool clipboard.ErrNoTool
-		missing := errors.As(err, &noTool)
-		text, terr := cb.ReadText()
-		switch {
-		case terr == nil && text != "":
-			return clipboardTextMsg{path: p, text: text, before: before}
-		case missing:
-			return msgs.ToastMsg{Level: msgs.ToastWarn, Text: "Image paste needs " + noTool.Tool + " (not installed)"}
-		case terr != nil:
-			return msgs.ToastMsg{Level: msgs.ToastWarn, Text: "Could not read the clipboard: " + terr.Error()}
-		}
-		return nil // empty clipboard
+	mapMsg := m.mapMsg
+	return func() tea.Msg { return mapMsg(readClipboard(cb, p, before)) }
+}
+
+// readClipboard is readClipboardCmd's command body.
+func readClipboard(cb Clipboard, p string, before bool) tea.Msg {
+	data, err := cb.ReadImage()
+	if err == nil && len(data) > 0 {
+		return clipboardImageMsg{path: p, data: data}
 	}
+	var noTool clipboard.ErrNoTool
+	missing := errors.As(err, &noTool)
+	text, terr := cb.ReadText()
+	switch {
+	case terr == nil && text != "":
+		return clipboardTextMsg{path: p, text: text, before: before}
+	case missing:
+		return msgs.ToastMsg{Level: msgs.ToastWarn, Text: "Image paste needs " + noTool.Tool + " (not installed)"}
+	case terr != nil:
+		return msgs.ToastMsg{Level: msgs.ToastWarn, Text: "Could not read the clipboard: " + terr.Error()}
+	}
+	return nil // empty clipboard
 }
 
 // pasteClipboardText pastes text read from the clipboard, literally.
@@ -93,5 +97,5 @@ func (m Model) importClipboardImage(msg clipboardImageMsg) (Model, tea.Cmd) {
 	if m.readOnly {
 		return m.flash()
 	}
-	return m, emit(msgs.ImportImageMsg{Data: msg.data, Ext: "png"})
+	return m, m.emit(msgs.ImportImageMsg{Data: msg.data, Ext: "png"})
 }

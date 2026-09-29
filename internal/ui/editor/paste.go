@@ -43,7 +43,7 @@ func (m Model) handlePaste(msg tea.PasteMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if p, ok := attach.ParsePastedPath(text, fileExists); ok {
-		return m, emit(msgs.ImportImageMsg{Path: p})
+		return m, m.emit(msgs.ImportImageMsg{Path: p})
 	}
 	return m.apply(func() vim.Effect {
 		m.ed.PasteClipboard(m.buf, text, false)

@@ -16,7 +16,7 @@ func (m Model) autosave(t AutosaveTickMsg) tea.Cmd {
 	if t.Path != m.path || t.Version != m.buf.Version() || !m.buf.Dirty() || m.readOnly || m.locked {
 		return nil
 	}
-	return emit(msgs.SaveRequestMsg{})
+	return m.emit(msgs.SaveRequestMsg{})
 }
 
 // Lock locks the editor for the merge window (spec §7): key presses,
@@ -144,7 +144,7 @@ func (m Model) afterExternal(before uint64) (Model, tea.Cmd) {
 func (m Model) replayToggle(msg toggleMsg) (Model, tea.Cmd) {
 	m, cmd, ok := m.ApplyToggle(msg.line, msg.text)
 	if !ok {
-		return m, emit(msgs.ToastMsg{Level: msgs.ToastWarn, Text: "Task not found: " + msg.text})
+		return m, m.emit(msgs.ToastMsg{Level: msgs.ToastWarn, Text: "Task not found: " + msg.text})
 	}
 	return m, cmd
 }

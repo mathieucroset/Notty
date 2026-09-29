@@ -35,6 +35,14 @@ type Options struct {
 	Palette     theme.Palette
 	Clipboard   Clipboard // nil: OSC52 for copies, no clipboard reads
 	VaultRoot   string    // absolute vault path, used to resolve image chips
+	// MapMsg, when set, is applied to every message the editor creates
+	// (requests such as msgs.SaveRequestMsg, its own timer and clipboard
+	// messages) before it is delivered; returning nil drops the message.
+	// Requests are mapped synchronously, inside Update; timer and clipboard
+	// messages are mapped when their command runs, on another goroutine.
+	// A host embedding the editor uses it to wrap the editor's messages in
+	// its own envelope and to intercept requests. nil means identity.
+	MapMsg func(tea.Msg) tea.Msg
 }
 
 // DefaultBanner is the read-only banner shown for a conflicted note.
@@ -166,6 +174,17 @@ func (m Model) ModeName() string {
 		return "READ-ONLY"
 	}
 	return m.ed.ModeName()
+}
+
+// CanLeave reports whether esc would have nothing left to cancel, so a host
+// can treat it as "leave the editor": always for the Plain editor; for vim,
+// in normal mode with no pending count, operator or register.
+func (m Model) CanLeave() bool {
+	mc, ok := m.ed.(*vim.Machine)
+	if !ok {
+		return true
+	}
+	return mc.Mode() == vim.Normal && mc.Pending() == ""
 }
 
 // CommandLine returns the ":" or "/" command line being typed, for the app

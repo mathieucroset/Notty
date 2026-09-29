@@ -37,8 +37,24 @@ type flashEndMsg struct{ id int }
 // variable so tests can shorten it).
 var flashDuration = 300 * time.Millisecond
 
-// emit returns a Cmd delivering msg.
-func emit(msg tea.Msg) tea.Cmd { return func() tea.Msg { return msg } }
+// emit returns a Cmd delivering msg passed through Options.MapMsg, or nil
+// when the mapping drops it. The mapping runs now, when the message is
+// created, so a host sees the editor's requests synchronously.
+func (m Model) emit(msg tea.Msg) tea.Cmd {
+	mapped := m.mapMsg(msg)
+	if mapped == nil {
+		return nil
+	}
+	return func() tea.Msg { return mapped }
+}
+
+// mapMsg applies Options.MapMsg (nil means identity).
+func (m Model) mapMsg(msg tea.Msg) tea.Msg {
+	if m.opts.MapMsg == nil || msg == nil {
+		return msg
+	}
+	return m.opts.MapMsg(msg)
+}
 
 // Update handles key presses, pastes and the editor's own messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -88,7 +104,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	k := translateKey(msg)
 	if m.readOnly && m.resolverKey(k) {
-		return m, emit(msgs.OpenResolverMsg{Path: m.path})
+		return m, m.emit(msgs.OpenResolverMsg{Path: m.path})
 	}
 	return m.apply(func() vim.Effect { return m.ed.Handle(m.buf, k) })
 }
@@ -127,15 +143,15 @@ func (m Model) ChangeCmd() tea.Cmd {
 	p, v := m.path, m.buf.Version()
 	delay := time.Duration(m.opts.AutosaveMS) * time.Millisecond
 	return tea.Batch(
-		emit(ChangedMsg{Path: p, Version: v}),
-		tea.Tick(delay, func(time.Time) tea.Msg { return AutosaveTickMsg{Path: p, Version: v} }),
+		m.emit(ChangedMsg{Path: p, Version: v}),
+		tea.Tick(delay, func(time.Time) tea.Msg { return m.mapMsg(AutosaveTickMsg{Path: p, Version: v}) }),
 	)
 }
 
 // effects turns an engine Effect into messages and commands.
 func (m Model) effects(eff vim.Effect) (Model, []tea.Cmd) {
 	var cmds, ordered []tea.Cmd // ordered: messages delivered in order (":wq" saves first)
-	add := func(msg tea.Msg) { ordered = append(ordered, emit(msg)) }
+	add := func(msg tea.Msg) { ordered = append(ordered, m.emit(msg)) }
 	blocked := eff.Blocked
 	if eff.Save {
 		if m.readOnly {
@@ -197,5 +213,5 @@ func (m Model) flash() (Model, tea.Cmd) {
 	m.flashID++
 	m.flashing = true
 	id := m.flashID
-	return m, tea.Tick(flashDuration, func(time.Time) tea.Msg { return flashEndMsg{id: id} })
+	return m, tea.Tick(flashDuration, func(time.Time) tea.Msg { return m.mapMsg(flashEndMsg{id: id}) })
 }
