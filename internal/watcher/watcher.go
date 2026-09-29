@@ -30,6 +30,8 @@ const (
 	// Event: after it, the paths already quiet for debounce are delivered and
 	// the still-changing ones wait for their own quiet window.
 	maxDelay = time.Second
+	// selfWriteTTL is how long a NoteSelfWrite record stays valid.
+	selfWriteTTL = 5 * time.Second
 	// errBuffer is the capacity of the Errors channel; further errors are
 	// dropped while it is full.
 	errBuffer = 16
@@ -45,10 +47,28 @@ var ErrRootGone = errors.New("watcher: vault root was removed or renamed")
 // reported under the old name); the consumer checks existence.
 type Event struct{ Paths []string }
 
+// fileID is a file's inode and status-change time, where the platform
+// provides them (see fileIDOf); the zero value otherwise.
+type fileID struct {
+	ino   uint64
+	ctime int64 // nanoseconds
+}
+
 // fileStamp identifies the content of a file the app wrote itself.
 type fileStamp struct {
-	mtime time.Time
-	size  int64
+	mtime    time.Time
+	size     int64
+	id       fileID
+	recorded time.Time // when NoteSelfWrite ran
+}
+
+func stampOf(info os.FileInfo, now time.Time) fileStamp {
+	return fileStamp{mtime: info.ModTime(), size: info.Size(), id: fileIDOf(info), recorded: now}
+}
+
+// matches reports whether info still describes the file as it was stamped.
+func (s fileStamp) matches(info os.FileInfo) bool {
+	return info.ModTime().Equal(s.mtime) && info.Size() == s.size && fileIDOf(info) == s.id
 }
 
 // Watcher reports changes under a vault root. Create it with New and release
@@ -141,20 +161,27 @@ func (w *Watcher) Events() <-chan Event { return w.events }
 func (w *Watcher) Errors() <-chan error { return w.errors }
 
 // NoteSelfWrite records that the app has just written rel (call it right after
-// the save, including after an atomic tmp-file-then-rename save). Subsequent
-// changes to rel are ignored for as long as the file still has the size and
-// modification time it has now; the first change that alters them, or deletes
-// the file, is reported again.
+// the save, including after an atomic tmp-file-then-rename save). For the next
+// 5 seconds, changes to rel are ignored as long as the file still has the
+// size, modification time, inode and status-change time it has now (inode and
+// ctime where the platform has them). The first change that alters them, or
+// deletes the file, is reported and ends the suppression.
 func (w *Watcher) NoteSelfWrite(rel string) {
 	rel = cleanRel(rel)
 	info, err := os.Stat(w.abs(rel))
+	now := time.Now()
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	for k, st := range w.selfWrites {
+		if now.Sub(st.recorded) > selfWriteTTL {
+			delete(w.selfWrites, k)
+		}
+	}
 	if err != nil {
 		delete(w.selfWrites, rel)
 		return
 	}
-	w.selfWrites[rel] = fileStamp{mtime: info.ModTime(), size: info.Size()}
+	w.selfWrites[rel] = stampOf(info, now)
 }
 
 // Pause drops every change seen until Resume. Use it only around git
@@ -382,15 +409,27 @@ func (w *Watcher) flush(now time.Time) {
 			continue
 		}
 		delete(w.pending, rel)
-		if stamp, ok := w.selfWrites[rel]; ok {
-			info, err := os.Stat(w.abs(rel))
-			if err == nil && info.ModTime().Equal(stamp.mtime) && info.Size() == stamp.size {
-				continue
-			}
-			delete(w.selfWrites, rel)
+		if !w.isSelfWrite(rel, now) {
+			w.ready[rel] = true
 		}
-		w.ready[rel] = true
 	}
+}
+
+// isSelfWrite reports whether rel is still exactly as the app wrote it, per a
+// NoteSelfWrite record younger than selfWriteTTL. A stale or mismatched record
+// is dropped. w.mu must be held.
+func (w *Watcher) isSelfWrite(rel string, now time.Time) bool {
+	stamp, ok := w.selfWrites[rel]
+	if !ok {
+		return false
+	}
+	if now.Sub(stamp.recorded) <= selfWriteTTL {
+		if info, err := os.Stat(w.abs(rel)); err == nil && stamp.matches(info) {
+			return true
+		}
+	}
+	delete(w.selfWrites, rel)
+	return false
 }
 
 // addTree watches rel and every non-ignored directory below it. When found is

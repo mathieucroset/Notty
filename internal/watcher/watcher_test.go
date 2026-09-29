@@ -194,6 +194,109 @@ func TestExternalWriteAfterSelfWriteReported(t *testing.T) {
 	}
 }
 
+func TestSelfWriteInSubdirectorySuppressed(t *testing.T) {
+	root := t.TempDir()
+	mkdir(t, root, "Work/Projects")
+	w := newTestWatcher(t, root)
+
+	atomicSave(t, root, "Work/Projects/plan.md", "saved by app")
+	w.NoteSelfWrite("Work/Projects/plan.md")
+
+	expectNoEvent(t, w)
+}
+
+func TestSameSizeExternalEditAfterSelfWriteReported(t *testing.T) {
+	if !haveFileID {
+		t.Skip("no inode/ctime on this platform; only mtime+size are compared")
+	}
+	root := t.TempDir()
+	w := newTestWatcher(t, root)
+
+	atomicSave(t, root, "note.md", "AAAA")
+	w.NoteSelfWrite("note.md")
+	expectNoEvent(t, w)
+
+	// Same size, and the mtime forced back to the recorded one: only the
+	// ctime (and, for a replace, the inode) reveals the external edit.
+	p := filepath.Join(root, "note.md")
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	writeFile(t, root, "note.md", "BBBB")
+	if err := os.Chtimes(p, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	ev := nextEvent(t, w)
+	if !slices.Equal(ev.Paths, []string{"note.md"}) {
+		t.Fatalf("paths = %v, want [note.md]", ev.Paths)
+	}
+}
+
+func TestSelfWriteStamp(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(t *testing.T, p string)
+		after  time.Duration // time elapsed since NoteSelfWrite
+		want   bool
+		fileID bool // needs inode/ctime support
+	}{
+		{name: "unchanged", want: true},
+		{name: "unchanged but expired", after: selfWriteTTL + time.Second, want: false},
+		{name: "rewritten with other size", change: func(t *testing.T, p string) {
+			if err := os.WriteFile(p, []byte("longer content"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, want: false},
+		{name: "replaced, same size and mtime", fileID: true, change: func(t *testing.T, p string) {
+			info, err := os.Stat(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p+".other", []byte("BBBB"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(p+".other", info.ModTime(), info.ModTime()); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(p+".other", p); err != nil {
+				t.Fatal(err)
+			}
+		}, want: false},
+		{name: "deleted", change: func(t *testing.T, p string) {
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+		}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.fileID && !haveFileID {
+				t.Skip("no inode/ctime on this platform")
+			}
+			root := t.TempDir()
+			w, err := newWatcher(root) // event loop not started
+			if err != nil {
+				t.Fatalf("newWatcher: %v", err)
+			}
+			t.Cleanup(func() { _ = w.Close() })
+
+			writeFile(t, root, "Sub/note.md", "AAAA")
+			w.NoteSelfWrite("Sub/note.md")
+			if tc.change != nil {
+				tc.change(t, filepath.Join(root, "Sub", "note.md"))
+			}
+			w.mu.Lock()
+			got := w.isSelfWrite("Sub/note.md", time.Now().Add(tc.after))
+			w.mu.Unlock()
+			if got != tc.want {
+				t.Fatalf("isSelfWrite = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSelfWriteDoesNotHideOtherPaths(t *testing.T) {
 	root := t.TempDir()
 	w := newTestWatcher(t, root)
