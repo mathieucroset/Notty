@@ -90,7 +90,7 @@ func detectTerminalCaps(protocol string) imgrender.Caps {
 	var tty io.ReadWriter
 	if runtime.GOOS != "windows" {
 		if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			if restore, ok := makeRaw(f); ok {
 				defer restore()
 				tty = f
@@ -146,23 +146,23 @@ func run(args []string, e env) int {
 		return 2
 	}
 	if flags.NArg() > 0 {
-		fmt.Fprintf(e.stderr, "notty: unknown argument %q\n", flags.Arg(0))
+		_, _ = fmt.Fprintf(e.stderr, "notty: unknown argument %q\n", flags.Arg(0))
 		return 2
 	}
 	if *showVersion {
-		fmt.Fprintln(e.stdout, "notty "+version)
+		_, _ = fmt.Fprintln(e.stdout, "notty "+version)
 		return 0
 	}
 
 	opts, release, err := prepare(*vaultFlag, e)
 	if err != nil {
-		fmt.Fprintf(e.stderr, "notty: %v\n", err)
+		_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
 		return 1
 	}
 	defer release()
 
 	if err := e.runTUI(opts); err != nil {
-		fmt.Fprintf(e.stderr, "notty: %v\n", err)
+		_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
 		return 1
 	}
 	return 0
@@ -200,7 +200,7 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 
 	p, ok := theme.Get(cfg.Theme)
 	if !ok {
-		fmt.Fprintf(e.stderr, "notty: unknown theme %q, using %s\n", cfg.Theme, fallbackTheme)
+		_, _ = fmt.Fprintf(e.stderr, "notty: unknown theme %q, using %s\n", cfg.Theme, fallbackTheme)
 		p, _ = theme.Get(fallbackTheme)
 	}
 	opts := app.Options{
@@ -231,11 +231,11 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 	opts.LocalPath = localstate.PathFor(e.stateDir, v.Root)
 	if opts.Local, err = localstate.Load(opts.LocalPath); err != nil {
 		// Per-machine state is a convenience: start fresh rather than fail.
-		fmt.Fprintf(e.stderr, "notty: ignoring local state: %v\n", err)
+		_, _ = fmt.Fprintf(e.stderr, "notty: ignoring local state: %v\n", err)
 		opts.Local = &localstate.State{Recents: []string{}, Cursor: map[string][2]int{}, Expanded: []string{}}
 	}
 	if opts.Pins, err = meta.Load(v.Root); err != nil {
-		fmt.Fprintf(e.stderr, "notty: ignoring pins: %v\n", err)
+		_, _ = fmt.Fprintf(e.stderr, "notty: ignoring pins: %v\n", err)
 		opts.Pins = &meta.State{Pins: []string{}}
 	}
 	return opts, release, nil
@@ -264,7 +264,7 @@ func acquireLock(root string, wait time.Duration, stderr io.Writer) (release fun
 	lock, err := vault.AcquireLock(root, 0)
 	var held vault.ErrLocked
 	if errors.As(err, &held) && wait > 0 {
-		fmt.Fprintln(stderr, "notty: waiting for vault lock…")
+		_, _ = fmt.Fprintln(stderr, "notty: waiting for vault lock…")
 		lock, err = vault.AcquireLock(root, wait)
 	}
 	if err != nil {
