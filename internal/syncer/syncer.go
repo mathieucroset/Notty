@@ -740,12 +740,29 @@ const (
 	mergeDeferred                       // $EDITOR opened during the fetch: nothing merged
 )
 
-// mergeSection is the locked merge section of spec §7.
-func (s *Syncer) mergeSection() (outcome mergeOutcome, err error) {
+// mergeSection runs the locked merge section of spec §7, then, once the
+// editor is unlocked, checks for notes trashed remotely but edited here and
+// emits the merge result.
+func (s *Syncer) mergeSection() (mergeOutcome, error) {
 	s.setState(Merging)
+	outcome, u, err := s.lockedMerge()
+	if err != nil || outcome != merged {
+		return outcome, err
+	}
+	// Warnings are best effort: a failed check must not fail the sync.
+	u.TrashWarnings, _ = detectTrashWarnings(s.repo, s.dir, "ORIG_HEAD", s.hostname)
+	u.Status = s.Status()
+	s.emit(u)
+	return merged, nil
+}
+
+// lockedMerge is the locked part: lock, pause the watcher, flush, commit,
+// merge, auto-resolve, then resume and unlock with the conflicted set. On a
+// clean merge it returns the Reindex/Reload update for the caller to emit.
+func (s *Syncer) lockedMerge() (outcome mergeOutcome, u Update, err error) {
 	branch, err := s.repo.CurrentBranch()
 	if err != nil {
-		return merged, fmt.Errorf("syncer: merge: %w", err)
+		return merged, u, fmt.Errorf("syncer: merge: %w", err)
 	}
 	ref := "origin/" + branch
 
@@ -770,24 +787,24 @@ func (s *Syncer) mergeSection() (outcome mergeOutcome, err error) {
 	// must not rewrite a file under it (spec §7).
 	if s.deferIfEditing() {
 		s.setState(Idle)
-		return mergeDeferred, nil
+		return mergeDeferred, u, nil
 	}
 	_ = s.host.Flush()
 	if err := s.commitAll(); err != nil {
-		return merged, err
+		return merged, u, err
 	}
 	err = s.repo.Merge(ref, false)
 	if errors.Is(err, gitsync.ErrLocalChanges) {
 		// Another program changed a file in the same instant: commit and
 		// retry once.
 		if cerr := s.commitAll(); cerr != nil {
-			return merged, cerr
+			return merged, u, cerr
 		}
 		err = s.repo.Merge(ref, false)
 	}
 	stopped := errors.Is(err, gitsync.ErrConflict) && s.repo.MergeInProgress()
 	if err != nil && !stopped {
-		return merged, fmt.Errorf("syncer: merge: %w", err)
+		return merged, u, fmt.Errorf("syncer: merge: %w", err)
 	}
 	// Once the merge has stopped with conflicts, nothing may return before
 	// the conflicted set is known: the UI must learn which notes to protect.
@@ -801,26 +818,21 @@ func (s *Syncer) mergeSection() (outcome mergeOutcome, err error) {
 		paths, lerr = s.conflictedPaths()
 		listFailed = lerr != nil
 	}
-	reindex, reload := s.reindex()
-	u := Update{Reindex: reindex, Reload: reload}
+	u.Reindex, u.Reload = s.reindex()
 	if len(paths) > 0 || listFailed {
 		for _, p := range paths {
 			conflictSet[p] = true
 		}
 		s.enterConflict(u, paths)
-		return mergeConflicted, nil
+		return mergeConflicted, Update{}, nil
 	}
 	if stopped {
 		// Nothing is left unmerged: conclude the merge.
 		if err := s.repo.CommitMerge("Merge · " + s.hostname); err != nil {
-			return merged, fmt.Errorf("syncer: merge: %w", err)
+			return merged, Update{}, fmt.Errorf("syncer: merge: %w", err)
 		}
 	}
-	// Warnings are best effort: a failed check must not fail the sync.
-	u.TrashWarnings, _ = detectTrashWarnings(s.repo, s.dir, "ORIG_HEAD", s.hostname)
-	u.Status = s.Status()
-	s.emit(u)
-	return merged, nil
+	return merged, u, nil
 }
 
 // reindex returns the paths changed by the last merge (spec §7: every file in

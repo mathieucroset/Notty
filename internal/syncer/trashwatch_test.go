@@ -67,6 +67,30 @@ func TestTrashWarningLastChangeFromThisHost(t *testing.T) {
 	}
 }
 
+func TestTrashCheckRunsOutsideLockedSection(t *testing.T) {
+	env := gittest.New(t)
+	h := newHarness(t, env.Laptop)
+	h.start()
+	gittest.Write(t, env.Laptop, "mine.md", "mine\n")
+	h.s.SyncNow()
+	h.s.waitIdle()
+	gittest.Sync(t, env.Desktop)
+	deskPush(t, env, func(r *gitsync.Repo) { trashNote(t, r, "mine.md", deskTrashID, "desktop", false) })
+	h.host.reset()
+	h.rec.reset()
+	h.s.SyncNow()
+	h.s.waitIdle()
+
+	calls := h.host.calls()
+	unlock, check := slices.Index(calls, "Unlock"), slices.Index(calls, "LastCommitAdding")
+	if unlock < 0 || check < 0 || check < unlock {
+		t.Fatalf("calls = %v, want the trash check after Unlock", calls)
+	}
+	if got := h.rec.trashWarnings(); len(got) != 1 || got[0].Path != "mine.md" {
+		t.Fatalf("TrashWarnings = %+v, want one for mine.md", got)
+	}
+}
+
 func TestNoTrashWarningForRemoteNote(t *testing.T) {
 	env := gittest.New(t)
 	h := newHarness(t, env.Laptop)

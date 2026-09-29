@@ -17,7 +17,7 @@ type trashRepo interface {
 	MergeBase(a, b string) (string, error)
 	DiffNameStatus(from, to string) ([]gitsync.Change, error)
 	ShowAt(rev, path string) ([]byte, error)
-	Log(path string) ([]gitsync.LogEntry, error)
+	LastCommitAdding(path string) (string, error)
 	LastCommitHostFor(path, before string) (string, error)
 }
 
@@ -122,9 +122,10 @@ func detectTrashWarnings(r trashRepo, dir, origHead, host string) ([]TrashWarnin
 
 // lastChangeFrom returns the host of the last commit that changed was before
 // the commit that moved it to trashed, or "" if that commit is not found.
+// The trashing commit is the one that added trashed (trash IDs are unique).
 func lastChangeFrom(r trashRepo, trashed, was string) string {
-	trashCommit := findTrashCommit(r, trashed)
-	if trashCommit == "" {
+	trashCommit, err := r.LastCommitAdding(trashed)
+	if err != nil || trashCommit == "" {
 		return ""
 	}
 	h, err := r.LastCommitHostFor(was, trashCommit+"^")
@@ -132,31 +133,6 @@ func lastChangeFrom(r trashRepo, trashed, was string) string {
 		return ""
 	}
 	return h
-}
-
-// findTrashCommit returns the non-merge commit that created trashed from a
-// parent that still had the file elsewhere: the oldest commit in trashed's
-// history (followed through renames) where trashed exists but not in its
-// parent.
-func findTrashCommit(r trashRepo, trashed string) string {
-	entries, err := r.Log(trashed)
-	if err != nil {
-		return ""
-	}
-	found := ""
-	for _, e := range entries {
-		if revID(r, e.Rev+"^2") != "" {
-			continue // merges only carry the file over
-		}
-		if _, err := r.ShowAt(e.Rev, trashed); err != nil {
-			continue
-		}
-		if _, err := r.ShowAt(e.Rev+"^", trashed); err == nil {
-			continue
-		}
-		found = e.Rev // entries are newest first: keep the oldest
-	}
-	return found
 }
 
 // revID resolves a commit-ish to its ID, or "" if it does not exist. The

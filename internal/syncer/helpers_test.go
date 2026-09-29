@@ -215,6 +215,11 @@ func (r *spyRepo) Merge(ref string, allowUnrelated bool) error {
 	return r.Repo.Merge(ref, allowUnrelated)
 }
 
+func (r *spyRepo) LastCommitAdding(path string) (string, error) {
+	r.host.record("LastCommitAdding")
+	return r.Repo.LastCommitAdding(path)
+}
+
 func (r *spyRepo) Fetch(ctx context.Context) error {
 	r.fetches.Add(1)
 	r.host.record("Fetch")
