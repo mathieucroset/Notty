@@ -226,7 +226,7 @@ func (r *Repo) Commit(msg string) (committed bool, err error) {
 	} else if exitCode(err) != 1 {
 		return false, fmt.Errorf("gitsync: commit: %w", err)
 	}
-	if _, err := r.git("commit", "-q", "-m", msg); err != nil {
+	if _, err := r.git(noHooks("commit", "-q", "-m", msg)...); err != nil {
 		return false, fmt.Errorf("gitsync: commit: %w", err)
 	}
 	return true, nil
@@ -382,7 +382,7 @@ func (r *Repo) Merge(ref string, allowUnrelated bool) error {
 		args = append(args, "--allow-unrelated-histories")
 	}
 	args = append(args, ref)
-	res, err := r.git(args...)
+	res, err := r.git(noHooks(args...)...)
 	r.recordMerge(string(res.Stdout) + "\n" + string(res.Stderr))
 	if err != nil {
 		return fmt.Errorf("gitsync: merge %s: %w", ref, err)
@@ -441,7 +441,7 @@ func (r *Repo) CommitMerge(msg string) error {
 	if !r.MergeInProgress() {
 		return errors.New("gitsync: commit merge: no merge in progress")
 	}
-	if _, err := r.git("commit", "-q", "-m", msg); err != nil {
+	if _, err := r.git(noHooks("commit", "-q", "-m", msg)...); err != nil {
 		return fmt.Errorf("gitsync: commit merge: %w", err)
 	}
 	r.clearMergeRecord()
@@ -544,6 +544,13 @@ func (r *Repo) MergeBase(a, b string) (string, error) {
 		return "", fmt.Errorf("gitsync: merge-base %s %s: %w", a, b, err)
 	}
 	return strings.TrimSpace(string(res.Stdout)), nil
+}
+
+// noHooks prefixes a commit-creating git command with options that disable
+// hooks and signing, so no hook or pinentry prompt can block or draw over the
+// TUI.
+func noHooks(args ...string) []string {
+	return append([]string{"-c", "core.hooksPath=" + os.DevNull, "-c", "commit.gpgsign=false"}, args...)
 }
 
 // checkArg rejects empty values and values that git would parse as options.

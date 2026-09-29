@@ -191,6 +191,55 @@ func TestAddRemoveLiteralPaths(t *testing.T) {
 	}
 }
 
+func TestCommitsIgnoreHooksAndSigning(t *testing.T) {
+	env := gittest.New(t)
+	hooks := t.TempDir()
+	for _, h := range []string{"pre-commit", "prepare-commit-msg", "commit-msg", "pre-merge-commit", "post-commit"} {
+		script := "#!/bin/sh\necho hook " + h + " ran >&2\nexit 1\n"
+		for _, dir := range []string{hooks, filepath.Join(env.Laptop.Dir, ".git", "hooks")} {
+			if err := os.WriteFile(filepath.Join(dir, h), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	gittest.Git(t, env.Laptop.Dir, "config", "core.hooksPath", hooks)
+	gittest.Git(t, env.Laptop.Dir, "config", "commit.gpgsign", "true")
+	gittest.Git(t, env.Laptop.Dir, "config", "gpg.program", "false")
+
+	// Plain commit.
+	gittest.Write(t, env.Laptop, "a.md", "a\n")
+	gittest.CommitAll(t, env.Laptop, "Create a.md · laptop")
+
+	// Clean non-fast-forward merge creates a merge commit.
+	gittest.Write(t, env.Desktop, "b.md", "b\n")
+	gittest.CommitAll(t, env.Desktop, "Create b.md · desktop")
+	gittest.Push(t, env.Desktop)
+	gittest.Sync(t, env.Laptop)
+
+	// Conflicted merge concluded with CommitMerge.
+	gittest.Write(t, env.Desktop, "README.md", "desktop\n")
+	gittest.CommitAll(t, env.Desktop, "desk")
+	gittest.Push(t, env.Desktop)
+	gittest.Write(t, env.Laptop, "README.md", "laptop\n")
+	gittest.CommitAll(t, env.Laptop, "lap")
+	if err := env.Laptop.Fetch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Laptop.Merge("origin/main", false); !errors.Is(err, gitsync.ErrConflict) {
+		t.Fatalf("Merge err = %v, want ErrConflict", err)
+	}
+	gittest.Write(t, env.Laptop, "README.md", "resolved\n")
+	if err := env.Laptop.Add("README.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Laptop.CommitMerge("Merge · laptop"); err != nil {
+		t.Fatalf("CommitMerge with failing hooks/signing: %v", err)
+	}
+	if got := gittest.Git(t, env.Laptop.Dir, "log", "-1", "--format=%s"); got != "Merge · laptop" {
+		t.Fatalf("last commit = %q", got)
+	}
+}
+
 func TestFetchMergePushRoundTrip(t *testing.T) {
 	env := gittest.New(t)
 	lap, desk := env.Laptop, env.Desktop
