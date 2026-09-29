@@ -54,8 +54,26 @@ func renderMarkdown(content string, width int, p theme.Palette) []string {
 	return lines
 }
 
+// mapLineToRendered approximates which rendered preview line corresponds to
+// rawLine (a 0-based line index into content), by position: Glamour
+// reformats markdown, so there is no exact mapping between source and
+// rendered lines, but scaling by each side's line count keeps the preview
+// scrolled to roughly the right place.
+func mapLineToRendered(rawLine int, content string, renderedLen int) int {
+	if renderedLen <= 0 {
+		return -1
+	}
+	total := strings.Count(content, "\n") + 1
+	if total <= 1 {
+		return 0
+	}
+	idx := rawLine * (renderedLen - 1) / (total - 1)
+	return max(0, min(idx, renderedLen-1))
+}
+
 // previewPaneLines builds the preview pane's body: the selected note's
-// rendered content, from the top.
+// rendered content, scrolled (for full-text) so the hit line is visible and
+// marked, or from the top (for fuzzy).
 func (m Model) previewPaneLines(width, height int) []string {
 	blank := m.bgStyle(lipgloss.NewStyle(), false).Render(strings.Repeat(" ", max(width, 0)))
 	if height <= 0 {
@@ -71,13 +89,31 @@ func (m Model) previewPaneLines(width, height int) []string {
 	}
 
 	full := m.previewLines(note, width)
+	markIdx := -1
+	start := 0
+	if m.mode == FullText {
+		if h, ok := m.currentHit(); ok {
+			markIdx = mapLineToRendered(h.Line, note.Content, len(full))
+			start = markIdx - height/2
+		}
+	}
+	if maxStart := max(len(full)-height, 0); start > maxStart {
+		start = maxStart
+	}
+	start = max(start, 0)
+
 	out := make([]string, height)
 	for i := range out {
-		if i >= len(full) {
+		idx := start + i
+		if idx >= len(full) {
 			out[i] = blank
 			continue
 		}
-		out[i] = full[i]
+		line := full[idx]
+		if idx == markIdx {
+			line = m.styles.Selection.Render(line)
+		}
+		out[i] = line
 	}
 	return out
 }

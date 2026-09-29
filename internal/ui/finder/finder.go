@@ -11,6 +11,7 @@
 package finder
 
 import (
+	"context"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -78,6 +79,12 @@ type Model struct {
 	// Fuzzy mode state.
 	fuzzy []search.FuzzyResult
 
+	// Full-text mode state.
+	hits      []search.Hit
+	seq       int
+	searching bool
+	cancel    context.CancelFunc
+
 	previewCache map[previewKey][]string
 }
 
@@ -142,11 +149,16 @@ func (m Model) listRows() int {
 	return max(m.bodyHeight()/itemLines, 1)
 }
 
-// Update handles key presses. Unrecognized messages are ignored.
+// Update handles key presses, the full-text debounce tick, and full-text
+// search results. Unrecognized messages are ignored.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case debounceMsg:
+		return m.handleDebounce(msg)
+	case ftResultMsg:
+		return m.handleResult(msg)
 	}
 	return m, nil
 }
@@ -154,6 +166,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) handleKey(k tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch k.String() {
 	case "esc":
+		if m.cancel != nil {
+			m.cancel()
+		}
 		return m, emit(CloseMsg{})
 	case "enter":
 		return m, m.choose()
@@ -185,15 +200,22 @@ func (m Model) handleKey(k tea.KeyPressMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// queryChanged recomputes the fuzzy results after the query text changed.
+// queryChanged recomputes the results after the query text changed: fuzzy
+// results synchronously, full-text results after a debounce.
 func (m Model) queryChanged() (Model, tea.Cmd) {
-	m.recomputeFuzzy()
-	return m, nil
+	if m.mode == Fuzzy {
+		m.recomputeFuzzy()
+		return m, nil
+	}
+	return m.queryChangedFullText()
 }
 
 // itemCount is the number of selectable rows for the current mode.
 func (m Model) itemCount() int {
-	return len(m.fuzzy)
+	if m.mode == Fuzzy {
+		return len(m.fuzzy)
+	}
+	return len(m.hits)
 }
 
 func (m Model) pageItems() int {
@@ -234,21 +256,36 @@ func (m *Model) ensureVisible() {
 // choose builds the command for enter: opening the selected result, or nil
 // when nothing is selected.
 func (m Model) choose() tea.Cmd {
-	r, ok := m.currentFuzzy()
+	if m.mode == Fuzzy {
+		r, ok := m.currentFuzzy()
+		if !ok {
+			return nil
+		}
+		return emit(msgs.OpenNoteMsg{Path: r.Path, Line: -1})
+	}
+	h, ok := m.currentHit()
 	if !ok {
 		return nil
 	}
-	return emit(msgs.OpenNoteMsg{Path: r.Path, Line: -1})
+	return emit(msgs.OpenNoteMsg{Path: h.Path, Line: h.Line})
 }
 
 // selectedNote looks up the note behind the current selection, for the
 // preview pane.
 func (m Model) selectedNote() (*index.Note, bool) {
-	r, ok := m.currentFuzzy()
+	if m.mode == Fuzzy {
+		r, ok := m.currentFuzzy()
+		if !ok {
+			return nil, false
+		}
+		n, ok := m.byPath[r.Path]
+		return n, ok
+	}
+	h, ok := m.currentHit()
 	if !ok {
 		return nil, false
 	}
-	n, ok := m.byPath[r.Path]
+	n, ok := m.byPath[h.Path]
 	return n, ok
 }
 

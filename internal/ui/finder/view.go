@@ -56,7 +56,11 @@ func (m Model) inputLine() string {
 }
 
 func (m Model) statusLine() string {
-	return " " + m.bgStyle(m.styles.Muted, false).Render(m.fuzzyStatus())
+	text := m.fuzzyStatus()
+	if m.mode == FullText {
+		text = m.fullTextStatus()
+	}
+	return " " + m.bgStyle(m.styles.Muted, false).Render(text)
 }
 
 func (m Model) footerLine() string {
@@ -131,5 +135,9 @@ func (m Model) emptyHint() string {
 
 // resultLines dispatches to the mode-specific row renderer for result i.
 func (m Model) resultLines(i, width int) (string, string) {
-	return m.fuzzyItemLines(i, width, i == m.cursor)
+	selected := i == m.cursor
+	if m.mode == Fuzzy {
+		return m.fuzzyItemLines(i, width, selected)
+	}
+	return m.hitItemLines(i, width, selected)
 }
