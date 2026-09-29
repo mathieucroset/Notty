@@ -36,18 +36,17 @@ func DefaultSyncFactory(root string, cfg config.Config, host syncer.Host) (*sync
 	return syncer.New(repo, cfg, host, syncer.RealClock()), repo
 }
 
-// Toast texts of the sync wiring.
+// Texts, dialog IDs and limits of the sync wiring.
 const (
 	textGitMissing   = "git not found — sync and history are disabled"
 	textDroppedKeys  = "%d keystrokes were dropped (sync conflict)"
 	textQuitSyncing  = "syncing before exit…"
-	dlgAuthFailed    = "auth-failed"
-	quitSyncLimit    = 5 * time.Second
-	restoreHint      = " · R to restore"
-	textSyncing      = "Syncing… try again"
 	textNoSyncSetup  = "Sync is not available: this vault is not a git repository"
 	textSyncIsSetUp  = "Sync is already set up for this vault"
 	textConflictsFix = "Conflicts resolved"
+	restoreHint      = " · R to restore"
+	dlgAuthFailed    = "auth-failed"
+	quitSyncLimit    = 5 * time.Second
 )
 
 // syncUpdateMsg carries one syncer update.
