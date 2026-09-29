@@ -486,6 +486,53 @@ func TestClone(t *testing.T) {
 	}
 }
 
+// noIdentity makes git refuse to guess an identity from the environment.
+func noIdentity(t *testing.T) {
+	t.Helper()
+	gittest.Isolate(t)
+	t.Setenv("EMAIL", "")
+	os.Unsetenv("EMAIL")
+	gittest.Git(t, "", "config", "--global", "user.useConfigOnly", "true")
+}
+
+func TestIdentity(t *testing.T) {
+	noIdentity(t)
+	if err := gitsync.CheckIdentity(ctx, ""); !errors.Is(err, gitsync.ErrNoIdentity) {
+		t.Fatalf("CheckIdentity without identity err = %v, want ErrNoIdentity", err)
+	}
+	r, err := gitsync.Init(t.TempDir(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gittest.Write(t, r, "a.md", "a")
+	if err := r.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Commit("x"); !errors.Is(err, gitsync.ErrNoIdentity) {
+		t.Fatalf("Commit without identity err = %v, want ErrNoIdentity", err)
+	}
+	// A repository-local identity is enough for that repository.
+	gittest.SetUser(t, r, "Local", "local@example.com")
+	if err := gitsync.CheckIdentity(ctx, r.Dir); err != nil {
+		t.Fatalf("CheckIdentity with a local identity: %v", err)
+	}
+	if err := gitsync.CheckIdentity(ctx, filepath.Join(t.TempDir(), "missing")); !errors.Is(err, gitsync.ErrNoIdentity) {
+		t.Fatalf("CheckIdentity on a missing dir err = %v, want ErrNoIdentity", err)
+	}
+	if err := gitsync.SetGlobalIdentity(ctx, "", "x@example.com"); err == nil {
+		t.Fatal("SetGlobalIdentity with an empty name succeeded")
+	}
+	if err := gitsync.SetGlobalIdentity(ctx, "Me", "me@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitsync.CheckIdentity(ctx, ""); err != nil {
+		t.Fatalf("CheckIdentity after SetGlobalIdentity: %v", err)
+	}
+	if got := gittest.Git(t, "", "config", "--global", "user.email"); got != "me@example.com" {
+		t.Fatalf("global user.email = %q", got)
+	}
+}
+
 func TestRemoteURLAndGitPath(t *testing.T) {
 	gittest.Isolate(t)
 	r, err := gitsync.Init(t.TempDir(), "main")

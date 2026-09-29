@@ -157,6 +157,35 @@ func (r *Repo) HasRemote() bool {
 	return err == nil
 }
 
+// CheckIdentity reports whether git can author and commit in dir: it runs
+// `git var GIT_AUTHOR_IDENT` and `GIT_COMMITTER_IDENT` there when dir is a
+// repository, else outside any repository (the global identity). It returns
+// an error wrapping ErrNoIdentity when git has no usable name or email.
+func CheckIdentity(ctx context.Context, dir string) error {
+	if dir == "" || !Open(dir).IsRepo() {
+		dir = os.TempDir()
+	}
+	for _, v := range []string{"GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"} {
+		if _, err := runGit(ctx, execRunner, dir, false, "var", v); err != nil {
+			return fmt.Errorf("gitsync: check identity: %w", err)
+		}
+	}
+	return nil
+}
+
+// SetGlobalIdentity sets user.name and user.email in the global git config.
+func SetGlobalIdentity(ctx context.Context, name, email string) error {
+	if strings.TrimSpace(name) == "" || strings.TrimSpace(email) == "" {
+		return errors.New("gitsync: set identity: name and email are required")
+	}
+	for _, kv := range [][2]string{{"user.name", name}, {"user.email", email}} {
+		if _, err := runGit(ctx, execRunner, os.TempDir(), false, "config", "--global", kv[0], kv[1]); err != nil {
+			return fmt.Errorf("gitsync: set identity: %w", err)
+		}
+	}
+	return nil
+}
+
 // RemoteURL returns the configured URL of origin, or an error wrapping
 // ErrNoRemote when origin is not configured.
 func (r *Repo) RemoteURL() (string, error) {

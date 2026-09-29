@@ -40,6 +40,8 @@ var (
 	// ErrLocalChanges means git refused to merge because uncommitted local
 	// changes would be overwritten.
 	ErrLocalChanges = errors.New("gitsync: local changes would be overwritten by merge")
+	// ErrNoIdentity means git has no user.name/user.email to commit with.
+	ErrNoIdentity = errors.New("gitsync: git user name and email are not set")
 )
 
 const (
@@ -260,6 +262,13 @@ var (
 		regexp.MustCompile(`permission to .* denied`),
 		regexp.MustCompile(`repository '[^']*' not found`),
 	}
+	// Commit, merge and `git var` without a usable user.name/user.email.
+	identityPatterns = []string{
+		"please tell me who you are",
+		"unable to auto-detect email address",
+		"auto-detection is disabled",
+		"empty ident name",
+	}
 	// A local-path remote that was moved or deleted, as reported by clone.
 	reMissingLocalRepo = regexp.MustCompile(`repository '[^']*' does not exist`)
 	networkPatterns    = []string{
@@ -287,6 +296,14 @@ func classify(args []string, network bool, stdout, stderr string) error {
 		}
 		if hasConflictLine(stdout) || hasConflictLine(stderr) {
 			return ErrConflict
+		}
+	}
+	switch subcommand(args) {
+	case "commit", "merge", "var":
+		for _, p := range identityPatterns {
+			if strings.Contains(lower, p) {
+				return ErrNoIdentity
+			}
 		}
 	}
 	if !network {
