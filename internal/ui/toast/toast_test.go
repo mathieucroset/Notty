@@ -199,6 +199,20 @@ func TestViewSnapshotToastStack(t *testing.T) {
 	}
 }
 
+func TestErrorToastShowsDismissHint(t *testing.T) {
+	m, _ := New(testStyles(t)).Push(msgs.ToastWarn, "careful")
+	if strings.Contains(strip(m.View(48)), "esc to dismiss") {
+		t.Error("a warning toast shows the dismiss hint")
+	}
+	m, _ = m.Push(msgs.ToastError, "boom")
+	if !strings.Contains(strip(m.View(48)), "esc to dismiss") {
+		t.Errorf("error toast lacks the dismiss hint:\n%s", strip(m.View(48)))
+	}
+	if log := m.Log(); log[0].Text != "boom" {
+		t.Errorf("hint leaked into the log: %q", log[0].Text)
+	}
+}
+
 func TestNotVisibleWhenEmpty(t *testing.T) {
 	m := New(testStyles(t))
 	if m.Visible() {
@@ -206,5 +220,26 @@ func TestNotVisibleWhenEmpty(t *testing.T) {
 	}
 	if m.View(80) != "" {
 		t.Fatalf("expected an empty view, got %q", m.View(80))
+	}
+}
+
+func latteStyles(t *testing.T) theme.Styles {
+	t.Helper()
+	p, ok := theme.Get("catppuccin-latte")
+	if !ok {
+		t.Fatal("catppuccin-latte palette missing")
+	}
+	return theme.NewStyles(p)
+}
+
+func TestSetStylesRethemes(t *testing.T) {
+	m, _ := New(testStyles(t)).Push(msgs.ToastError, "boom")
+	before := m.View(40)
+	after := m.SetStyles(latteStyles(t)).View(40)
+	if before == after {
+		t.Error("SetStyles did not change the rendering")
+	}
+	if ansi.Strip(before) != ansi.Strip(after) {
+		t.Error("SetStyles changed the content")
 	}
 }

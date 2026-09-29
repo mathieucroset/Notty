@@ -63,6 +63,22 @@ func newTest(t *testing.T) Model {
 	return m
 }
 
+func TestSelectedFolder(t *testing.T) {
+	m := newTest(t)
+	m.Select("Work/Sub/deep.md")
+	if got := m.SelectedFolder(); got != "Work/Sub" {
+		t.Errorf("SelectedFolder on a note = %q, want Work/Sub", got)
+	}
+	m.Select("Work")
+	if got := m.SelectedFolder(); got != "Work" {
+		t.Errorf("SelectedFolder on a folder = %q, want Work", got)
+	}
+	m.Select("readme.md")
+	if got := m.SelectedFolder(); got != "" {
+		t.Errorf("SelectedFolder at the root = %q, want \"\"", got)
+	}
+}
+
 // nodePaths lists the tree rows currently visible, in order.
 func nodePaths(m Model) []string {
 	var out []string
@@ -538,5 +554,27 @@ func TestRenderSnapshot(t *testing.T) {
 	got := ansi.Strip(m.View())
 	if got != want {
 		t.Errorf("snapshot mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func latteStyles(t *testing.T) theme.Styles {
+	t.Helper()
+	p, ok := theme.Get("catppuccin-latte")
+	if !ok {
+		t.Fatal("catppuccin-latte palette missing")
+	}
+	return theme.NewStyles(p)
+}
+
+func TestSetStylesRethemes(t *testing.T) {
+	m := newTest(t)
+	before := m.View()
+	m.SetStyles(latteStyles(t))
+	after := m.View()
+	if before == after {
+		t.Error("SetStyles did not change the rendering")
+	}
+	if ansi.Strip(before) != ansi.Strip(after) {
+		t.Error("SetStyles changed the content")
 	}
 }

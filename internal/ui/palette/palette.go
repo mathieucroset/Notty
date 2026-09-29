@@ -81,6 +81,13 @@ func (m Model) WithCurrentTheme(name string) Model {
 	return m
 }
 
+// SetStyles re-themes the palette, so the theme picker previews the
+// highlighted theme on itself too.
+func (m Model) SetStyles(styles theme.Styles) Model {
+	m.styles = styles
+	return m
+}
+
 // SetSize sizes the overlay box for a termW x termH terminal: about 60
 // columns wide, up to 60% of the terminal's height, but never wider or
 // taller than the terminal itself.

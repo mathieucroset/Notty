@@ -55,13 +55,14 @@ func testOptions(t *testing.T) Options {
 		t.Fatal(err)
 	}
 	return Options{
-		Config:    config.Default(),
-		Styles:    theme.NewStyles(p),
-		Palette:   p,
-		Vault:     v,
-		Local:     local,
-		LocalPath: localPath,
-		Pins:      &meta.State{Pins: []string{}},
+		Config:     config.Default(),
+		Styles:     theme.NewStyles(p),
+		Palette:    p,
+		Vault:      v,
+		Local:      local,
+		LocalPath:  localPath,
+		Pins:       &meta.State{Pins: []string{}},
+		ConfigPath: filepath.Join(t.TempDir(), "config.toml"),
 	}
 }
 
@@ -296,6 +297,24 @@ func TestQuit(t *testing.T) {
 	}
 }
 
+func TestQuitSavesLocalState(t *testing.T) {
+	for _, quitMsg := range []tea.Msg{keyMsg("ctrl+q"), msgs.QuitMsg{}} {
+		opts := testOptions(t)
+		m := start(t, opts, 120, 30)
+		opts.Local.Touch("ideas.md") // changed but not saved yet
+		if !hasQuit(run(t, m, quitMsg)) {
+			t.Fatalf("%#v did not quit", quitMsg)
+		}
+		saved, err := localstate.Load(opts.LocalPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if saved.LastNote != "ideas.md" {
+			t.Errorf("%#v: saved LastNote = %q, want the state saved on quit", quitMsg, saved.LastNote)
+		}
+	}
+}
+
 func TestGlobalActionsEmitMessages(t *testing.T) {
 	tests := []struct {
 		key  string
@@ -379,6 +398,25 @@ func TestOpenNote(t *testing.T) {
 	// Opening reveals the note in the sidebar, expanding its folder.
 	if !reflect.DeepEqual(saved.Expanded, []string{"Work"}) {
 		t.Errorf("saved Expanded = %v, want [Work]", saved.Expanded)
+	}
+}
+
+func TestLastNoteReopenedOnStart(t *testing.T) {
+	opts := testOptions(t)
+	opts.Local.LastNote = "ideas.md"
+	m := start(t, opts, 120, 30)
+	if m.NotePath() != "ideas.md" {
+		t.Errorf("NotePath = %q, want the last note reopened", m.NotePath())
+	}
+
+	opts = testOptions(t)
+	opts.Local.LastNote = "gone.md"
+	m = start(t, opts, 120, 30)
+	if m.NotePath() != "" {
+		t.Errorf("NotePath = %q, want nothing for a missing last note", m.NotePath())
+	}
+	if len(m.toast.Log()) != 0 {
+		t.Errorf("toasts = %v, want none for a missing last note", toastTexts(m))
 	}
 }
 

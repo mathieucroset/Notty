@@ -12,6 +12,12 @@ func (m *Model) keyContext() keys.Context {
 	if m.opts.WizardNeeded {
 		return keys.Wizard
 	}
+	if m.overlayOpen() {
+		return keys.Overlay
+	}
+	if m.history != nil {
+		return keys.History
+	}
 	if m.focus == FocusSidebar {
 		if m.sidebar.PickerOpen() {
 			// The inline tag picker behaves like an overlay: ctrl+k moves
@@ -37,13 +43,26 @@ func (m *Model) keyContext() keys.Context {
 
 // handleKey routes a key press through the layers in keys.Route.
 func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
-	if a, global := keys.Route(m.keyContext(), m.overlayOpen, k); global {
+	if a, global := keys.Route(m.keyContext(), m.overlayOpen(), k); global {
 		return m.handleAction(a)
 	}
 	if m.opts.WizardNeeded {
 		return nil // TODO(Task 33): route keys to the wizard.
 	}
+	if m.overlayOpen() {
+		return m.updateOverlay(k)
+	}
+	if m.history != nil {
+		h, cmd := m.history.Update(k)
+		m.history = &h
+		return cmd
+	}
 	if m.focus == FocusSidebar {
+		// esc dismisses the newest sticky error before it reaches the
+		// sidebar (where it clears the tag filter).
+		if k.String() == "esc" && !m.sidebar.PickerOpen() && m.dismissToast() {
+			return nil
+		}
 		var cmd tea.Cmd
 		m.sidebar, cmd = m.sidebar.Update(k)
 		return tea.Batch(cmd, m.syncExpanded())
@@ -54,13 +73,24 @@ func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 // handleMainKey handles keys for the main pane. The editor, preview, Tasks
 // and Trash components take these over in later tasks.
 func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
+	var cmd tea.Cmd
+	switch m.mainView {
+	case ViewTasks:
+		m.tasks, cmd = m.tasks.Update(k)
+		return cmd
+	case ViewTrash:
+		m.trash, cmd = m.trash.Update(k)
+		return cmd
+	}
 	switch k.String() {
 	case "tab":
 		return emit(msgs.FocusSidebarMsg{})
 	case "esc":
-		if m.mainView != ViewNote {
-			m.mainView = ViewNote
-		}
+		// The note view has no use for esc yet: it dismisses the newest
+		// error toast.
+		// TODO(editor pass): only when the editor does not use the esc
+		// (vim normal mode with nothing pending; never in insert mode).
+		m.dismissToast()
 	}
 	return nil
 }
@@ -69,8 +99,7 @@ func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
 func (m *Model) handleAction(a keys.Action) tea.Cmd {
 	switch a {
 	case keys.Quit:
-		// TODO(Task 19/32): full quit sequence (save, kitty cleanup, syncer).
-		return tea.Quit
+		return m.quit()
 	case keys.Help:
 		return emit(msgs.OpenHelpMsg{})
 	case keys.ToggleSidebar:
@@ -86,7 +115,8 @@ func (m *Model) handleAction(a keys.Action) tea.Cmd {
 	case keys.Save:
 		return emit(msgs.SaveRequestMsg{})
 	case keys.ExternalEditor:
-		// TODO(Task 19): open the current note in $EDITOR.
+		// TODO(editor pass): save the buffer first.
+		return m.openExternal(m.note.path)
 	}
 	return nil
 }

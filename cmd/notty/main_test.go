@@ -143,6 +143,16 @@ func TestNormalStartup(t *testing.T) {
 	if o.Pins == nil || !reflect.DeepEqual(o.Pins.Pins, []string{"a.md"}) {
 		t.Errorf("Pins = %+v", o.Pins)
 	}
+	if o.ConfigPath != f.configPath {
+		t.Errorf("ConfigPath = %q, want %q", o.ConfigPath, f.configPath)
+	}
+	if o.Watcher == nil {
+		t.Fatal("no vault watcher")
+	}
+	// The watcher is closed once the TUI exits.
+	if _, open := <-o.Watcher.Events(); open {
+		t.Error("watcher still running after the TUI exited")
+	}
 }
 
 func TestVaultFlagOverridesConfig(t *testing.T) {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -34,6 +35,42 @@ func errorToast(format string, args ...any) tea.Cmd {
 	return emit(msgs.ToastMsg{Level: msgs.ToastError, Text: fmt.Sprintf(format, args...)})
 }
 
+// noteReloadedMsg carries the open note re-read after it changed on disk.
+type noteReloadedMsg struct {
+	path    string
+	content string
+	err     error
+}
+
+// reloadNoteIf re-reads the open note when it is one of paths (or inside
+// one of them).
+func (m *Model) reloadNoteIf(paths ...string) tea.Cmd {
+	if m.opts.Vault == nil || m.note.path == "" {
+		return nil
+	}
+	for _, p := range paths {
+		if isUnder(m.note.path, p) {
+			v, rel := m.opts.Vault, m.note.path
+			return func() tea.Msg {
+				content, err := v.Read(rel)
+				return noteReloadedMsg{path: rel, content: content, err: err}
+			}
+		}
+	}
+	return nil
+}
+
+// handleNoteReloaded shows the re-read content of the open note. A note
+// that could not be read (deleted, say) keeps its last content.
+func (m *Model) handleNoteReloaded(msg noteReloadedMsg) {
+	if msg.err != nil || msg.path != m.note.path {
+		return
+	}
+	m.note.content = msg.content
+	m.note.title = vault.Title(msg.content, msg.path)
+	m.note.words = len(strings.Fields(msg.content))
+}
+
 // loadTreeCmd reads the vault tree off the UI goroutine.
 func loadTreeCmd(v *vault.Vault) tea.Cmd {
 	return func() tea.Msg {
@@ -51,8 +88,9 @@ func loadNoteCmd(v *vault.Vault, path string, seq int) tea.Cmd {
 }
 
 // saveLocalCmd writes a snapshot of the local state, so the command never
-// races with later changes made in Update.
-func saveLocalCmd(s *localstate.State, path string) tea.Cmd {
+// races with later changes made in Update; snapshots land in order.
+func (m *Model) saveLocalCmd() tea.Cmd {
+	s, path, saver := m.opts.Local, m.opts.LocalPath, m.localSaver
 	if s == nil || path == "" {
 		return nil
 	}
@@ -65,8 +103,9 @@ func saveLocalCmd(s *localstate.State, path string) tea.Cmd {
 	for k, v := range s.Cursor {
 		snap.Cursor[k] = v
 	}
+	seq := saver.ticket()
 	return func() tea.Msg {
-		if err := snap.Save(path); err != nil {
+		if err := saver.save(seq, func() error { return snap.Save(path) }); err != nil {
 			return msgs.ToastMsg{Level: msgs.ToastWarn, Text: fmt.Sprintf("Could not save local state: %v", err)}
 		}
 		return nil

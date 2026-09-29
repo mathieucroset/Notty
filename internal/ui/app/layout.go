@@ -6,6 +6,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mathieucroset/notty/internal/ui/textutil"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -74,31 +75,9 @@ func ComputeLayout(width, height int, sidebarVisible bool) Layout {
 	return l
 }
 
-// padLine truncates or pads s (which may contain ANSI codes) to width w.
-func padLine(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if sw := ansi.StringWidth(s); sw > w {
-		return ansi.Truncate(s, w, "")
-	} else if sw < w {
-		return s + strings.Repeat(" ", w-sw)
-	}
-	return s
-}
-
 // fitBlock returns exactly h lines of exactly w columns from body.
 func fitBlock(body string, w, h int) []string {
-	src := strings.Split(body, "\n")
-	out := make([]string, h)
-	for i := range out {
-		line := ""
-		if i < len(src) {
-			line = src[i]
-		}
-		out[i] = padLine(line, w)
-	}
-	return out
+	return textutil.FitBlock(strings.Split(body, "\n"), max(w, 0), max(h, 0))
 }
 
 // renderPane draws a rounded pane of size w×h with title embedded in the

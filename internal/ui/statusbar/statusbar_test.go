@@ -167,3 +167,16 @@ func TestViewTruncation(t *testing.T) {
 		}
 	}
 }
+
+func TestViewBusy(t *testing.T) {
+	m := New(styles(t))
+	m.SetSize(80)
+	m.Busy = "indexing…"
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "indexing…   F1 help") {
+		t.Errorf("busy label missing: %q", got)
+	}
+	m.Sync = msgs.SyncStatusMsg{State: msgs.SyncSynced}
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "indexing…   ✓ synced") {
+		t.Errorf("busy label not before the sync state: %q", got)
+	}
+}

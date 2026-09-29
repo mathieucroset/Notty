@@ -140,6 +140,9 @@ func New(styles theme.Styles) Model {
 	return m
 }
 
+// SetStyles re-themes the sidebar (a live theme preview, say).
+func (m *Model) SetStyles(styles theme.Styles) { m.styles = styles }
+
 // SetTree replaces the folder tree.
 func (m *Model) SetTree(root *vault.Node) {
 	m.root = root
@@ -499,6 +502,11 @@ func (m *Model) toggle(p string) {
 
 // selectionFolder is the folder a new note or folder goes into: the
 // selected folder, or the folder containing the selected note.
+// SelectedFolder returns the folder a new note or folder goes into for the
+// current selection: the selected folder itself, the folder holding the
+// selected note or pin, or "" (the vault root).
+func (m Model) SelectedFolder() string { return m.selectionFolder() }
+
 func (m Model) selectionFolder() string {
 	it, ok := m.selected()
 	if !ok {

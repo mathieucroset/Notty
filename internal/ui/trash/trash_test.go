@@ -150,6 +150,10 @@ func TestTitle(t *testing.T) {
 	if got, want := m.Title(), "Trash · 0 items"; got != want {
 		t.Errorf("Title() (empty) = %q, want %q", got, want)
 	}
+	m = m.SetItems(threeItems()[:1], now)
+	if got, want := m.Title(), "Trash · 1 item"; got != want {
+		t.Errorf("Title() (one) = %q, want %q", got, want)
+	}
 }
 
 func TestUpdateKeyMessages(t *testing.T) {
@@ -357,5 +361,22 @@ func TestViewShowsLoadingBeforePreviewArrives(t *testing.T) {
 	v := ansi.Strip(m.View())
 	if !strings.Contains(v, "loading") {
 		t.Errorf("View() before the preview loads does not contain %q:\n%s", "loading", v)
+	}
+}
+
+func TestSetThemeRethemes(t *testing.T) {
+	m := newTest(t)
+	m = m.SetPreview("3", "# Standup\n\nbody")
+	before := m.View()
+	p, ok := theme.Get("catppuccin-latte")
+	if !ok {
+		t.Fatal("palette missing")
+	}
+	after := m.SetTheme(theme.NewStyles(p), p).View()
+	if before == after {
+		t.Error("SetTheme did not change the rendering")
+	}
+	if ansi.Strip(before) != ansi.Strip(after) {
+		t.Error("SetTheme changed the content")
 	}
 }

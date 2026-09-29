@@ -550,3 +550,24 @@ func TestDisplayPathGuardsShortPaths(t *testing.T) {
 		}
 	}
 }
+
+func latteStyles(t *testing.T) theme.Styles {
+	t.Helper()
+	p, ok := theme.Get("catppuccin-latte")
+	if !ok {
+		t.Fatal("catppuccin-latte palette missing")
+	}
+	return theme.NewStyles(p)
+}
+
+func TestSetStylesRethemes(t *testing.T) {
+	m := newTest(t)
+	before := m.View()
+	after := m.SetStyles(latteStyles(t)).View()
+	if before == after {
+		t.Error("SetStyles did not change the rendering")
+	}
+	if ansi.Strip(before) != ansi.Strip(after) {
+		t.Error("SetStyles changed the content")
+	}
+}
