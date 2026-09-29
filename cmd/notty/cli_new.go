@@ -11,6 +11,7 @@ const usage = `usage:
   notty [--vault <path>] new "<title>" [--folder <folder>]
                                                   create a note and open it
   notty [--vault <path>] sync                     run one sync cycle and exit
+  notty theme matugen                             set up a matugen-generated theme
   notty --version                                 print the version
 `
 
@@ -26,6 +27,8 @@ func runSubcommand(args []string, vaultFlag string, e env) int {
 		return runNew(args[1:], vaultFlag, e)
 	case "sync":
 		return runSync(args[1:], vaultFlag, e)
+	case "theme":
+		return runTheme(args[1:], e)
 	}
 	_, _ = fmt.Fprintf(e.stderr, "notty: unknown command %q\n%s", args[0], usage)
 	return 2
