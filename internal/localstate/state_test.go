@@ -3,6 +3,7 @@ package localstate
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -91,6 +92,25 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 }
 
+func TestLoadCorruptJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(path, []byte("{not valid json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Load(path)
+	if err == nil {
+		t.Fatal("Load with corrupt JSON returned nil error")
+	}
+	if s != nil {
+		t.Fatalf("Load with corrupt JSON returned non-nil state: %+v", s)
+	}
+	if errors.Unwrap(err) == nil {
+		t.Errorf("expected error to wrap the underlying JSON error, got %v", err)
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "state.json")
@@ -137,6 +157,25 @@ func TestSaveCreatesParentDirs(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("expected file to exist: %v", err)
+	}
+}
+
+func TestSaveParentPathIsRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	// blocker exists as a regular file, so it can never be created as a
+	// directory: MkdirAll(blocker, ...) must fail.
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(blocker, "state.json")
+
+	err := newState().Save(path)
+	if err == nil {
+		t.Fatal("Save returned nil error when parent path is a regular file")
+	}
+	if errors.Unwrap(err) == nil {
+		t.Errorf("expected error to wrap the underlying MkdirAll error, got %v", err)
 	}
 }
 
