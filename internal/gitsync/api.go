@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // StatusEntry is one entry of `git status --porcelain=v2 -z`.
@@ -379,10 +380,51 @@ func (r *Repo) Merge(ref string, allowUnrelated bool) error {
 		args = append(args, "--allow-unrelated-histories")
 	}
 	args = append(args, ref)
-	if _, err := r.git(args...); err != nil {
+	res, err := r.git(args...)
+	r.recordMerge(string(res.Stdout) + "\n" + string(res.Stderr))
+	if err != nil {
 		return fmt.Errorf("gitsync: merge %s: %w", ref, err)
 	}
 	return nil
+}
+
+// recordMerge keeps the output of a merge that left a merge in progress, for
+// PathConflicts.
+func (r *Repo) recordMerge(output string) {
+	rec := mergeRecord{head: r.revParse("HEAD"), mergeHead: r.revParse("MERGE_HEAD"), output: output}
+	if rec.mergeHead == "" {
+		rec = mergeRecord{}
+	}
+	r.mu.Lock()
+	r.lastMerge = rec
+	r.mu.Unlock()
+}
+
+// recordedMergeOutput returns the recorded merge output if it belongs to the
+// merge currently in progress, else "".
+func (r *Repo) recordedMergeOutput() string {
+	r.mu.Lock()
+	rec := r.lastMerge
+	r.mu.Unlock()
+	if rec.mergeHead == "" || rec.mergeHead != r.revParse("MERGE_HEAD") || rec.head != r.revParse("HEAD") {
+		return ""
+	}
+	return rec.output
+}
+
+func (r *Repo) clearMergeRecord() {
+	r.mu.Lock()
+	r.lastMerge = mergeRecord{}
+	r.mu.Unlock()
+}
+
+// revParse resolves rev to an object ID, or "" if it does not exist.
+func (r *Repo) revParse(rev string) string {
+	res, err := r.git("rev-parse", "-q", "--verify", rev)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(res.Stdout))
 }
 
 // MergeInProgress reports whether MERGE_HEAD exists.
@@ -400,6 +442,7 @@ func (r *Repo) CommitMerge(msg string) error {
 	if _, err := r.git("commit", "-q", "-m", msg); err != nil {
 		return fmt.Errorf("gitsync: commit merge: %w", err)
 	}
+	r.clearMergeRecord()
 	return nil
 }
 
@@ -408,6 +451,7 @@ func (r *Repo) AbortMerge() error {
 	if _, err := r.git("merge", "--abort"); err != nil {
 		return fmt.Errorf("gitsync: abort merge: %w", err)
 	}
+	r.clearMergeRecord()
 	return nil
 }
 
@@ -525,4 +569,105 @@ func exitCode(err error) int {
 		return ee.ExitCode()
 	}
 	return -1
+}
+
+// LogEntry is one commit in a file's history.
+type LogEntry struct {
+	Rev     string
+	Date    time.Time // author date
+	Subject string
+	Host    string // parsed from a " · <host>" subject suffix, else ""
+	Added   int    // lines added to the file (0 for binary files and merges)
+	Deleted int    // lines deleted from the file
+}
+
+// Log returns the history of path, newest first, following renames.
+func (r *Repo) Log(path string) ([]LogEntry, error) {
+	if err := checkPaths([]string{path}); err != nil {
+		return nil, err
+	}
+	res, err := r.git("log", "--follow", "-M", "--numstat", "--no-color", "--no-show-signature",
+		"--format=%x1e%H%x1f%aI%x1f%s", "--", path)
+	if err != nil {
+		return nil, fmt.Errorf("gitsync: log %s: %w", path, err)
+	}
+	entries, err := parseLog(string(res.Stdout))
+	if err != nil {
+		return nil, fmt.Errorf("gitsync: log %s: %w", path, err)
+	}
+	return entries, nil
+}
+
+func parseLog(out string) ([]LogEntry, error) {
+	var entries []LogEntry
+	for rec := range strings.SplitSeq(out, "\x1e") {
+		if strings.TrimSpace(rec) == "" {
+			continue
+		}
+		header, body, _ := strings.Cut(rec, "\n")
+		f := strings.SplitN(header, "\x1f", 3)
+		if len(f) != 3 {
+			return nil, fmt.Errorf("malformed log record %q", header)
+		}
+		date, err := time.Parse(time.RFC3339, f[1])
+		if err != nil {
+			return nil, fmt.Errorf("parse date %q: %w", f[1], err)
+		}
+		e := LogEntry{Rev: f[0], Date: date, Subject: f[2], Host: HostFromSubject(f[2])}
+		for line := range strings.SplitSeq(body, "\n") {
+			nums := strings.SplitN(line, "\t", 3)
+			if len(nums) != 3 {
+				continue
+			}
+			// Binary files report "-".
+			a, _ := strconv.Atoi(nums[0])
+			d, _ := strconv.Atoi(nums[1])
+			e.Added += a
+			e.Deleted += d
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
+}
+
+// HostFromSubject returns the host of a Notty commit subject such as
+// "Update a.md · laptop", or "" when the subject has no " · " suffix.
+func HostFromSubject(subject string) string {
+	i := strings.LastIndex(subject, " · ")
+	if i < 0 {
+		return ""
+	}
+	host := strings.TrimSpace(subject[i+len(" · "):])
+	if strings.ContainsAny(host, " \t") {
+		return ""
+	}
+	return host
+}
+
+// ShowAt returns the content of path at revision rev.
+func (r *Repo) ShowAt(rev, path string) ([]byte, error) {
+	if err := checkArg("rev", rev); err != nil {
+		return nil, err
+	}
+	if err := checkPaths([]string{path}); err != nil {
+		return nil, err
+	}
+	return r.catBlob(rev + ":" + path)
+}
+
+// LastCommitHostFor returns the host of the newest commit that touched path
+// and is reachable from before (inclusive), or "" if there is none or its
+// subject names no host.
+func (r *Repo) LastCommitHostFor(path, before string) (string, error) {
+	if err := checkArg("rev", before); err != nil {
+		return "", err
+	}
+	if err := checkPaths([]string{path}); err != nil {
+		return "", err
+	}
+	res, err := r.git("log", "-1", "--no-show-signature", "--format=%s", before, "--", path)
+	if err != nil {
+		return "", fmt.Errorf("gitsync: last commit for %s: %w", path, err)
+	}
+	return HostFromSubject(strings.TrimSpace(string(res.Stdout))), nil
 }

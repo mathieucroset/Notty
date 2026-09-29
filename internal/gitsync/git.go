@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -106,6 +107,16 @@ type Repo struct {
 	Dir  string // absolute path of the working tree root
 	Host string // short hostname used in commit messages
 	run  runner
+
+	mu        sync.Mutex
+	lastMerge mergeRecord // output of the last Merge run through this Repo
+}
+
+// mergeRecord remembers git's output for a conflicted merge, keyed by the
+// HEAD and MERGE_HEAD it left behind so it is never applied to another merge.
+type mergeRecord struct {
+	head, mergeHead string
+	output          string
 }
 
 // Available reports whether a git binary is on PATH.
