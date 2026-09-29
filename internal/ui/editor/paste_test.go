@@ -1,0 +1,100 @@
+package editor
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/mathieucroset/notty/internal/buffer"
+	"github.com/mathieucroset/notty/internal/clipboard"
+	"github.com/mathieucroset/notty/internal/ui/msgs"
+)
+
+func TestPaste(t *testing.T) {
+	dir := t.TempDir()
+	img := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(img, []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("image path imports", func(t *testing.T) {
+		m := newModel(t, testOptions(t), "x", buffer.Pos{}, 40, 3)
+		m, cmd := m.Update(tea.PasteMsg{Content: "'" + img + "'\n"})
+		imp, ok := find[msgs.ImportImageMsg](collect(cmd))
+		if !ok || imp.Path != img {
+			t.Errorf("paste of an image path: got %#v, want ImportImageMsg{Path: %q}", imp, img)
+		}
+		if m.Content() != "x" {
+			t.Errorf("path inserted as text: %q", m.Content())
+		}
+	})
+
+	t.Run("missing image path is text", func(t *testing.T) {
+		m := newModel(t, testOptions(t), "", buffer.Pos{}, 40, 3)
+		m, _ = typeKeys(m, "i")
+		missing := filepath.Join(dir, "nope.png")
+		m, _ = m.Update(tea.PasteMsg{Content: missing})
+		if m.Content() != missing {
+			t.Errorf("content = %q", m.Content())
+		}
+	})
+
+	t.Run("empty paste checks the image clipboard", func(t *testing.T) {
+		opts := testOptions(t)
+		opts.Clipboard = &fakeClipboard{image: []byte("PNG")}
+		m := newModel(t, opts, "x", buffer.Pos{}, 40, 3)
+		_, cmd := m.Update(tea.PasteMsg{})
+		imp, ok := find[msgs.ImportImageMsg](collect(cmd))
+		if !ok || string(imp.Data) != "PNG" || imp.Ext != "png" {
+			t.Errorf("empty paste: got %#v, want ImportImageMsg with data", imp)
+		}
+	})
+
+	t.Run("empty paste without image pastes clipboard text", func(t *testing.T) {
+		opts := testOptions(t)
+		opts.Clipboard = &fakeClipboard{imageErr: clipboard.ErrNoImage, text: "clip"}
+		m := newModel(t, opts, "", buffer.Pos{}, 40, 3)
+		m, cmd := m.Update(tea.PasteMsg{})
+		txt, ok := find[clipboardTextMsg](collect(cmd))
+		if !ok {
+			t.Fatal("no clipboard text message")
+		}
+		m, _ = m.Update(txt)
+		if m.Content() != "clip" {
+			t.Errorf("content = %q", m.Content())
+		}
+	})
+
+	t.Run("text is inserted literally in normal mode", func(t *testing.T) {
+		m := newModel(t, testOptions(t), "abc\ndef", buffer.Pos{}, 40, 3)
+		m, cmd := m.Update(tea.PasteMsg{Content: "dG"})
+		if got := m.Content(); got != "adGbc\ndef" {
+			t.Errorf("content = %q, want the paste inserted as text after the cursor", got)
+		}
+		if _, ok := find[ChangedMsg](collect(cmd)); !ok {
+			t.Error("paste does not report a change")
+		}
+		if m.ModeName() != "NORMAL" {
+			t.Errorf("paste changed the mode to %s", m.ModeName())
+		}
+	})
+
+	t.Run("text in insert mode", func(t *testing.T) {
+		m := newModel(t, testOptions(t), "ab", buffer.Pos{Col: 1}, 40, 3)
+		m, _ = typeKeys(m, "i")
+		m, _ = m.Update(tea.PasteMsg{Content: "<esc>:q\n"})
+		if got := m.Content(); got != "a<esc>:q\nb" {
+			t.Errorf("content = %q", got)
+		}
+	})
+
+	t.Run("read-only blocks paste", func(t *testing.T) {
+		m := newModel(t, testOptions(t), "x", buffer.Pos{}, 40, 3).SetReadOnly(true, "")
+		m, _ = m.Update(tea.PasteMsg{Content: "text"})
+		if m.Content() != "x" || !m.flashing {
+			t.Errorf("read-only paste: content %q flashing %v", m.Content(), m.flashing)
+		}
+	})
+}

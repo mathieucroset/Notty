@@ -49,6 +49,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.handleKey(msg)
+	case tea.PasteMsg:
+		if m.locked {
+			m.queue = append(m.queue, msg)
+			return m, nil
+		}
+		return m.handlePaste(msg)
 	case clipboardTextMsg:
 		if m.locked {
 			m.queue = append(m.queue, msg)

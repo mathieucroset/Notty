@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/mathieucroset/notty/internal/buffer"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 )
@@ -82,6 +84,7 @@ func TestReadOnlyMotionsWork(t *testing.T) {
 func TestLockQueueReplay(t *testing.T) {
 	m := newModel(t, testOptions(t), "", buffer.Pos{}, 40, 5).SetLocked(true)
 	m, _ = typeKeys(m, "i", "a", "b", "esc")
+	m, _ = m.Update(tea.PasteMsg{Content: "zz"})
 	if m.Content() != "" {
 		t.Fatalf("locked editor applied keys: %q", m.Content())
 	}
@@ -89,8 +92,8 @@ func TestLockQueueReplay(t *testing.T) {
 	if dropped != 0 {
 		t.Errorf("dropped = %d on replay", dropped)
 	}
-	if got := m.Content(); got != "ab" {
-		t.Errorf("replayed content = %q, want %q", got, "ab")
+	if got := m.Content(); got != "abzz" {
+		t.Errorf("replayed content = %q, want %q", got, "abzz")
 	}
 	if _, ok := find[ChangedMsg](collect(cmd)); !ok {
 		t.Error("replay does not report the change")
