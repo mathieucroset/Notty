@@ -13,6 +13,7 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/palette"
 	"github.com/mathieucroset/notty/internal/ui/textutil"
+	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/ui/toast"
 )
 
@@ -39,12 +40,14 @@ type overlayState struct {
 	pending pendingOp
 
 	palette palette.Model
-	// paletteTheme is the theme when the palette opened, restored if the
-	// palette is dropped mid-preview.
-	paletteTheme string
-	help         help.Model
-	log          toast.LogView
-	finder       finder.Model
+	// paletteOrig is the palette displayed when the palette overlay opened,
+	// restored from memory (never re-resolved) when the theme picker is
+	// cancelled or the overlay closes without a choice (user themes spec
+	// §1).
+	paletteOrig theme.Palette
+	help        help.Model
+	log         toast.LogView
+	finder      finder.Model
 }
 
 // toastTimer wraps the expiry command of an info or warning toast. Tests
@@ -79,12 +82,12 @@ func (m *Model) pushOverlay(s *overlayState) {
 	m.syncOverlayFlag()
 }
 
-// leaveOverlay cleans up after an overlay dropped without closing itself:
-// a palette previewing a theme cancels the preview, exactly as its own
+// leaveOverlay cleans up after an overlay dropped without a result: a
+// palette previewing a theme cancels the preview, exactly as its own
 // ThemeCancelMsg would.
 func (m *Model) leaveOverlay(s *overlayState) {
-	if s.kind == overlayPalette && m.opts.Palette.Name != s.paletteTheme {
-		m.applyTheme(s.paletteTheme)
+	if s.kind == overlayPalette {
+		m.restorePalette(s.paletteOrig)
 	}
 	if s.kind == overlayDialog && s.pending.kind == opExternalChange {
 		// An unanswered "changed on disk" dialog keeps the edits.
@@ -107,10 +110,14 @@ func (m *Model) closeOverlay() {
 
 // closeOverlayKind closes the topmost overlay of kind k: an overlay's own
 // close request. A request from an overlay that was since replaced finds
-// nothing to close.
+// nothing to close. A palette closing without a theme choice restores the
+// palette it opened with.
 func (m *Model) closeOverlayKind(k overlayKind) {
 	for i := len(m.overlays) - 1; i >= 0; i-- {
 		if m.overlays[i].kind == k {
+			if k == overlayPalette {
+				m.leaveOverlay(m.overlays[i])
+			}
 			m.overlays = append(m.overlays[:i:i], m.overlays[i+1:]...)
 			m.syncOverlayFlag()
 			return

@@ -86,7 +86,7 @@ func (m *Model) updateWizard(msg tea.Msg) tea.Cmd {
 func (m *Model) updateWizardMsg(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case wizard.ThemePreviewMsg:
-		m.applyTheme(msg.Name)
+		_ = m.applyTheme(msg.Name)
 		if m.wizard != nil {
 			w := m.wizard.SetStyles(m.opts.Styles)
 			m.wizard = &w
@@ -120,7 +120,7 @@ func (m *Model) handleWizardDone(msg wizard.DoneMsg) tea.Cmd {
 		root = abs
 	}
 	if msg.Theme != "" {
-		m.applyTheme(msg.Theme)
+		_ = m.applyTheme(msg.Theme)
 	}
 	wait := m.opts.LockWait
 	if wait <= 0 {

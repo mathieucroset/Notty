@@ -28,7 +28,9 @@ func TestIconsSettingReachesTheScreen(t *testing.T) {
 			if top := strings.Split(screen(m), "\n")[0]; !strings.Contains(top, " "+set.Dirty+" ─╮") {
 				t.Errorf("pane title lacks the %s dirty mark: %q", name, top)
 			}
-			m.applyTheme("nord")
+			if err := m.applyTheme("nord"); err != nil {
+				t.Fatal(err)
+			}
 			if got := m.opts.Styles.Icons.Name; got != name {
 				t.Errorf("after a theme change icons = %q, want %q", got, name)
 			}

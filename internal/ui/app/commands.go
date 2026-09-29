@@ -53,8 +53,10 @@ func (m *Model) openPalette() {
 	}
 	p := palette.New(cmds, m.opts.Styles).
 		WithCurrentTheme(m.opts.Palette.Name).
+		WithThemeNames(m.opts.Catalog.Names()).
 		SetSize(m.width, m.height)
-	m.openOverlay(&overlayState{kind: overlayPalette, palette: p, paletteTheme: m.opts.Palette.Name})
+	m.openOverlay(&overlayState{kind: overlayPalette, palette: p, paletteOrig: m.opts.Palette})
+	m.lastThemeErr = ""
 }
 
 // openFinder opens the fuzzy finder (ctrl+p) or full-text search (ctrl+f)
@@ -144,13 +146,20 @@ func (m *Model) resizeOverlay() {
 	}
 }
 
-// applyTheme re-themes every component with the named theme. It changes
-// nothing on disk.
-func (m *Model) applyTheme(name string) {
-	p, ok := theme.Get(name)
-	if !ok {
-		return
+// applyTheme resolves name through the catalog (a user theme is read from
+// its file) and applies it. On error nothing changes.
+func (m *Model) applyTheme(name string) error {
+	p, err := m.opts.Catalog.Resolve(name)
+	if err != nil {
+		return err
 	}
+	m.applyPalette(p)
+	return nil
+}
+
+// applyPalette re-themes every component with p, keeping the icon set. It
+// changes nothing on disk.
+func (m *Model) applyPalette(p theme.Palette) {
 	st := theme.NewStyles(p).WithIcons(m.opts.Styles.Icons)
 	m.opts.Palette, m.opts.Styles = p, st
 	m.sidebar.SetStyles(st)
@@ -168,6 +177,71 @@ func (m *Model) applyTheme(name string) {
 		}
 	}
 	m.relayout()
+}
+
+// paletteOverlay returns the topmost palette overlay, or nil.
+func (m *Model) paletteOverlay() *overlayState {
+	for i := len(m.overlays) - 1; i >= 0; i-- {
+		if m.overlays[i].kind == overlayPalette {
+			return m.overlays[i]
+		}
+	}
+	return nil
+}
+
+// previewTheme shows the theme highlighted in the picker. A theme that
+// does not load keeps the current colors, with a warning toast (once per
+// distinct error while the picker is open). A preview landing after the
+// picker closed is dropped: nothing would restore it.
+func (m *Model) previewTheme(name string) tea.Cmd {
+	if m.paletteOverlay() == nil {
+		return nil
+	}
+	err := m.applyTheme(name)
+	if err == nil {
+		return nil
+	}
+	text := fmt.Sprintf("Could not load %v", err)
+	if text == m.lastThemeErr {
+		return nil
+	}
+	m.lastThemeErr = text
+	return m.pushToast(msgs.ToastWarn, text)
+}
+
+// cancelThemePreview goes back to the palette the picker opened with (esc
+// in the picker; the palette stays open on its command list). It never
+// re-resolves the theme, so a file that broke meanwhile cannot stop it.
+func (m *Model) cancelThemePreview() {
+	if o := m.paletteOverlay(); o != nil {
+		m.restorePalette(o.paletteOrig)
+	}
+}
+
+// restorePalette applies orig unless it is already displayed.
+func (m *Model) restorePalette(orig theme.Palette) {
+	if orig.Key() != m.opts.Palette.Key() {
+		m.applyPalette(orig)
+	}
+}
+
+// chooseTheme applies and saves the theme confirmed in the picker, then
+// closes the picker. A theme that does not load is not saved: the picker
+// closes on the palette it opened with and a warning toast says why.
+func (m *Model) chooseTheme(name string) tea.Cmd {
+	p, err := m.opts.Catalog.Resolve(name)
+	if err != nil {
+		m.closeOverlayKind(overlayPalette) // restores the original
+		return m.pushToast(msgs.ToastWarn, fmt.Sprintf("Could not load %v — theme not changed", err))
+	}
+	m.applyPalette(p)
+	m.themeName = p.Name
+	m.opts.Config.Theme = p.Name
+	if o := m.paletteOverlay(); o != nil {
+		o.paletteOrig = p // closing keeps the choice
+	}
+	m.closeOverlayKind(overlayPalette)
+	return m.setConfigCmd("theme", p.Name)
 }
 
 // setConfigCmd writes one key to the local config.toml (spec §8: only
@@ -306,13 +380,11 @@ func (m *Model) updateCommandMsg(msg tea.Msg) (tea.Cmd, bool) {
 	case toast.CloseLogMsg:
 		m.closeOverlayKind(overlayLog)
 	case palette.ThemePreviewMsg:
-		m.applyTheme(msg.Name)
+		return m.previewTheme(msg.Name), true
 	case palette.ThemeCancelMsg:
-		m.applyTheme(msg.Original)
+		m.cancelThemePreview()
 	case palette.ThemeChosenMsg:
-		m.applyTheme(msg.Name)
-		m.opts.Config.Theme = m.opts.Palette.Name
-		return m.setConfigCmd("theme", m.opts.Palette.Name), true
+		return m.chooseTheme(msg.Name), true
 	case palette.ToggleVimMsg:
 		return m.toggleVim(), true
 	case palette.ToggleLineNumbersMsg:

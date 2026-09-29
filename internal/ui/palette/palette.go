@@ -1,6 +1,7 @@
 package palette
 
 import (
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -25,12 +26,14 @@ type CloseMsg struct{}
 // the app can re-render live with the previewed theme.
 type ThemePreviewMsg struct{ Name string }
 
-// ThemeChosenMsg is emitted when enter confirms a theme in the picker.
+// ThemeChosenMsg is emitted when enter confirms a theme in the picker. It
+// comes alone: the app resolves the theme and closes the palette itself.
 type ThemeChosenMsg struct{ Name string }
 
 // ThemeCancelMsg is emitted when esc cancels the theme picker. The app
-// should restore Original.
-type ThemeCancelMsg struct{ Original string }
+// restores the palette it stored when the overlay opened (user themes spec
+// §1: restores never re-resolve).
+type ThemeCancelMsg struct{}
 
 // mode is the palette's internal display mode.
 type mode int
@@ -56,11 +59,11 @@ type Model struct {
 
 	mode mode
 
-	// Theme picker state.
-	themeNames    []string
-	themeCursor   int
-	originalTheme string
-	currentTheme  string
+	// Theme picker state. themeNames is set by the app (the catalog's
+	// names); theme.Names() when it never was.
+	themeNames   []string
+	themeCursor  int
+	currentTheme string
 
 	styles theme.Styles
 	width  int
@@ -74,10 +77,34 @@ func New(cmds []Command, styles theme.Styles) Model {
 	return m
 }
 
-// WithCurrentTheme sets the theme marked ✓ in the theme picker, and the
-// theme esc restores when the picker is cancelled.
+// WithCurrentTheme sets the theme marked current in the theme picker, where
+// its cursor starts.
 func (m Model) WithCurrentTheme(name string) Model {
 	m.currentTheme = name
+	return m
+}
+
+// WithThemeNames sets the themes the picker lists (the app passes its
+// catalog's names). Without it the picker lists the built-ins.
+func (m Model) WithThemeNames(names []string) Model {
+	m.themeNames = slices.Clone(names)
+	return m
+}
+
+// SetThemeNames replaces the listed themes, e.g. when a theme file appears
+// while the picker is open. The cursor stays on the same name when it is
+// still listed, and is clamped otherwise.
+func (m Model) SetThemeNames(names []string) Model {
+	var cur string
+	if m.themeCursor >= 0 && m.themeCursor < len(m.themeNames) {
+		cur = m.themeNames[m.themeCursor]
+	}
+	m.themeNames = slices.Clone(names)
+	if i := slices.Index(m.themeNames, cur); i >= 0 {
+		m.themeCursor = i
+	} else {
+		m.themeCursor = clampInt(m.themeCursor, 0, max(len(m.themeNames)-1, 0))
+	}
 	return m
 }
 
@@ -171,8 +198,9 @@ func (m Model) runSelected() (Model, tea.Cmd) {
 	cmd := m.matches[m.cursor].cmd
 	if cmd.ID == idSwitchTheme {
 		m.mode = modeTheme
-		m.themeNames = theme.Names()
-		m.originalTheme = m.currentTheme
+		if len(m.themeNames) == 0 {
+			m.themeNames = theme.Names()
+		}
 		m.themeCursor = indexOf(m.themeNames, m.currentTheme)
 		return m, nil
 	}
@@ -183,14 +211,13 @@ func (m Model) updateTheme(k tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch k.String() {
 	case "esc":
 		m.mode = modeCommands
-		orig := m.originalTheme
-		return m, func() tea.Msg { return ThemeCancelMsg{Original: orig} }
+		return m, func() tea.Msg { return ThemeCancelMsg{} }
 	case "enter":
 		name := m.currentTheme
 		if m.themeCursor >= 0 && m.themeCursor < len(m.themeNames) {
 			name = m.themeNames[m.themeCursor]
 		}
-		return m, tea.Batch(func() tea.Msg { return ThemeChosenMsg{Name: name} }, closeCmd())
+		return m, func() tea.Msg { return ThemeChosenMsg{Name: name} }
 	case "down", "ctrl+j":
 		m.themeCursor = clampInt(m.themeCursor+1, 0, max(len(m.themeNames)-1, 0))
 		return m, m.previewCmd()

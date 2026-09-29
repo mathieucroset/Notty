@@ -146,6 +146,9 @@ type Model struct {
 	// the displayed palette's Name after a startup fallback or during a
 	// picker preview (user themes spec §1).
 	themeName string
+	// lastThemeErr is the last theme load warning shown while previewing,
+	// so moving over a broken theme again does not repeat it.
+	lastThemeErr string
 
 	width, height  int
 	sidebarVisible bool

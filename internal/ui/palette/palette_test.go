@@ -2,6 +2,7 @@ package palette
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -204,7 +205,7 @@ func TestSwitchThemeOpensPickerAndPreviewsOnMove(t *testing.T) {
 	}
 }
 
-func TestSwitchThemeEnterChoosesAndCloses(t *testing.T) {
+func TestSwitchThemeEnterEmitsOnlyTheChoice(t *testing.T) {
 	m := newTestPalette(t)
 	m = findCommand(t, m, idSwitchTheme)
 	m, _ = m.Update(key("enter"))
@@ -215,15 +216,17 @@ func TestSwitchThemeEnterChoosesAndCloses(t *testing.T) {
 	_, cmd := m.Update(key("enter"))
 	got := collectMsgs(cmd)
 
-	chosen, ok := findMsg[ThemeChosenMsg](got)
+	// The app resolves the choice and closes the palette itself, so the
+	// choice comes alone, not batched with a CloseMsg.
+	if len(got) != 1 {
+		t.Fatalf("enter emitted %v, want exactly one ThemeChosenMsg", got)
+	}
+	chosen, ok := got[0].(ThemeChosenMsg)
 	if !ok {
-		t.Fatalf("expected ThemeChosenMsg among %v", got)
+		t.Fatalf("enter emitted %T, want ThemeChosenMsg", got[0])
 	}
 	if chosen.Name != want {
 		t.Errorf("chosen theme = %q, want %q", chosen.Name, want)
-	}
-	if !hasMsgType(got, CloseMsg{}) {
-		t.Errorf("expected CloseMsg among %v", got)
 	}
 }
 
@@ -231,15 +234,12 @@ func TestSwitchThemeEscCancelsThenClosesOnSecondEsc(t *testing.T) {
 	m := newTestPalette(t)
 	m = findCommand(t, m, idSwitchTheme)
 	m, _ = m.Update(key("enter"))
+	m, _ = m.Update(key("down"))
 
 	m, cmd := m.Update(key("esc"))
 	got := collectMsgs(cmd)
-	cancel, ok := findMsg[ThemeCancelMsg](got)
-	if !ok {
-		t.Fatalf("expected ThemeCancelMsg among %v", got)
-	}
-	if cancel.Original != "catppuccin-mocha" {
-		t.Errorf("cancel original = %q, want %q", cancel.Original, "catppuccin-mocha")
+	if len(got) != 1 || got[0] != (ThemeCancelMsg{}) {
+		t.Fatalf("esc emitted %v, want exactly one ThemeCancelMsg{}", got)
 	}
 	if m.mode != modeCommands {
 		t.Fatal("expected esc to return to the command list")
@@ -249,6 +249,78 @@ func TestSwitchThemeEscCancelsThenClosesOnSecondEsc(t *testing.T) {
 	got = collectMsgs(cmd)
 	if !hasMsgType(got, CloseMsg{}) {
 		t.Errorf("expected the second esc to close the palette, got %v", got)
+	}
+}
+
+// openThemeMode opens the theme picker of a palette listing names.
+func openThemeMode(t *testing.T, names []string, current string) Model {
+	t.Helper()
+	m := New(DefaultCommands(), testStyles(t)).WithCurrentTheme(current).WithThemeNames(names).SetSize(100, 40)
+	m = findCommand(t, m, idSwitchTheme)
+	m, _ = m.Update(key("enter"))
+	if m.mode != modeTheme {
+		t.Fatal("expected the palette to be in theme mode")
+	}
+	return m
+}
+
+func TestWithThemeNamesListsExactlyThose(t *testing.T) {
+	m := openThemeMode(t, []string{"a", "b"}, "b")
+	if !slices.Equal(m.themeNames, []string{"a", "b"}) {
+		t.Errorf("theme names = %v, want [a b]", m.themeNames)
+	}
+	if m.themeCursor != 1 {
+		t.Errorf("cursor = %d, want 1 (the current theme)", m.themeCursor)
+	}
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	var listed []string
+	for _, l := range lines {
+		l = strings.Trim(l, "│ ")
+		l = strings.TrimSpace(strings.TrimPrefix(l, m.styles.Icons.Check))
+		if l == "a" || l == "b" {
+			listed = append(listed, l)
+		}
+	}
+	if !slices.Equal(listed, []string{"a", "b"}) {
+		t.Errorf("view lists %v, want [a b]:\n%s", listed, ansi.Strip(m.View()))
+	}
+}
+
+func TestSetThemeNames(t *testing.T) {
+	tests := []struct {
+		name       string
+		before     []string
+		cursorOn   string
+		after      []string
+		wantCursor int
+	}{
+		{"cursor name kept", []string{"a", "b", "c"}, "b", []string{"x", "b", "y"}, 1},
+		{"cursor name moved", []string{"a", "b", "c"}, "c", []string{"c", "d"}, 0},
+		{"cursor name removed, clamped", []string{"a", "b", "c"}, "c", []string{"a", "b"}, 1},
+		{"list emptied", []string{"a", "b"}, "b", nil, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := openThemeMode(t, tt.before, tt.cursorOn)
+			m = m.SetThemeNames(tt.after)
+			if !slices.Equal(m.themeNames, tt.after) {
+				t.Errorf("theme names = %v, want %v", m.themeNames, tt.after)
+			}
+			if m.themeCursor != tt.wantCursor {
+				t.Errorf("cursor = %d, want %d", m.themeCursor, tt.wantCursor)
+			}
+			_ = m.View() // must not panic
+		})
+	}
+}
+
+func TestSetThemeNamesBeforeThemeMode(t *testing.T) {
+	m := New(DefaultCommands(), testStyles(t)).WithCurrentTheme("b").WithThemeNames([]string{"a"}).SetSize(100, 40)
+	m = m.SetThemeNames([]string{"a", "b"})
+	m = findCommand(t, m, idSwitchTheme)
+	m, _ = m.Update(key("enter"))
+	if !slices.Equal(m.themeNames, []string{"a", "b"}) || m.themeCursor != 1 {
+		t.Errorf("theme names = %v, cursor %d; want [a b], 1", m.themeNames, m.themeCursor)
 	}
 }
 
@@ -368,16 +440,6 @@ func splitLines(s string) []string {
 	}
 	lines = append(lines, s[start:])
 	return lines
-}
-
-func findMsg[T any](list []tea.Msg) (T, bool) {
-	var zero T
-	for _, m := range list {
-		if v, ok := m.(T); ok {
-			return v, true
-		}
-	}
-	return zero, false
 }
 
 func latteStyles(t *testing.T) theme.Styles {
