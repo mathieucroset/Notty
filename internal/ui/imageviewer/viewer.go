@@ -196,9 +196,13 @@ type session struct {
 	kittyVisible bool
 }
 
-// handle applies a batch of keys and reports whether the viewer should close.
+// handle applies a batch of keys and reports whether the viewer should
+// close. All moves of the batch are applied first and the screen is drawn
+// once at the end (keys pile up in one read when the terminal is slow to
+// draw large images); nothing is drawn when the batch closes the viewer.
 func (s *session) handle(batch []Key) bool {
 	n := len(s.v.Paths)
+	start, status := s.index, s.status
 	for _, k := range batch {
 		switch k {
 		case Quit:
@@ -206,25 +210,28 @@ func (s *session) handle(batch []Key) bool {
 		case QuitApp:
 			s.v.QuitRequested = true
 			return true
-		case Next, Prev:
-			if k == Next {
-				s.index = (s.index + 1) % n
-			} else {
-				s.index = (s.index + n - 1) % n
-			}
-			s.v.Index = s.index
+		case Next:
+			s.index = (s.index + 1) % n
 			s.status = ""
-			s.draw()
+		case Prev:
+			s.index = (s.index + n - 1) % n
+			s.status = ""
 		case Open:
 			s.status = ""
 			if err := s.open(s.v.Paths[s.index]); err != nil {
 				s.status = "open failed: " + err.Error()
 			}
-			var b strings.Builder
-			s.footer(&b)
-			s.write(b.String())
 		case Unknown:
 		}
+	}
+	s.v.Index = s.index
+	switch {
+	case s.index != start:
+		s.draw()
+	case s.status != status:
+		var b strings.Builder
+		s.footer(&b)
+		s.write(b.String())
 	}
 	return false
 }

@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/mathieucroset/notty/internal/imgrender"
@@ -69,6 +70,14 @@ func newTestViewer(paths []string, proto imgrender.Protocol, in io.Reader) (*Vie
 	v := New(paths, 0, imgrender.Caps{Viewer: proto})
 	v.Size = func() (int, int, error) { return 80, 24, nil }
 	v.Open = func(string) error { return nil }
+	// One key per read, as typed, unless the test needs the real reader
+	// (an *os.File) or controls the reads itself (a pipe).
+	if sr, ok := in.(*strings.Reader); ok {
+		in = iotest.OneByteReader(sr)
+	}
+	// Split sequences are joined by the reader: never let the esc timeout
+	// fire between two bytes of one test sequence.
+	v.escWait = 5 * time.Second
 	var out bytes.Buffer
 	v.SetStdin(in)
 	v.SetStdout(&out)
@@ -126,6 +135,36 @@ func TestRunHalfBlocksNavigates(t *testing.T) {
 	}
 	if strings.Contains(s, "\x1b_G") {
 		t.Error("half-block viewer sent kitty graphics")
+	}
+}
+
+// chunkReader returns one chunk per Read, then EOF.
+type chunkReader struct{ chunks []string }
+
+func (r *chunkReader) Read(p []byte) (int, error) {
+	if len(r.chunks) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, r.chunks[0])
+	r.chunks = r.chunks[1:]
+	return n, nil
+}
+
+func TestRunDrawsOncePerKeyBatch(t *testing.T) {
+	dir := t.TempDir()
+	paths := []string{writePNG(t, dir, "a.png", 10, 10), writePNG(t, dir, "b.png", 10, 10), writePNG(t, dir, "c.png", 10, 10)}
+	v, out := newTestViewer(paths, imgrender.ProtoHalfBlocks, &chunkReader{[]string{"nn", "np", "nq"}})
+	runViewer(t, v)
+	s := out.String()
+	assertOrder(t, s, "1/3", "3/3", altLeave)
+	if strings.Contains(s, "2/3") {
+		t.Error("intermediate image of a key batch was drawn")
+	}
+	if got := strings.Count(s, "\x1b[2J"); got != 2 {
+		t.Errorf("screen cleared %d times, want 2 (initial draw, first batch)", got)
+	}
+	if v.Index != 2 {
+		t.Errorf("Index = %d, want 2", v.Index)
 	}
 }
 
