@@ -90,7 +90,8 @@ func TestTokenizeLine(t *testing.T) {
 		{"two dashes not rule", "--", nil},
 		{"tag url fragment", "http://x.com/#frag", nil},
 		{"escaped star", `\*not\*`, nil},
-		{"tag in paren", "(#a)", []sp{{"#a", Tag}}},
+		{"no tag directly after paren", "(#a)", nil},
+		{"anchor link has no tag", "[setup](#setup)", []sp{{"[", Markup}, {"setup", Link}, {"](", Markup}, {"#setup", LinkURL}, {")", Markup}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

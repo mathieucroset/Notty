@@ -15,7 +15,9 @@ func TestParse(t *testing.T) {
 		{"no tags", "just some text\nand more", nil},
 		{"single", "hello #work", []string{"work"}},
 		{"start of line", "#work is here", []string{"work"}},
-		{"after paren", "(see #work)", []string{"work"}},
+		{"space inside paren", "(see #work)", []string{"work"}},
+		{"directly after paren", "(#work)", nil},
+		{"anchor link", "[setup](#setup)", nil},
 		{"nested", "#work/client stuff", []string{"work/client"}},
 		{"trailing slash dropped", "#work/ stuff", []string{"work"}},
 		{"heading line counts", "# Meeting #work", []string{"work"}},
@@ -119,7 +121,8 @@ func TestFindTags(t *testing.T) {
 		{"unicode byte range", "#été", [][2]int{{0, 6}}},
 		{"in code span", "`#x` #y", [][2]int{{5, 7}}},
 		{"url fragment", "http://x.com/#frag", nil},
-		{"paren", "(#x)", [][2]int{{1, 3}}},
+		{"paren", "(#x)", nil},
+		{"anchor link", "see [setup](#setup) #t", [][2]int{{20, 22}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

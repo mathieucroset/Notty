@@ -2,9 +2,10 @@
 //
 // A tag is '#' followed by a letter, then any run of letters, digits, '_',
 // '-' or '/'. A trailing '/' is not part of the tag. The '#' must be at the
-// start of the line or preceded by whitespace or '('; a '#' directly after
-// any other character (URL fragments, "a#b", "##") is not a tag. Tags inside
-// fenced code blocks and inline code spans are ignored.
+// start of the line or preceded by whitespace; a '#' directly after any
+// other character (URL fragments, anchor links like "[x](#x)", "a#b", "##",
+// "(#x)") is not a tag. Tags inside fenced code blocks and inline code spans
+// are ignored.
 package tags
 
 import (
@@ -82,7 +83,7 @@ func boundaryBefore(line string, i int) bool {
 		return true
 	}
 	r, _ := utf8.DecodeLastRuneInString(line[:i])
-	return r == '(' || unicode.IsSpace(r)
+	return unicode.IsSpace(r)
 }
 
 // tagEnd returns the end offset of the tag word starting at start (just after
