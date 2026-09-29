@@ -104,9 +104,13 @@ type Syncer struct {
 	updates chan Update
 	onEmit  func(Update) // test hook, set before Start
 
-	startOnce sync.Once
-	netCtx    context.Context // background fetches and pushes; Quit cancels it
-	netCancel context.CancelFunc
+	// life bounds the worker and the pump: cancelled when Start's context is
+	// done or when Quit returns, so no goroutine outlives the syncer.
+	life       context.Context
+	lifeCancel context.CancelFunc
+	startOnce  sync.Once
+	netCtx     context.Context // background fetches and pushes; Quit cancels it
+	netCancel  context.CancelFunc
 
 	// Job queue, consumed by one worker goroutine.
 	qmu     sync.Mutex
@@ -157,6 +161,8 @@ func New(repo *gitsync.Repo, cfg config.Config, host Host, clock Clock) *Syncer 
 		s.fetchInterval = defaultFetchInterval
 	}
 	s.qcond = sync.NewCond(&s.qmu)
+	s.life, s.lifeCancel = context.WithCancel(context.Background())
+	s.netCtx, s.netCancel = context.WithCancel(s.life)
 	return s
 }
 
@@ -174,7 +180,8 @@ func (s *Syncer) Status() Status {
 // is in progress, LocalOnly without a remote or with sync disabled, else a
 // full cycle. The worker stops when ctx is done.
 func (s *Syncer) Start(ctx context.Context) {
-	s.ensureWorker(ctx)
+	context.AfterFunc(ctx, s.lifeCancel)
+	s.ensureWorker()
 	s.enqueue(job{fn: s.startLogic})
 }
 
@@ -232,7 +239,7 @@ func (s *Syncer) ExternalEditDone() {
 // LocalOnly. The channel receives the job's error.
 func (s *Syncer) RunSetup(setup func(*gitsync.Repo) error) <-chan error {
 	errc := make(chan error, 1)
-	s.ensureWorker(context.Background())
+	s.ensureWorker()
 	s.enqueue(job{
 		fn: func() {
 			errc <- setup(s.raw)
@@ -268,7 +275,9 @@ func (s *Syncer) ConflictResolved() {
 // pushes within ctx's deadline (spec §7, amendment A7). It never blocks past
 // ctx and returns the push error, if any; the caller quits regardless.
 func (s *Syncer) Quit(ctx context.Context, skipFlush bool) error {
-	s.ensureWorker(context.Background())
+	s.ensureWorker()
+	// Once Quit returns the syncer is finished: stop the worker and the pump.
+	defer s.lifeCancel()
 	s.mu.Lock()
 	s.quitting = true
 	s.disarm(&s.commitTimer)
@@ -324,18 +333,17 @@ func (s *Syncer) quitJob(ctx context.Context, skipFlush bool) error {
 	return nil
 }
 
-// ensureWorker starts the worker and the update pump once.
-func (s *Syncer) ensureWorker(ctx context.Context) {
+// ensureWorker starts the worker and the update pump once; both stop when
+// s.life is cancelled.
+func (s *Syncer) ensureWorker() {
 	s.startOnce.Do(func() {
-		s.netCtx, s.netCancel = context.WithCancel(ctx)
-		go s.work(ctx)
-		go s.pump(ctx)
-		go func() {
-			<-ctx.Done()
+		go s.work(s.life)
+		go s.pump(s.life)
+		context.AfterFunc(s.life, func() {
 			s.qmu.Lock()
 			s.qcond.Broadcast()
 			s.qmu.Unlock()
-		}()
+		})
 	})
 }
 
@@ -377,8 +385,11 @@ func (s *Syncer) work(ctx context.Context) {
 		s.running = true
 		s.qmu.Unlock()
 
-		if j.quit || !s.isQuitting() {
+		switch {
+		case j.quit || !s.isQuitting():
 			j.fn()
+		case j.drop != nil:
+			j.drop() // skipped after Quit: still answer the caller
 		}
 
 		s.qmu.Lock()

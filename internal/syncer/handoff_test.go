@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mathieucroset/notty/internal/config"
 	"github.com/mathieucroset/notty/internal/gitsync"
 	"github.com/mathieucroset/notty/internal/gitsync/gittest"
 )
@@ -182,6 +183,77 @@ func TestRunSetupReturnsJobError(t *testing.T) {
 		t.Fatalf("job did not receive the syncer's repository")
 	}
 	h.wantState(LocalOnly)
+}
+
+// waitStopped blocks until the worker has exited.
+func waitStopped(s *Syncer) {
+	s.qmu.Lock()
+	for !s.stopped {
+		s.qcond.Wait()
+	}
+	s.qmu.Unlock()
+}
+
+func TestRunSetupAfterQuitAnswers(t *testing.T) {
+	env := gittest.New(t)
+	h := newHarness(t, env.Laptop)
+	h.start()
+
+	// Queued before Quit, skipped because of it: still answered.
+	release, started := make(chan struct{}), make(chan struct{})
+	h.s.enqueue(job{fn: func() { close(started); <-release }})
+	<-started
+	early := h.s.RunSetup(func(*gitsync.Repo) error { return nil })
+	quitDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		quitDone <- h.s.Quit(ctx, true)
+	}()
+	for !h.s.isQuitting() {
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	if err := <-quitDone; err != nil {
+		t.Fatalf("Quit: %v", err)
+	}
+	for name, errc := range map[string]<-chan error{
+		"queued before Quit": early,
+		"after Quit":         h.s.RunSetup(func(*gitsync.Repo) error { return nil }),
+	} {
+		select {
+		case err := <-errc:
+			if !errors.Is(err, errStopped) {
+				t.Fatalf("RunSetup %s = %v, want errStopped", name, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("RunSetup %s never answered", name)
+		}
+	}
+}
+
+func TestNoGoroutinesLeftAfterQuitWithoutStart(t *testing.T) {
+	env := gittest.New(t)
+	s := New(env.Laptop, config.Default(), &fakeHost{}, newFakeClock())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.Quit(ctx, true); err != nil {
+		t.Fatalf("Quit: %v", err)
+	}
+	waitStopped(s) // hangs (test timeout) if the worker leaked
+}
+
+func TestStartLinksContextAfterEarlyRunSetup(t *testing.T) {
+	repo := newLocalRepo(t)
+	s := New(repo, config.Default(), &fakeHost{}, newFakeClock())
+	if err := <-s.RunSetup(func(*gitsync.Repo) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Start(ctx)
+	s.waitIdle()
+	cancel()
+	waitStopped(s) // hangs (test timeout) if Start did not link its context
 }
 
 func TestRunSetupSerializedWithCycles(t *testing.T) {
