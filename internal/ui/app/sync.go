@@ -143,7 +143,11 @@ func (m *Model) handleSyncUpdate(u syncer.Update) tea.Cmd {
 		if u.Conflicted != nil {
 			m.setConflicted(pathSet(u.Conflicted))
 		}
-	case len(m.conflicted) > 0:
+	case len(m.conflicted) > 0 && !m.syncerInConflict():
+		// Updates may lag behind the host calls: a Merging update
+		// emitted before the merge conflicted can arrive after the
+		// unlock that reported the conflicts. Only a syncer that has
+		// really left Conflict makes the notes editable again.
 		m.setConflicted(nil)
 	}
 	if len(u.Reindex) > 0 {
@@ -164,6 +168,12 @@ func (m *Model) handleSyncUpdate(u syncer.Update) tea.Cmd {
 		m.authShown = false
 	}
 	return tea.Batch(cmds...)
+}
+
+// syncerInConflict reports whether the syncer is in Conflict right now (its
+// current state, not the last update received).
+func (m *Model) syncerInConflict() bool {
+	return m.syncSvc != nil && m.syncSvc.Status().State == syncer.Conflict
 }
 
 // pathSet turns a path list into a set (nil for none).

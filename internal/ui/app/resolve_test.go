@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mathieucroset/notty/internal/gitsync/gittest"
+	"github.com/mathieucroset/notty/internal/syncer"
 	"github.com/mathieucroset/notty/internal/ui/history"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/palette"
@@ -180,6 +181,24 @@ func TestWritePathsRefuseFolderWithConflict(t *testing.T) {
 	}
 	if m.overlayOpen() {
 		t.Error("trash dialog opened for a folder holding a conflict")
+	}
+}
+
+func TestStaleSyncUpdateKeepsConflicts(t *testing.T) {
+	// The Merging update of a merge that conflicted can arrive after the
+	// unlock that reported the conflicted set (spec §7: no ordering between
+	// updates and host calls): it must not make the notes editable again.
+	_, m, _ := conflictEnv(t)
+	run(t, m, syncUpdateMsg{u: syncer.Update{Status: syncer.Status{State: syncer.Merging}}})
+	if !m.isConflicted("README.md") {
+		t.Fatalf("a stale Merging update cleared the conflicts: %v", m.conflicted)
+	}
+	// Without a syncer in Conflict, a later update clears them.
+	m2 := start(t, testOptions(t), 120, 30)
+	m2.setConflicted(map[string]bool{"ideas.md": true})
+	run(t, m2, syncUpdateMsg{u: syncer.Update{Status: syncer.Status{State: syncer.Synced}}})
+	if len(m2.conflicted) != 0 {
+		t.Errorf("conflicts kept without a syncer in Conflict: %v", m2.conflicted)
 	}
 }
 
