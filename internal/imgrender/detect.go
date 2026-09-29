@@ -91,6 +91,10 @@ var (
 //
 // Inside tmux (TMUX set), run("tmux", "show", "-gv", "allow-passthrough")
 // must print "on" or "all"; otherwise everything falls back to half-blocks.
+// Detect calls run synchronously, so run must be time-bounded (for example
+// exec.CommandContext with a short timeout). The Kitty query is wrapped with
+// [WrapTmux] so it reaches the outer terminal; tmux answers DA1 and CSI 16 t
+// itself.
 //
 // Reads from tty are always bounded, so no Read is ever left pending after
 // Detect returns (the tty stays usable for Bubble Tea): a tty implementing
@@ -136,7 +140,7 @@ func Detect(cfgProtocol string, env func(string) string, tty io.ReadWriter, run 
 	}
 
 	if tty != nil {
-		r := queryTTY(tty)
+		r := queryTTY(tty, env("TMUX") != "")
 		if !configured {
 			kitty = kitty || r.kitty
 			sixel = sixel || r.sixel
@@ -243,14 +247,19 @@ func boundedReader(tty io.Reader) (read func(p []byte, deadline time.Time) (int,
 
 // queryTTY writes the capability queries and collects the replies until the
 // DA1 answer arrives or queryTimeout passes. It never leaves a Read pending
-// and does not query a tty whose reads it cannot bound.
-func queryTTY(tty io.ReadWriter) ttyReplies {
+// and does not query a tty whose reads it cannot bound. Inside tmux the
+// Kitty query goes through tmux passthrough.
+func queryTTY(tty io.ReadWriter, inTmux bool) ttyReplies {
 	read, cleanup := boundedReader(tty)
 	if read == nil {
 		return ttyReplies{}
 	}
 	defer cleanup()
-	if _, err := tty.Write([]byte(kittyQuery + cellQuery + da1Query)); err != nil {
+	kq := kittyQuery
+	if inTmux {
+		kq = WrapTmux(kittyQuery)
+	}
+	if _, err := tty.Write([]byte(kq + cellQuery + da1Query)); err != nil {
 		return ttyReplies{}
 	}
 	deadline := time.Now().Add(queryTimeout)
