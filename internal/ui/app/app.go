@@ -110,6 +110,12 @@ type Model struct {
 	indexing bool
 	// filterTag is the tag the sidebar tree is filtered by, or "".
 	filterTag string
+
+	// tree is the last vault tree read.
+	tree *vault.Node
+	// pendingSelect is a path to select in the sidebar once the next tree
+	// refresh lands (a note or folder just created, renamed or moved).
+	pendingSelect string
 	note    note
 	openSeq int // number of the latest open request
 	sync    msgs.SyncStatusMsg
@@ -179,7 +185,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, errorToast("Could not read the vault: %v", msg.err)
 		}
+		m.tree = msg.root
 		m.sidebar.SetTree(msg.root)
+		if m.pendingSelect != "" {
+			m.sidebar.Select(m.pendingSelect)
+			m.pendingSelect = ""
+			return m, m.syncExpanded()
+		}
 		return m, nil
 
 	case msgs.OpenNoteMsg:
@@ -240,6 +252,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyFilter()
 	case msgs.TogglePinMsg:
 		return m, m.togglePin(msg.Path)
+	case msgs.RequestNewNote:
+		return m, m.requestNewNote(msg.Folder)
+	case msgs.RequestNewFolder:
+		return m, m.requestNewFolder(msg.Parent)
+	case msgs.RequestRename:
+		return m, m.requestRename(msg.Path)
+	case msgs.RequestMove:
+		return m, m.requestMove(msg.Path)
+	case msgs.RequestTrash:
+		return m, m.requestTrash(msg.Path)
+	case fileOpMsg:
+		return m, m.handleFileOp(msg)
+	case msgs.OpenFileExternalMsg:
+		return m, m.openExternal(msg.Path)
+	case externalDoneMsg:
+		return m, m.handleExternalDone(msg)
+	case noteReloadedMsg:
+		m.handleNoteReloaded(msg)
 	case dialog.ResultMsg:
 		return m, m.handleDialogResult(msg)
 	default:
