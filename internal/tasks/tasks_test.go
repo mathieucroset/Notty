@@ -203,3 +203,49 @@ func TestFindLine(t *testing.T) {
 		t.Errorf("trimmed-equal FindLine = %d,%v want 0,true", line, ok)
 	}
 }
+
+// TestFindLineConsistentComparison verifies the fallback scan uses the same
+// exact-or-trimmed-equal comparison as the in-place check, not a stricter
+// exact-only comparison.
+func TestFindLineConsistentComparison(t *testing.T) {
+	lines := []string{
+		"- [ ] alpha",
+		"  - [ ] drifted  ",
+		"- [x] gamma",
+	}
+	// "- [ ] drifted" (no surrounding whitespace) is not present verbatim
+	// anywhere, but line 1 is trimmed-equal to it. The fallback scan must
+	// find it using the same trimmed comparison as the in-place check.
+	line, ok := FindLine(lines, 0, "- [ ] drifted")
+	if !ok || line != 1 {
+		t.Errorf("FindLine with trimmed-equal fallback = %d,%v want 1,true", line, ok)
+	}
+}
+
+func TestFenceIndentRule(t *testing.T) {
+	// Per CommonMark, a fence delimiter indented 4 or more spaces is not a
+	// fence (it would be an indented code block instead); Parse should not
+	// treat it as one, so the task lines "inside" it are parsed normally.
+	content := strings.Join([]string{
+		"- [ ] before",           // 0
+		"    ```",                // 1 (4 spaces: not a fence)
+		"- [ ] not fenced",       // 2
+		"    ```",                // 3 (4 spaces: not a fence)
+		"- [ ] after",            // 4
+		"   ```",                 // 5 (3 spaces: is a fence)
+		"- [ ] really fenced",    // 6
+		"   ```",                 // 7 (3 spaces: closes the fence)
+		"- [ ] after real fence", // 8
+	}, "\n")
+
+	got := Parse(content)
+	wantLines := []int{0, 2, 4, 8}
+	if len(got) != len(wantLines) {
+		t.Fatalf("Parse() returned %d tasks, want %d: %+v", len(got), len(wantLines), got)
+	}
+	for i, l := range wantLines {
+		if got[i].Line != l {
+			t.Errorf("task[%d].Line = %d, want %d", i, got[i].Line, l)
+		}
+	}
+}

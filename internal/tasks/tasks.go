@@ -71,15 +71,13 @@ func Parse(content string) []Task {
 	lines := strings.Split(content, "\n")
 	var result []Task
 	inFence := false
-	var fenceChar byte
+	var fenceMark byte
 	for i, line := range lines {
-		trimmed := strings.TrimLeft(line, " \t")
-		if isFenceDelim(trimmed) {
-			ch := trimmed[0]
+		if ch, ok := fenceDelim(line); ok {
 			if !inFence {
 				inFence = true
-				fenceChar = ch
-			} else if ch == fenceChar {
+				fenceMark = ch
+			} else if ch == fenceMark {
 				inFence = false
 			}
 			continue
@@ -95,17 +93,42 @@ func Parse(content string) []Task {
 	return result
 }
 
-// isFenceDelim reports whether s (already left-trimmed) opens or closes a
-// fenced code block: a run of at least 3 backticks or tildes.
-func isFenceDelim(s string) bool {
-	if len(s) < 3 {
-		return false
+// fenceDelim reports whether line opens or closes a fenced code block: a
+// run of at least 3 backticks or tildes preceded by at most 3 leading
+// spaces of indentation, per CommonMark (4 or more leading spaces makes it
+// an indented code block instead, not a fence). A leading tab counts as
+// advancing to the next multiple of 4.
+func fenceDelim(line string) (byte, bool) {
+	width := 0
+	i := 0
+loop:
+	for i < len(line) {
+		switch line[i] {
+		case ' ':
+			width++
+			i++
+		case '\t':
+			width += 4 - (width % 4)
+			i++
+		default:
+			break loop
+		}
 	}
-	c := s[0]
+	if width > 3 {
+		return 0, false
+	}
+	rest := line[i:]
+	if len(rest) < 3 {
+		return 0, false
+	}
+	c := rest[0]
 	if c != '`' && c != '~' {
-		return false
+		return 0, false
 	}
-	return s[0] == c && s[1] == c && s[2] == c
+	if rest[0] == c && rest[1] == c && rest[2] == c {
+		return c, true
+	}
+	return 0, false
 }
 
 // ToggleLine toggles the checkbox on line.
@@ -182,16 +205,14 @@ func Progress(lines []string, headingLine int) (done, total int) {
 	}
 
 	inFence := false
-	var fenceChar byte
+	var fenceMark byte
 	// Establish fence state up to and including headingLine.
 	for i := 0; i <= headingLine; i++ {
-		trimmed := strings.TrimLeft(lines[i], " \t")
-		if isFenceDelim(trimmed) {
-			ch := trimmed[0]
+		if ch, ok := fenceDelim(lines[i]); ok {
 			if !inFence {
 				inFence = true
-				fenceChar = ch
-			} else if ch == fenceChar {
+				fenceMark = ch
+			} else if ch == fenceMark {
 				inFence = false
 			}
 		}
@@ -199,13 +220,11 @@ func Progress(lines []string, headingLine int) (done, total int) {
 
 	for i := headingLine + 1; i < len(lines); i++ {
 		line := lines[i]
-		trimmed := strings.TrimLeft(line, " \t")
-		if isFenceDelim(trimmed) {
-			ch := trimmed[0]
+		if ch, ok := fenceDelim(line); ok {
 			if !inFence {
 				inFence = true
-				fenceChar = ch
-			} else if ch == fenceChar {
+				fenceMark = ch
+			} else if ch == fenceMark {
 				inFence = false
 			}
 			continue
@@ -229,22 +248,25 @@ func Progress(lines []string, headingLine int) (done, total int) {
 // FindLine locates the line for a toggle request identified by (line, text),
 // per spec §5 "Toggling a task from outside the editor": if lines[line] is a
 // task whose Raw equals text (exactly or after trimming), that line is
-// returned. Otherwise, every line is searched for an exact Raw match, and
-// the match nearest to line wins. If nothing matches, returns false.
+// returned. Otherwise, every line is searched using the same comparison for
+// a match, and the match nearest to line wins. If nothing matches, returns
+// false.
 func FindLine(lines []string, line int, text string) (int, bool) {
+	matches := func(s string) bool {
+		return s == text || strings.TrimSpace(s) == strings.TrimSpace(text)
+	}
+
 	if line >= 0 && line < len(lines) {
 		candidate := lines[line]
-		if _, ok := ParseLine(candidate); ok {
-			if candidate == text || strings.TrimSpace(candidate) == strings.TrimSpace(text) {
-				return line, true
-			}
+		if _, ok := ParseLine(candidate); ok && matches(candidate) {
+			return line, true
 		}
 	}
 
 	best := -1
 	bestDist := 0
 	for i, l := range lines {
-		if l != text {
+		if !matches(l) {
 			continue
 		}
 		dist := i - line
