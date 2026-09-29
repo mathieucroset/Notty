@@ -1,0 +1,174 @@
+package vault
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// lockPollInterval is how often AcquireLock retries a held lock.
+const lockPollInterval = 100 * time.Millisecond
+
+// corruptLockGrace is how long an unparsable lock file is treated as held
+// (its creator may still be writing it) before it counts as stale.
+const corruptLockGrace = 2 * time.Second
+
+// Lock is a held vault instance lock: the file .notty/lock (spec §9).
+type Lock struct {
+	path    string
+	content string // what we wrote, "pid host\n"
+}
+
+// ErrLocked means another Notty process holds the vault lock. Pid is 0
+// and Host empty when the lock file could not be parsed.
+type ErrLocked struct {
+	Pid  int
+	Host string
+}
+
+func (e ErrLocked) Error() string {
+	switch {
+	case e.Pid > 0 && e.Host != "":
+		return fmt.Sprintf("vault is open in another Notty (pid %d on %s)", e.Pid, e.Host)
+	case e.Pid > 0:
+		return fmt.Sprintf("vault is open in another Notty (pid %d)", e.Pid)
+	default:
+		return "vault is open in another Notty"
+	}
+}
+
+// AcquireLock takes the instance lock of the vault at root by creating
+// .notty/lock exclusively, containing "<pid> <host>\n". If another process
+// holds it, AcquireLock retries every 100ms until wait has elapsed and then
+// returns ErrLocked (wait 0 means a single attempt).
+//
+// A lock is stale, and taken over, when it names this host and a process
+// that is no longer running, when it has been unparsable for more than a
+// couple of seconds, or when it is a dangling symlink. Takeover re-checks the file just before removing it;
+// two processes taking over the same stale lock at the same instant could
+// still both succeed.
+func AcquireLock(root string, wait time.Duration) (*Lock, error) {
+	dir := filepath.Join(root, ".notty")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("vault: lock: %w", err)
+	}
+	host := shortHostname()
+	l := &Lock{
+		path:    filepath.Join(dir, "lock"),
+		content: fmt.Sprintf("%d %s\n", os.Getpid(), host),
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		err := createLock(l.path, l.content)
+		if err == nil {
+			return l, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, fmt.Errorf("vault: lock: %w", err)
+		}
+		held, seen, err := readLockFile(l.path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			// Either released since our attempt (retry at once), or a
+			// dangling symlink, which is stale: remove the link itself.
+			if _, lerr := os.Lstat(l.path); lerr == nil {
+				if err := os.Remove(l.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return nil, fmt.Errorf("vault: lock: remove dangling lock: %w", err)
+				}
+			}
+			continue
+		case err != nil:
+			return nil, fmt.Errorf("vault: lock: %w", err)
+		case isStale(l.path, held, host):
+			if err := removeIfUnchanged(l.path, seen); err != nil {
+				return nil, fmt.Errorf("vault: lock: remove stale lock: %w", err)
+			}
+			continue
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, held
+		}
+		time.Sleep(min(lockPollInterval, remaining))
+	}
+}
+
+// createLock creates path exclusively and writes content to it.
+func createLock(path, content string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(content)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(path)
+	}
+	return err
+}
+
+// readLockFile returns the holder named by the lock file ("<pid> <host>",
+// the host being the rest of the line) and its raw content. An unparsable
+// file yields a zero ErrLocked and no error.
+func readLockFile(path string) (ErrLocked, []byte, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ErrLocked{}, nil, err
+	}
+	pidText, host, ok := strings.Cut(strings.TrimSpace(string(b)), " ")
+	host = strings.TrimSpace(host)
+	pid, err := strconv.Atoi(pidText)
+	if !ok || host == "" || err != nil || pid <= 0 {
+		return ErrLocked{}, b, nil
+	}
+	return ErrLocked{Pid: pid, Host: host}, b, nil
+}
+
+// isStale reports whether the lock held by holder can be taken over.
+func isStale(path string, holder ErrLocked, host string) bool {
+	if holder.Pid == 0 { // unparsable
+		fi, err := os.Lstat(path)
+		return err == nil && time.Since(fi.ModTime()) > corruptLockGrace
+	}
+	return holder.Host == host && !processAlive(holder.Pid)
+}
+
+// removeIfUnchanged removes path if it still holds exactly seen. A file that
+// changed or vanished meanwhile is left alone without error.
+func removeIfUnchanged(path string, seen []byte) error {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && !bytes.Equal(b, seen)) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// Release gives up the lock. The file is removed only if it still contains
+// what this Lock wrote, so a lock taken over by another process survives.
+// Releasing twice, or a nil Lock, is a no-op.
+func (l *Lock) Release() error {
+	if l == nil {
+		return nil
+	}
+	if err := removeIfUnchanged(l.path, []byte(l.content)); err != nil {
+		return fmt.Errorf("vault: release lock: %w", err)
+	}
+	return nil
+}
