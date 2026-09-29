@@ -2,6 +2,7 @@ package theme
 
 import (
 	"image/color"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 
@@ -35,9 +36,12 @@ type Styles struct {
 	SidebarDim             lipgloss.Style
 
 	// General-purpose.
-	Muted  lipgloss.Style
-	Accent lipgloss.Style
-	Chip   lipgloss.Style
+	// Section is a section header (Subtext bold), drawn over the text of
+	// SectionTitle: the sidebar's, the Tasks view's and the help's.
+	Section lipgloss.Style
+	Muted   lipgloss.Style
+	Accent  lipgloss.Style
+	Chip    lipgloss.Style
 
 	// Dialogs and overlays.
 	Dialog      lipgloss.Style
@@ -128,6 +132,9 @@ func NewStyles(p Palette) Styles {
 		SidebarDim: lipgloss.NewStyle().
 			Foreground(p.Muted),
 
+		Section: lipgloss.NewStyle().
+			Foreground(p.Subtext).
+			Bold(true),
 		Muted:  lipgloss.NewStyle().Foreground(p.Muted),
 		Accent: lipgloss.NewStyle().Foreground(p.Accent),
 		Chip: lipgloss.NewStyle().
@@ -166,4 +173,14 @@ func NewStyles(p Palette) Styles {
 func (s Styles) WithIcons(set icons.Set) Styles {
 	s.Icons = set
 	return s
+}
+
+// SectionTitle spells a section header in letter-spaced capitals (spec
+// §4): "Notes" becomes "N O T E S", and words are three spaces apart.
+func SectionTitle(s string) string {
+	words := strings.Fields(strings.ToUpper(s))
+	for i, w := range words {
+		words[i] = strings.Join(strings.Split(w, ""), " ")
+	}
+	return strings.Join(words, "   ")
 }

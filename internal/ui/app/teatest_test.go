@@ -20,7 +20,7 @@ func TestProgramStartsAndQuits(t *testing.T) {
 
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
 		s := ansi.Strip(string(b))
-		for _, want := range []string{"Notty", "NOTES", "Standup", "ideas", "NORMAL", "F1", "help"} {
+		for _, want := range []string{"Notty", "N O T E S", "Standup", "ideas", "NORMAL", "F1", "help"} {
 			if !strings.Contains(s, want) {
 				return false
 			}

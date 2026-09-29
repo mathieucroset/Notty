@@ -37,7 +37,7 @@ func TestTasksView(t *testing.T) {
 		t.Fatalf("MainView = %v, focus = %v", m.MainView(), m.Focus())
 	}
 	s := screen(m)
-	for _, want := range []string{"Tasks · 2 open", "OVERDUE", "write report", "buy milk"} {
+	for _, want := range []string{"Tasks · 2 open", "O V E R D U E", "write report", "buy milk"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("tasks view missing %q:\n%s", want, s)
 		}
@@ -116,9 +116,9 @@ func TestTasksViewOpenAndBack(t *testing.T) {
 func TestTasksToggleFlow(t *testing.T) {
 	opts := tasksOptions(t)
 	tm := teatest.NewTestModel(t, New(opts), teatest.WithInitialTermSize(120, 30))
-	waitScreen(t, tm, "NOTES")
+	waitScreen(t, tm, "N O T E S")
 	tm.Send(msgs.ActivateEntryMsg{Entry: msgs.EntryTasks})
-	waitScreen(t, tm, "OVERDUE", "write report")
+	waitScreen(t, tm, "O V E R D U E", "write report")
 	tm.Send(spaceKey)
 	eventually(t, func() bool {
 		return strings.Contains(readFile(t, opts.Vault, "Work/Todo.md"), "- [x] write report")

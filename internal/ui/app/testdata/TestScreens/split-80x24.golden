@@ -1,14 +1,14 @@
 ╭─ ◆ Notty ────────────────╮╭─ Work / Standup notes ─────────────────── split ─╮
-│  PINNED                  ││ # Standup notes        │  Standup notes          │
+│  P I N N E D             ││ # Standup notes        │  Standup notes          │
 │  ★ Standup notes         ││                        │                         │
 │                          ││ - shipped **auth**     │ • shipped auth flow     │
-│  NOTES                   ││ flow                   │ ☐ follow up with        │
+│  N O T E S               ││ flow                   │ ☐ follow up with        │
 │  ▸ Personal              ││ ☐ follow up with       │ #design                 │
 │  ▾ Work                  ││ #design                │ ☑ review the PR #todo   │
 │    • Standup notes       ││ ☑ review the PR #todo  │                         │
 │  • ideas                 ││                        │ │ Keep it short.        │
 │                          ││ ▎ Keep it short.       │                         │
-│  TAGS                    ││                        │ ## Next                 │
+│  T A G S                 ││                        │ ## Next                 │
 │   #design 1   #life 1    ││ ## Next                │                         │
 │   #todo 1                ││                        │ Plan the sprint demo.   │
 │                          ││ Plan the *sprint*      │                         │

@@ -153,7 +153,8 @@ func (m Model) twoColumn(width int) []string {
 
 // formatSection renders sec's title and rows to lines of exactly width,
 // with the key column styled Accent and the description left plain. The
-// section title uses SidebarSection, and a blank line follows for spacing.
+// section title is a letter-spaced Section header, and a blank line
+// follows for spacing.
 //
 // The key column's width is the longest Keys string in the section, capped
 // at a fraction of width so a single long multi-key label (e.g. vim text
@@ -163,7 +164,7 @@ func (m Model) twoColumn(width int) []string {
 func formatSection(sec Section, styles theme.Styles, width int) []string {
 	keyWidth := sectionKeyWidth(sec, width)
 
-	lines := []string{padLine(styles.SidebarSection.Render(sec.Title), width)}
+	lines := []string{padLine(styles.Section.Render(theme.SectionTitle(sec.Title)), width)}
 	for _, r := range sec.Rows {
 		lines = append(lines, formatRow(r, styles, width, keyWidth)...)
 	}

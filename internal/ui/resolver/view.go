@@ -10,6 +10,7 @@ import (
 
 	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/textutil"
+	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
 // Layout constants.
@@ -155,7 +156,7 @@ func (m Model) fileList(w, h int) []string {
 		}
 		entries = append(entries, e)
 	}
-	out := []string{m.styles.SidebarSection.Render(" Files")}
+	out := []string{m.styles.Section.Render(" " + theme.SectionTitle("Files"))}
 	// Window the entries so the selected one is visible.
 	avail := h - 1
 	start, used := 0, 0

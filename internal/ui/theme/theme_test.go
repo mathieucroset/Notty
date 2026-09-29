@@ -12,6 +12,31 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/icons"
 )
 
+func TestSectionTitle(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"notes", "N O T E S"},
+		{"PINNED", "P I N N E D"},
+		{"Due soon", "D U E   S O O N"},
+		{"Editor · insert", "E D I T O R   ·   I N S E R T"},
+		{"  Tags  ", "T A G S"},
+		{"Rosé", "R O S É"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := SectionTitle(tt.in); got != tt.want {
+			t.Errorf("SectionTitle(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestSectionStyle(t *testing.T) {
+	p, _ := Get("catppuccin-mocha")
+	st := NewStyles(p)
+	if st.Section.GetForeground() != p.Subtext || !st.Section.GetBold() {
+		t.Errorf("Section is not Subtext bold: fg %v bold %v", st.Section.GetForeground(), st.Section.GetBold())
+	}
+}
+
 func TestStylesCarryIcons(t *testing.T) {
 	p, _ := Get("nord")
 	tests := []struct {

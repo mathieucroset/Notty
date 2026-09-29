@@ -419,7 +419,7 @@ func TestRenderSnapshot(t *testing.T) {
 	if len(lines) != 10 {
 		t.Fatalf("got %d lines, want 10:\n%s", len(lines), got)
 	}
-	if !strings.Contains(lines[0], "OVERDUE") {
+	if !strings.Contains(lines[0], "O V E R D U E") {
 		t.Errorf("line 0 = %q, want OVERDUE header", lines[0])
 	}
 	if !strings.Contains(lines[1], "send invoice") || !strings.Contains(lines[1], "@09-27") || !strings.Contains(lines[1], "Work/admin") {

@@ -703,7 +703,7 @@ func (m Model) row(it item, selected bool) string {
 
 	switch it.kind {
 	case kindHeader:
-		s := m.styles.SidebarSection.Render("  " + it.text)
+		s := m.styles.Section.Render("  " + theme.SectionTitle(it.text))
 		if it.text == "NOTES" && m.filter != nil {
 			s += m.styles.Muted.Render(" · filtered")
 		}

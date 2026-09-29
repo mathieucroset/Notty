@@ -1,14 +1,14 @@
 ╭─ ◆ Notty ────────────────╮╭─ Work / Standup notes ───────────────────────────╮
-│  PINNED                  ││ # Standup notes                                  │
+│  P I N N E D             ││ # Standup notes                                  │
 │  ★ Standup notes         ││                                                  │
 │                          ││ - shipped **auth** flow                          │
-│  NOTES                   ││ ☐ follow up with #design                         │
+│  N O T E S               ││ ☐ follow up with #design                         │
 │  ▸ Perso╭──────────────────────────────────────────────────────────╮         │
 │  ▾ Work │                                                          │         │
 │    • Sta│  › ▏                                                     │         │
 │  • ideas│  New note                                   n · sidebar  │         │
 │         │  New folder                                 N · sidebar  │         │
-│  TAGS   │  Switch theme                                            │         │
+│  T A G S│  Switch theme                                            │         │
 │   #desig│  Toggle vim                                              │         │
 │   #todo │  Toggle line numbers                                     │         │
 │         │  Sync now                                                │         │

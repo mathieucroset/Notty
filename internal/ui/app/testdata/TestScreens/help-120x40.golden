@@ -1,34 +1,34 @@
 ╭─ ◆ Notty ────────────────╮╭─ Work / Standup notes ───────────────────────────────────────────────────────────────────╮
-│  PINNED                  ││ # Standup notes                                                                          │
+│  P I N N E D             ││ # Standup notes                                                                          │
 │  ★ Standup notes         ││                                                                                          │
 │     ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────╮     │
-│  NOT│                                                                                                          │     │
-│  ▸ P│  Global                                             Editor · read-only                                   │     │
+│  N O│                                                                                                          │     │
+│  ▸ P│  G L O B A L                                        E D I T O R   ·   R E A D - O N L Y                  │     │
 │  ▾ W│  ctrl+p fuzzy finder                                motions move and scroll                              │     │
 │    •│  ctrl+f full-text search                            /       search                                       │     │
 │  • i│  ctrl+k command palette                             y       yank / copy                                  │     │
 │     │  ctrl+b toggle sidebar (zen layout)                 tab     focus sidebar                                │     │
-│  TAG│  ctrl+g cycle editor / split / preview              c       open resolver on this file                   │     │
+│  T A│  ctrl+g cycle editor / split / preview              c       open resolver on this file                   │     │
 │   #d│  ctrl+s save                                                                                             │     │
-│   #t│  ctrl+e open note in $EDITOR                        Preview                                              │     │
+│   #t│  ctrl+e open note in $EDITOR                        P R E V I E W                                        │     │
 │     │  ctrl+q quit                                        j/k      scroll                                      │     │
 │  ☐ T│  F1     help                                        ctrl+d/u half-page down / up                         │     │
 │  ⌫ T│                                                     gg G     top / bottom                                │     │
-│     │  Sidebar                                            ]t [t    next / previous task                        │     │
+│     │  S I D E B A R                                      ]t [t    next / previous task                        │     │
 │     │  j/↓   move down                                    space    toggle highlighted task                     │     │
 │     │  k/↑   move up                                      ]i [i    next / previous image                       │     │
 │     │  h/←   collapse folder / go to parent               enter    open image viewer                           │     │
 │     │  l/→   expand folder                                tab      focus sidebar                               │     │
 │     │  enter open note, toggle folder, open entry         ?        help                                        │     │
 │     │  tab   focus main pane                                                                                   │     │
-│     │  n     new note                                     Tasks                                                │     │
+│     │  n     new note                                     T A S K S                                            │     │
 │     │  N     new folder                                   j/k   move                                           │     │
 │     │  r     rename                                       space toggle task                                    │     │
 │     │  m     move                                         enter open note at task                              │     │
 │     │  d     delete (move to trash)                       tab   focus sidebar                                  │     │
 │     │  p     pin / unpin                                  esc   back to note                                   │     │
 │     │  H     note history                                                                                      │     │
-│     │  #     filter by tag                                Trash                                                │     │
+│     │  #     filter by tag                                T R A S H                                            │     │
 │     │  esc   clear tag filter                             j/k   move                                           │     │
 │     │  c     open resolver                                enter restore                                        │     │
 │     │  !     error log                                    D     delete permanently                             │     │

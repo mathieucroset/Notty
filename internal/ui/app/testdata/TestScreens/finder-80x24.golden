@@ -1,14 +1,14 @@
 ╭─ ◆ Notty ────────────────╮╭─ Work / Standup notes ───────────────────────────╮
-│  PINNED                  ││ # Standup notes                                  │
+│  P I N N E D             ││ # Standup notes                                  │
 │  ★ Standup notes         ││                                                  │
 │                          ││ - shipped **auth** flow                          │
-│  NOTES╭──────────────────────────────────────────────────────────────╮       │
+│  N O T╭──────────────────────────────────────────────────────────────╮       │
 │  ▸ Per│ Find note                                                    │       │
 │  ▾ Wor│ › ▏                                                          │       │
 │    • S│ Recent                                                       │       │
 │  • ide│ Standup notes             │                                  │       │
 │       │  Work/Standup notes.md    │ Standup notes                    │       │
-│  TAGS │                           │                                  │       │
+│  T A G│                           │                                  │       │
 │   #des│                           │• shipped auth flow               │       │
 │   #tod│                           │☐ follow up with #design          │       │
 │       │                           │☑ review the PR #todo             │       │

@@ -508,9 +508,9 @@ func padLine(s string, w int) string {
 func (m Model) renderHeader(it item) string {
 	switch it.group {
 	case groupOverdue:
-		return padLine(m.styles.Error.Bold(true).Render(it.header), m.width)
+		return padLine(m.styles.Error.Bold(true).Render(theme.SectionTitle(it.header)), m.width)
 	case groupDueSoon:
-		return padLine(m.styles.Warning.Bold(true).Render(it.header), m.width)
+		return padLine(m.styles.Warning.Bold(true).Render(theme.SectionTitle(it.header)), m.width)
 	default:
 		label := it.header
 		count := fmt.Sprintf("%d/%d", it.done, it.total)
@@ -523,7 +523,7 @@ func (m Model) renderHeader(it item) string {
 		if gap < 1 {
 			gap = 1
 		}
-		line := m.styles.SidebarSection.Render(label) + strings.Repeat(" ", gap) + m.styles.Muted.Render(count)
+		line := m.styles.Section.Render(label) + strings.Repeat(" ", gap) + m.styles.Muted.Render(count)
 		return padLine(line, m.width)
 	}
 }

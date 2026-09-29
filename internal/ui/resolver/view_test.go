@@ -58,7 +58,7 @@ func TestViewContent120(t *testing.T) {
 	m := newModel(t, 120, 40, allKinds()...)
 	v := plain(m)
 	for _, want := range []string{
-		"Resolve conflicts", "1 of 6 files resolved", "Files",
+		"Resolve conflicts", "1 of 6 files resolved", "F I L E S",
 		"notes/meeting.md", "✓", "●", "Yours", "Theirs", "Result",
 		"]c/[c", "esc close",
 	} {

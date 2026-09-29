@@ -1,8 +1,8 @@
 ╭─ ◆ Notty ────────────────╮╭─ Work / Standup notes ───────────────────────────╮
-│  PINNED                  ││ # Standup notes                                  │
+│  P I N N E D             ││ # Standup notes                                  │
 │  ★╭──────────────────────────────────────────────────────────────────────╮   │
 │   │                                                                      │   │
-│  N│  Global                                                              │   │
+│  N│  G L O B A L                                                         │   │
 │  ▸│  ctrl+p fuzzy finder                                                 │   │
 │  ▾│  ctrl+f full-text search                                             │   │
 │   │  ctrl+k command palette                                              │   │
@@ -13,7 +13,7 @@
 │   │  ctrl+q quit                                                         │   │
 │   │  F1     help                                                         │   │
 │  ☐│                                                                      │   │
-│  ⌫│  Sidebar                                                             │   │
+│  ⌫│  S I D E B A R                                                       │   │
 │   │  j/↓   move down                                                     │   │
 │   │  k/↑   move up                                                       │   │
 │   │  h/←   collapse folder / go to parent                                │   │
