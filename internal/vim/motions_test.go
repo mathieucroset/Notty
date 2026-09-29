@@ -110,8 +110,51 @@ func TestMotions(t *testing.T) {
 		{"0 after count is count digit", "|abcdefghijklm", "10l0", "|abcdefghijklm"},
 		// grapheme columns
 		{"l over emoji", "|a👍b", "ll", "a👍|b"},
-		{"j keeps grapheme col", "a👍|b\nxyz", "j", "a👍b\nxy|z"},
 	})
+}
+
+// TestDisplayColumn checks that the desired column of vertical motions is
+// measured in display cells (CJK is 2 cells, tabs stop every TabWidth).
+func TestDisplayColumn(t *testing.T) {
+	runEditCases(t, []editCase{
+		{"j into CJK", "ab|c\n日本語", "j", "abc\n日|本語"},
+		{"j out of CJK", "日本|語\nabcdef", "j", "日本語\nabcd|ef"},
+		{"j k round trip", "日|本語\nabcdef", "jk", "日|本語\nabcdef"},
+		{"j after emoji", "a👍|b\nxyzw", "j", "a👍b\nxyz|w"},
+		{"j sticky through short CJK line", "abcdef|g\n日本\nabcdefgh", "jj", "abcdefg\n日本\nabcdef|gh"},
+		{"j from after tab", "\tx|y\nabcdefgh", "j", "\txy\nabcde|fgh"},
+		{"j onto tab", "ab|cd\n\txyz", "j", "abcd\n|\txyz"},
+		{"j past tab", "abcd|e\n\txyz", "j", "abcde\n\t|xyz"},
+		{"k keeps cell", "abcdefgh\n\t\t|x", "k", "abcdefg|h\n\t\tx"},
+		{"insert down CJK", "日本語\nabcdefg", "A<down>", "日本語\nabcdef|g"},
+		{"insert up CJK", "日本語\nabc|d", "i<up>", "日|本語\nabcd"},
+	})
+	tests := []struct{ name, in, keys, want string }{
+		{"plain down into CJK", "ab|cd\n日本語", "<down>", "abcd\n日|本語"},
+		{"plain up from CJK", "abcdef\n日本|語", "<up>", "abcd|ef\n日本語"},
+		{"plain down tab", "abcde|f\n\txyz", "<down>", "abcdef\n\tx|yz"},
+	}
+	for _, tt := range tests {
+		_, b, _ := runPlain(t, tt.in, tt.keys)
+		if got := show(b); got != tt.want {
+			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestDisplayColHelpers(t *testing.T) {
+	line := "a\t日x"
+	// cells: a=0, tab=1..3, 日=4..5, x=6
+	for _, tt := range []struct{ col, cell int }{{0, 0}, {1, 1}, {2, 4}, {3, 6}, {4, 7}} {
+		if got := displayCol(line, tt.col); got != tt.cell {
+			t.Errorf("displayCol(%d) = %d, want %d", tt.col, got, tt.cell)
+		}
+	}
+	for _, tt := range []struct{ cell, col int }{{0, 0}, {1, 1}, {3, 1}, {4, 2}, {5, 2}, {6, 3}, {7, 4}, {99, 4}} {
+		if got := colAtCell(line, tt.cell); got != tt.col {
+			t.Errorf("colAtCell(%d) = %d, want %d", tt.cell, got, tt.col)
+		}
+	}
 }
 
 // fakeNav moves by 10-column screen rows on one line.

@@ -39,13 +39,14 @@ func (m *Machine) moveCursor(b *buffer.Buffer, c cmd) {
 	case r.wantEOL:
 		m.curswant = wantEOL
 	case !r.keepWant:
-		m.curswant = r.pos.Col
+		m.curswant = cursorCell(b)
 	}
 }
 
 // vertical returns the position on line l at the desired column.
 func (m *Machine) vertical(b *buffer.Buffer, l int) motionRes {
-	return motionRes{pos: pos(l, normalCol(b, l, m.curswant)), kind: linewise, ok: true, keepWant: true}
+	col := normalCol(b, l, colAtCell(b.Line(l), m.curswant))
+	return motionRes{pos: pos(l, col), kind: linewise, ok: true, keepWant: true}
 }
 
 // evalMotion computes the target of motion c from p. op is the pending

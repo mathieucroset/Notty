@@ -94,7 +94,7 @@ func (m *Machine) execVisual(b *buffer.Buffer, c cmd) {
 		cur := b.Cursor()
 		b.SetCursor(m.anchor)
 		m.anchor = cur
-		m.curswant = b.Cursor().Col
+		m.curswant = cursorCell(b)
 		return
 	}
 	if m.execVisualSpecial(b, c) {
@@ -193,5 +193,5 @@ func (m *Machine) selectTextObject(b *buffer.Buffer, c cmd) {
 	t := newText(b)
 	t.dec(&end)
 	b.SetCursor(end)
-	m.curswant = end.Col
+	m.curswant = cursorCell(b)
 }

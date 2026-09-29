@@ -75,7 +75,7 @@ type Machine struct {
 	mode     Mode
 	readOnly bool
 	pending  []string       // normal/visual keys typed so far
-	curswant int            // desired column for vertical motions
+	curswant int            // desired display column for vertical motions
 	lastPos  buffer.Pos     // cursor when the last key was handled
 	buf      *buffer.Buffer // buffer the state belongs to
 	nav      WrapNavigator
@@ -150,7 +150,7 @@ func (m *Machine) Handle(b *buffer.Buffer, k Key) Effect {
 	m.attach(b)
 	if b.Cursor() != m.lastPos {
 		// Moved from outside (mouse, reload): forget the desired column.
-		m.curswant = b.Cursor().Col
+		m.curswant = cursorCell(b)
 	}
 	defer func() { m.lastPos = b.Cursor() }()
 	if m.mode == Insert {
@@ -448,7 +448,7 @@ func (m *Machine) attach(b *buffer.Buffer) {
 	}
 	m.buf = b
 	m.lastPos = b.Cursor()
-	m.curswant = b.Cursor().Col
+	m.curswant = cursorCell(b)
 }
 
 // idle closes any open change group and returns to normal mode.
@@ -474,7 +474,7 @@ func (m *Machine) Reset(b *buffer.Buffer) {
 	m.buf = b
 	m.clampNormal(b)
 	m.lastPos = b.Cursor()
-	m.curswant = b.Cursor().Col
+	m.curswant = cursorCell(b)
 }
 
 // SetReadOnly toggles read-only mode (conflicted notes). Only motions,

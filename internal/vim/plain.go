@@ -11,7 +11,7 @@ type Plain struct {
 	readOnly  bool
 	selecting bool
 	anchor    buffer.Pos
-	curswant  int
+	curswant  int // desired display column for up / down
 	lastPos   buffer.Pos
 	buf       *buffer.Buffer // buffer the state belongs to
 
@@ -53,7 +53,7 @@ func (p *Plain) attach(b *buffer.Buffer) {
 	}
 	p.buf = b
 	p.lastPos = b.Cursor()
-	p.curswant = b.Cursor().Col
+	p.curswant = cursorCell(b)
 }
 
 // idle closes the typing group and clears the selection.
@@ -70,7 +70,7 @@ func (p *Plain) Reset(b *buffer.Buffer) {
 	p.idle()
 	p.buf = b
 	p.lastPos = b.Cursor()
-	p.curswant = b.Cursor().Col
+	p.curswant = cursorCell(b)
 }
 
 // Selection returns the shift-selection, if any.
@@ -96,7 +96,7 @@ func (p *Plain) Handle(b *buffer.Buffer, k Key) Effect {
 	var eff Effect
 	p.attach(b)
 	if b.Cursor() != p.lastPos {
-		p.curswant = b.Cursor().Col
+		p.curswant = cursorCell(b)
 	}
 	defer func() { p.lastPos = b.Cursor() }()
 
@@ -118,7 +118,7 @@ func (p *Plain) Handle(b *buffer.Buffer, k Key) Effect {
 			} else {
 				b.SetCursor(r.End)
 			}
-			p.curswant = b.Cursor().Col
+			p.curswant = cursorCell(b)
 		} else {
 			p.move(b, tok)
 		}
@@ -181,7 +181,7 @@ func (p *Plain) Handle(b *buffer.Buffer, k Key) Effect {
 		}
 	}
 	if !plainVertical[tok] {
-		p.curswant = b.Cursor().Col
+		p.curswant = cursorCell(b)
 	}
 	return eff
 }
@@ -248,7 +248,7 @@ func (p *Plain) move(b *buffer.Buffer, tok string) {
 		case l > last:
 			cur = lineEnd(b, last)
 		default:
-			cur = pos(l, min(p.curswant, b.LineLen(l)))
+			cur = pos(l, colAtCell(b.Line(l), p.curswant))
 		}
 		b.SetCursor(cur)
 		return

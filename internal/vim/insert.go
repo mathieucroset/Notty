@@ -12,7 +12,7 @@ func (m *Machine) startInsert(b *buffer.Buffer, p buffer.Pos, repeat int) {
 	m.mode = Insert
 	m.insertRepeat = repeat
 	m.sessionKeys = nil
-	m.curswant = b.Cursor().Col
+	m.curswant = cursorCell(b)
 }
 
 // openLine implements o (below) and O (above), keeping the indentation of
@@ -81,7 +81,7 @@ func (m *Machine) insertApply(b *buffer.Buffer, k Key, tok string) {
 			l = cur.Line + 1
 		}
 		if l >= 0 && l < b.LineCount() {
-			b.SetCursor(pos(l, min(m.curswant, b.LineLen(l))))
+			b.SetCursor(pos(l, colAtCell(b.Line(l), m.curswant)))
 		}
 		return // keep the desired column
 	case "<home>", "<s-home>":
@@ -119,7 +119,7 @@ func (m *Machine) insertApply(b *buffer.Buffer, k Key, tok string) {
 			b.SetCursor(b.Insert(cur, k.Text))
 		}
 	}
-	m.curswant = b.Cursor().Col
+	m.curswant = cursorCell(b)
 }
 
 // insertNewline splits the line at the cursor, keeping the indentation.
@@ -164,5 +164,5 @@ func (m *Machine) leaveInsert(b *buffer.Buffer) {
 	}
 	b.SetCursor(p)
 	m.clampNormal(b)
-	m.curswant = b.Cursor().Col
+	m.curswant = cursorCell(b)
 }

@@ -80,7 +80,7 @@ func (m *Machine) doSearch(b *buffer.Buffer, pat string, fwd bool) {
 	r := m.searchMotion(b, b.Cursor(), false, 1)
 	if r.ok {
 		b.SetCursor(r.pos)
-		m.curswant = r.pos.Col
+		m.curswant = cursorCell(b)
 	}
 }
 

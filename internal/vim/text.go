@@ -133,6 +133,52 @@ func isBlank(s string) bool { return strings.TrimSpace(s) == "" }
 // graphemeLen returns the number of grapheme clusters in s.
 func graphemeLen(s string) int { return len(buffer.Graphemes(s)) }
 
+// TabWidth is the tab stop width used to measure display columns for the
+// desired column of vertical motions. The renderer should expand tabs to
+// the same stops.
+const TabWidth = 4
+
+// cellWidth is the number of terminal cells grapheme g takes when it starts
+// at cell x.
+func cellWidth(g string, x int) int {
+	if g == "\t" {
+		return TabWidth - x%TabWidth
+	}
+	return buffer.DisplayWidth(g)
+}
+
+// displayCol returns the display cell where grapheme col of line starts.
+func displayCol(line string, col int) int {
+	x := 0
+	for i, g := range buffer.Graphemes(line) {
+		if i >= col {
+			break
+		}
+		x += cellWidth(g, x)
+	}
+	return x
+}
+
+// colAtCell returns the grapheme of line that covers display cell x, or the
+// number of graphemes if x is past the end of the line.
+func colAtCell(line string, x int) int {
+	gs := buffer.Graphemes(line)
+	c := 0
+	for i, g := range gs {
+		c += cellWidth(g, c)
+		if x < c {
+			return i
+		}
+	}
+	return len(gs)
+}
+
+// cursorCell returns the display cell of the cursor.
+func cursorCell(b *buffer.Buffer) int {
+	p := b.Cursor()
+	return displayCol(b.Line(p.Line), p.Col)
+}
+
 // pos is a shorthand constructor.
 func pos(line, col int) buffer.Pos { return buffer.Pos{Line: line, Col: col} }
 
