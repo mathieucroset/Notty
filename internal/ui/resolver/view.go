@@ -30,7 +30,7 @@ const (
 	footerTextTab  = "]c/[c next/prev · o/t/b choose · u unset · e edit · tab column · enter resolve · j/k files · esc close"
 	footerChoice   = "1-%d choose · enter confirm · j/k files · esc close"
 	footerResolved = "j/k files · esc close"
-	footerEdit     = "ctrl+s accept · esc back (keeps a draft)"
+	footerEdit     = "ctrl+s accept · esc done (keeps the edits)"
 )
 
 // split returns the widths of the file list, the separator and the right
@@ -289,8 +289,6 @@ func (m Model) messageLine(it *item) string {
 		return ""
 	case it.text != nil && it.text.allResolved():
 		return m.styles.Success.Render(" All conflicts resolved · enter writes the result")
-	case it.text != nil && it.text.hasDraft:
-		return m.styles.Muted.Render(" An unsaved edit draft is kept · e resumes it")
 	case it.text != nil:
 		return ""
 	}

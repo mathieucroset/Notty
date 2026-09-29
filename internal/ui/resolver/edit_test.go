@@ -80,7 +80,7 @@ func TestEditPlainCtrlSAccepts(t *testing.T) {
 	}
 }
 
-func TestEditPlainEscKeepsDraft(t *testing.T) {
+func TestEditPlainEscKeepsEdits(t *testing.T) {
 	m := newModel(t, 120, 40, textFile("n.md", base1, ours1, theirs1))
 	m, _ = press(t, m, "e")
 	m = typeText(t, m, "Q")
@@ -89,17 +89,32 @@ func TestEditPlainEscKeepsDraft(t *testing.T) {
 		t.Fatal("esc in plain mode did not leave the editor")
 	}
 	tx := m.items[0].text
-	if tx.edited || !tx.hasDraft {
-		t.Fatalf("edited=%v hasDraft=%v, want a draft only", tx.edited, tx.hasDraft)
+	if !tx.edited || tx.editedText != "a\nQX\nc\n" {
+		t.Fatalf("edited=%v text=%q, want the edit as the result", tx.edited, tx.editedText)
 	}
-	m, _ = press(t, m, "e")
-	if got := m.ed.Content(); got != "a\nQX\nc\n" {
-		t.Fatalf("draft not resumed: %q", got)
+	_, out := press(t, m, "enter")
+	if got := only[ResolveTextMsg](out); len(got) != 1 || string(got[0].Content) != "a\nQX\nc\n" {
+		t.Fatalf("esc then enter produced %v, want the edited content", out)
 	}
-	// Leaving without changes keeps nothing.
-	m, _ = press(t, m, "esc", "t")
-	if m.items[0].text.hasDraft {
-		t.Error("choosing a block should drop the draft")
+}
+
+func TestEditEscWithoutChangesLeavesFileUnresolved(t *testing.T) {
+	m := newModel(t, 120, 40, textFile("n.md", base2, ours2, theirs2))
+	m, _ = press(t, m, "e", "esc")
+	if m.KeyContext() != keys.Resolver {
+		t.Fatal("esc did not leave the editor")
+	}
+	tx := m.items[0].text
+	if tx.edited || tx.resolvedCount() != 0 {
+		t.Fatalf("edited=%v resolved=%d, want nothing changed", tx.edited, tx.resolvedCount())
+	}
+	if _, out := press(t, m, "enter"); len(only[ResolveTextMsg](out)) != 0 {
+		t.Fatal("an unchanged edit made the file resolvable")
+	}
+	// ctrl+s always accepts, even unchanged (the pre-filled result).
+	m, _ = press(t, m, "e", "ctrl+s")
+	if !m.items[0].text.edited || m.items[0].text.editedText != ours2 {
+		t.Fatalf("ctrl+s without changes: edited=%v text=%q", m.items[0].text.edited, m.items[0].text.editedText)
 	}
 }
 
@@ -119,8 +134,8 @@ func TestEditVimEscOnlyFromNormal(t *testing.T) {
 	if m.KeyContext() != keys.Resolver {
 		t.Fatal("esc from normal mode did not leave the editor")
 	}
-	if !m.items[0].text.hasDraft || m.items[0].text.edited {
-		t.Fatal("draft not kept")
+	if !m.items[0].text.edited || m.items[0].text.editedText != "a\nQX\nc\n" {
+		t.Fatalf("edit not kept: %q", m.items[0].text.editedText)
 	}
 }
 
@@ -152,6 +167,15 @@ func TestEditVimQuitLeaves(t *testing.T) {
 	m, _ = press(t, m, "e", ":", "q", "enter")
 	if m.KeyContext() != keys.Resolver {
 		t.Fatal(":q did not leave the editor")
+	}
+	// :q after a change keeps it as the result.
+	m, _ = press(t, m, "e", "d", "d", ":", "q", "enter")
+	if m.KeyContext() != keys.Resolver {
+		t.Fatal(":q did not leave the editor")
+	}
+	_, out := press(t, m, "enter")
+	if got := only[ResolveTextMsg](out); len(got) != 1 || string(got[0].Content) != "X\nc\n" {
+		t.Fatalf(":q then enter produced %v", out)
 	}
 }
 

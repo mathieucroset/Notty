@@ -41,8 +41,6 @@ type textState struct {
 
 	edited     bool   // the result was edited and accepted
 	editedText string // the accepted edit
-	hasDraft   bool   // an edit was left with esc and can be resumed
-	draft      string
 
 	scroll [3]int // top line of each column
 }
@@ -133,17 +131,9 @@ func (t *textState) content() string {
 	return merge.JoinLines(t.resultLines(false), t.trailing)
 }
 
-// editText returns the text the embedded editor opens with: the draft left
-// with esc, or else baseEditText.
-func (t *textState) editText() string {
-	if t.hasDraft {
-		return t.draft
-	}
-	return t.baseEditText()
-}
-
-// baseEditText returns the accepted edit, or the current result with
-// unresolved blocks pre-filled with ours.
+// baseEditText returns the text the embedded editor opens with: the
+// accepted edit, or the current result with unresolved blocks pre-filled
+// with ours.
 func (t *textState) baseEditText() string {
 	if t.edited {
 		return t.editedText
@@ -159,14 +149,12 @@ func resolvedLines(b merge.Block) []string {
 	return b.Ours
 }
 
-// setChoice sets the current conflict's choice and drops the edited result
-// and any draft (they were built from the old choices).
+// setChoice sets the current conflict's choice.
 func (t *textState) setChoice(c choice) {
 	if len(t.conflicts) == 0 {
 		return
 	}
 	t.choices[t.cur] = c
-	t.hasDraft, t.draft = false, ""
 }
 
 // nextUnresolved returns the next conflict after the current one without a

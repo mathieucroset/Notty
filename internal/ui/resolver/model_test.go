@@ -91,16 +91,12 @@ func TestTextStateEditText(t *testing.T) {
 	ts := newTextState(textFile("n.md", base2, ours2, theirs2))
 	ts.cur = 1
 	ts.setChoice(chooseTheirs)
-	if got := ts.editText(); got != "1\nA\n3\nD\n5\n" {
+	if got := ts.baseEditText(); got != "1\nA\n3\nD\n5\n" {
 		t.Errorf("editText = %q, want unresolved blocks pre-filled with yours", got)
 	}
-	ts.hasDraft, ts.draft = true, "draft"
-	if got := ts.editText(); got != "draft" {
-		t.Errorf("editText with a draft = %q", got)
-	}
-	ts.setChoice(chooseOurs)
-	if ts.hasDraft {
-		t.Error("a new choice should drop the draft")
+	ts.edited, ts.editedText = true, "edited"
+	if got := ts.baseEditText(); got != "edited" {
+		t.Errorf("baseEditText after an edit = %q", got)
 	}
 }
 

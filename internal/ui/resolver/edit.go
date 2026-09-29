@@ -14,8 +14,8 @@ import (
 // or the editor's :w).
 type acceptEditMsg struct{}
 
-// leaveEditMsg closes the embedded editor keeping its text as a draft (the
-// editor's :q).
+// leaveEditMsg closes the embedded editor keeping its edits (the editor's
+// :q).
 type leaveEditMsg struct{}
 
 // editStatusMsg carries a vim status message for the edit footer.
@@ -29,7 +29,7 @@ func (m Model) openEditor() (Model, tea.Cmd) {
 	it := m.current()
 	t := it.text
 	cursor := buffer.Pos{}
-	if !t.edited && !t.hasDraft && len(t.conflicts) > 0 {
+	if !t.edited && len(t.conflicts) > 0 {
 		// Start on the current conflict: count the result lines before it.
 		n := 0
 		for i := range t.conflicts[t.cur] {
@@ -42,7 +42,7 @@ func (m Model) openEditor() (Model, tea.Cmd) {
 		}
 		cursor.Line = n
 	}
-	m.ed = m.ed.Load(it.file.Path, t.editText(), cursor)
+	m.ed = m.ed.Load(it.file.Path, t.baseEditText(), cursor)
 	m.ed = m.ed.SetSize(m.editorSize()).SetFocused(true)
 	m.editing = true
 	m.status, m.hint = "", ""
@@ -81,28 +81,28 @@ func (m Model) acceptEdit() (Model, tea.Cmd) {
 	text := m.ed.Content()
 	m = m.mutateText(func(t *textState) {
 		t.edited, t.editedText = true, text
-		t.hasDraft, t.draft = false, ""
 		t.scroll[colResult] = 0
 	})
-	m.editing = false
-	m.ed = m.ed.SetFocused(false)
-	m.status = ""
-	return m.scrollToCurrent(), nil
+	return m.closeEditor().scrollToCurrent(), nil
 }
 
-// leaveEdit closes the editor keeping its text as a draft that the next
-// `e` resumes; the result is unchanged.
+// leaveEdit closes the editor (esc, :q) keeping the edits: text that
+// differs from what the editor opened with becomes the result, as with
+// ctrl+s; unchanged text leaves everything as it was (an unresolved file
+// stays unresolved).
 func (m Model) leaveEdit() Model {
 	if !m.editing {
 		return m
 	}
-	text := m.ed.Content()
-	m = m.mutateText(func(t *textState) {
-		t.hasDraft, t.draft = text != t.baseEditText(), text
-		if !t.hasDraft {
-			t.draft = ""
-		}
-	})
+	if it := m.current(); it != nil && it.text != nil && m.ed.Content() != it.text.baseEditText() {
+		m, _ = m.acceptEdit()
+		return m
+	}
+	return m.closeEditor()
+}
+
+// closeEditor returns to the navigation context.
+func (m Model) closeEditor() Model {
 	m.editing = false
 	m.ed = m.ed.SetFocused(false)
 	m.status = ""
