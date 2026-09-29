@@ -397,7 +397,8 @@ func runExec(ctx context.Context, sshCommand, dir string, args ...string) (resul
 	cmd := exec.CommandContext(ctx, path, full...)
 	cmd.Env = gitEnv(os.Environ(), sshCommand)
 	cmd.Stdin = nil
-	// ssh children may hold the pipes open after git is killed on timeout.
+	killGroupOnCancel(cmd)
+	// Last resort if a child escaped the process group and holds the pipes.
 	cmd.WaitDelay = 2 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
