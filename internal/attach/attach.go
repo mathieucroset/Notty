@@ -8,6 +8,7 @@ package attach
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand/v2"
 	"os"
 	"path"
@@ -36,11 +37,21 @@ var allowedExt = map[string]bool{
 // attachDir is the vault-relative folder holding imported images (spec §3).
 const attachDir = "attachments"
 
+// tmpSuffix marks an in-flight write's temp file, matching vault.Save's own
+// convention (spec §9) so such files are recognized and skipped the same
+// way elsewhere (for example by Unused's attachments/ scan).
+const tmpSuffix = ".notty-tmp"
+
 // suffixChars is the alphabet of an imported file's random suffix.
 const suffixChars = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 // suffixLen is the length of an imported file's random suffix.
 const suffixLen = 4
+
+// maxNameAttempts bounds Import's search for a free file name: on a
+// collision it regenerates the random suffix and retries this many times
+// before giving up, rather than ever overwriting an existing file.
+const maxNameAttempts = 10
 
 // maxSlugLen is Slug's maximum output length.
 const maxSlugLen = 40
@@ -80,29 +91,96 @@ func randomSuffix(n int) string {
 	return string(b)
 }
 
+// newSuffix generates the random suffix for an imported file's name. It is
+// a package variable, rather than a direct call to randomSuffix, purely so
+// tests can force a name collision (and verify Import retries onto a fresh
+// name instead of overwriting anything).
+var newSuffix = func() string { return randomSuffix(suffixLen) }
+
 // Import copies data into the vault's attachments/ folder as
 // "attachments/<note-slug>-<YYYYMMDD-HHMMSS>-<4 random chars>.<ext>",
-// written atomically (a "<file>.notty-tmp" temp file, fsynced, then renamed
-// into place; spec §9), creating attachments/ if needed. ext is normalized
-// to lowercase without a leading dot; only png, jpg, jpeg, gif and webp are
-// accepted (ErrNotImage otherwise). It returns the vault-root markdown link
-// to insert into the note: "![](/attachments/<name>)".
+// written atomically (a temp file, fsynced, then linked into place under
+// its final name; spec §9) and never overwriting an existing file: on the
+// rare chance the generated name collides with one already there, the
+// random suffix is regenerated and the write retried, up to
+// maxNameAttempts times. attachments/ is created if needed. ext is
+// normalized to lowercase without a leading dot; only png, jpg, jpeg, gif
+// and webp are accepted (ErrNotImage otherwise). It returns the vault-root
+// markdown link to insert into the note: "![](/attachments/<name>)".
 func Import(v *vault.Vault, noteRel string, data []byte, ext string, now time.Time) (string, error) {
 	norm := strings.ToLower(strings.TrimPrefix(ext, "."))
 	if !allowedExt[norm] {
 		return "", fmt.Errorf("attach: import for %q: %w", noteRel, ErrNotImage)
 	}
-	name := fmt.Sprintf("%s-%s-%s.%s",
-		Slug(noteRel),
-		now.UTC().Format("20060102-150405"),
-		randomSuffix(suffixLen),
-		norm,
-	)
-	rel := path.Join(attachDir, name)
-	if err := v.Save(rel, string(data)); err != nil {
+
+	dir := v.Abs(attachDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("attach: import: create %q: %w", attachDir, err)
+	}
+
+	slug := Slug(noteRel)
+	stamp := now.UTC().Format("20060102-150405")
+
+	var lastErr error
+	for i := 0; i < maxNameAttempts; i++ {
+		name := fmt.Sprintf("%s-%s-%s.%s", slug, stamp, newSuffix(), norm)
+		rel := path.Join(attachDir, name)
+		err := writeExclusive(v.Abs(rel), data)
+		if err == nil {
+			return "![](/" + rel + ")", nil
+		}
+		if errors.Is(err, fs.ErrExist) {
+			lastErr = err
+			continue
+		}
 		return "", fmt.Errorf("attach: import %q: %w", rel, err)
 	}
-	return "![](/" + rel + ")", nil
+	return "", fmt.Errorf("attach: import into %q: no free name after %d attempts: %w", attachDir, maxNameAttempts, lastErr)
+}
+
+// writeExclusive writes data to dst without ever overwriting an existing
+// file at dst: it writes to a uniquely-named temp file in the same
+// directory, fsyncs it, then links it to dst (which fails with fs.ErrExist,
+// leaving dst untouched, if something is already there) before removing
+// the temp file, which is otherwise just a second name for the same data.
+func writeExclusive(dst string, data []byte) error {
+	dir := filepath.Dir(dst)
+	tmp, err := os.CreateTemp(dir, ".attach-*"+tmpSuffix)
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Link(tmpName, dst); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fs.ErrExist
+		}
+		return err
+	}
+	syncDir(dir)
+	return nil
+}
+
+// syncDir makes a link into dir durable. It is best-effort: some platforms
+// cannot fsync directories, and the file's own data is already synced.
+func syncDir(dir string) {
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
 }
 
 // ImportPath reads the regular file at path (which must exist and have a

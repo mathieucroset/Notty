@@ -172,7 +172,7 @@ func attachmentFiles(v *vault.Vault) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if strings.HasSuffix(d.Name(), ".notty-tmp") {
+		if strings.HasSuffix(d.Name(), tmpSuffix) {
 			return nil
 		}
 		rel, err := filepath.Rel(root, abs)
