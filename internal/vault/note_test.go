@@ -138,6 +138,7 @@ func TestCreateNote(t *testing.T) {
 		{"md title not doubled", "", "notes.md", "notes.md", "# notes.md\n\n"},
 		{"md title collision", "", "notes.MD", "notes 2.md", "# notes.MD\n\n"},
 		{"only md title", "", ".md", "Untitled 3.md", "# .md\n\n"},
+		{"control chars in heading", "", "x\ny\tz\r", "xyz.md", "# x y z\n\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -347,6 +348,34 @@ func TestMoveSiblingPrefixAllowed(t *testing.T) {
 	}
 	if got != "WorkX/Work" {
 		t.Errorf("newRel = %q, want WorkX/Work", got)
+	}
+}
+
+func TestErrorPrefixOnce(t *testing.T) {
+	v := openVault(t)
+	mkfiles(t, v.Root, "a.md", "b.md", "file")
+	tests := []struct {
+		name string
+		op   func() error
+	}{
+		{"read", func() error { _, err := v.Read("nope.md"); return err }},
+		{"save root", func() error { return v.Save("", "x") }},
+		{"create note in file", func() error { _, err := v.CreateNote("file", "x"); return err }},
+		{"create folder in file", func() error { _, err := v.CreateFolder("file", "x"); return err }},
+		{"rename exists", func() error { _, err := v.Rename("a.md", "b"); return err }},
+		{"rename missing", func() error { _, err := v.Rename("nope.md", "x"); return err }},
+		{"move missing", func() error { _, err := v.Move("nope.md", ""); return err }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.op()
+			if err == nil {
+				t.Fatal("want error")
+			}
+			if n := strings.Count(err.Error(), "vault:"); n != 1 {
+				t.Errorf("%q has %d \"vault:\" prefixes, want 1", err, n)
+			}
+		})
 	}
 }
 

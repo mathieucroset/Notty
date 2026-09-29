@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // maxCollisions bounds the " 2", " 3", ... suffix search.
@@ -96,9 +97,17 @@ func syncDir(dir string) {
 // A folder inside a hidden location (the top-level hidden folders, dot
 // folders) is rejected with ErrInvalidPath.
 func (v *Vault) CreateNote(folder, title string) (string, error) {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = untitled
+	// The heading is one line: control characters (newlines, tabs) become
+	// spaces. The file name is derived from the raw title, exactly as
+	// FileNameFromTitle does.
+	heading := strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, title))
+	if heading == "" {
+		heading = untitled
 	}
 	dir := clean(folder)
 	if inReserved(dir) {
@@ -120,11 +129,11 @@ func (v *Vault) CreateNote(folder, title string) (string, error) {
 		return f.Close()
 	})
 	if err != nil {
-		return "", fmt.Errorf("vault: create note %q: %w", title, err)
+		return "", fmt.Errorf("vault: create note %q: %w", heading, err)
 	}
-	if err := v.Save(rel, "# "+title+"\n\n"); err != nil {
+	if err := v.Save(rel, "# "+heading+"\n\n"); err != nil {
 		_ = os.Remove(v.Abs(rel))
-		return "", fmt.Errorf("vault: create note %q: %w", title, err)
+		return "", err // already prefixed and names the path
 	}
 	return rel, nil
 }
@@ -180,8 +189,9 @@ func (v *Vault) claim(dir, base, ext string, create func(abs string) error) (str
 }
 
 // Rename renames the note, folder or file at rel within its folder. newName
-// is sanitized like a title and must not be a reserved name (ErrInvalidName). Notes always end in ".md": a user-typed ".md"
-// in any case is normalized, and it is appended if omitted. It fails with
+// is sanitized like a title and must not be a reserved name
+// (ErrInvalidName). Notes always end in ".md": a user-typed ".md" in any
+// case is normalized, and it is appended if omitted. It fails with
 // ErrExists if the target is taken.
 func (v *Vault) Rename(rel, newName string) (string, error) {
 	src := clean(rel)
