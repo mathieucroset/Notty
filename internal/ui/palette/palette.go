@@ -235,11 +235,25 @@ func (m Model) viewCommands() string {
 	return m.styles.Dialog.Width(m.width).Render(strings.Join(lines, "\n"))
 }
 
+// renderRow renders one command row: the (possibly fuzzy-highlighted) name
+// on the left, its key right-aligned in Muted. When the name and key
+// together don't fit width, the name is truncated with an ellipsis so the
+// key — the shorter, more load-bearing half of the row — is always shown in
+// full.
 func (m Model) renderRow(mt match, selected bool, width int) string {
-	name := highlight(mt.cmd.Name, mt.matched, m.styles.Match)
-	nameWidth := ansi.StringWidth(mt.cmd.Name)
 	keyWidth := ansi.StringWidth(mt.cmd.Key)
-	gap := width - nameWidth - keyWidth
+
+	// Reserve room for the key and at least one separating space; whatever
+	// remains is the name's budget.
+	nameBudget := width - keyWidth - 1
+	if nameBudget < 1 {
+		nameBudget = 1
+	}
+
+	truncatedName, kept := truncateName(mt.cmd.Name, nameBudget)
+	name := highlight(truncatedName, filterMatched(mt.matched, kept), m.styles.Match)
+
+	gap := width - ansi.StringWidth(truncatedName) - keyWidth
 	if gap < 1 {
 		gap = 1
 	}
@@ -249,6 +263,49 @@ func (m Model) renderRow(mt match, selected bool, width int) string {
 		return m.styles.Selection.Render(line)
 	}
 	return line
+}
+
+// truncateName returns s unchanged if it already fits maxWidth. Otherwise
+// it returns a prefix of s followed by an ellipsis, sized to fit maxWidth,
+// along with the byte length of that prefix (excluding the ellipsis) so
+// callers can drop any fuzzy-match highlight that fell past the cut.
+func truncateName(s string, maxWidth int) (truncated string, keptBytes int) {
+	if maxWidth < 1 {
+		maxWidth = 1
+	}
+	if ansi.StringWidth(s) <= maxWidth {
+		return s, len(s)
+	}
+	const ellipsis = "…"
+	budget := maxWidth - ansi.StringWidth(ellipsis)
+	if budget < 0 {
+		budget = 0
+	}
+	w, cut := 0, 0
+	for i, r := range s {
+		rw := ansi.StringWidth(string(r))
+		if w+rw > budget {
+			break
+		}
+		w += rw
+		cut = i + len(string(r))
+	}
+	return s[:cut] + ellipsis, cut
+}
+
+// filterMatched drops any matched byte offset at or past limit, so
+// highlighting a truncated name never reaches past what's actually shown.
+func filterMatched(matched []int, limit int) []int {
+	if len(matched) == 0 {
+		return nil
+	}
+	out := make([]int, 0, len(matched))
+	for _, i := range matched {
+		if i < limit {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 func (m Model) viewTheme() string {

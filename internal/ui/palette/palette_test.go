@@ -2,6 +2,7 @@ package palette
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -281,6 +282,32 @@ func TestSetSizeNeverExceedsTinyTerminal(t *testing.T) {
 		}
 		// Rendering at this size must not panic.
 		_ = m.View()
+	}
+}
+
+func TestRenderRowTruncatesNameBeforeKey(t *testing.T) {
+	styles := testStyles(t)
+	m := New([]Command{{
+		ID:   "x",
+		Name: "A very long command name that will not fit",
+		Key:  "ctrl+shift+x",
+	}}, styles).SetSize(100, 40)
+
+	const width = 24 // deliberately narrow so name+key don't both fit
+	row := m.renderRow(m.matches[0], false, width)
+	plain := ansi.Strip(row)
+
+	if got := ansi.StringWidth(plain); got != width {
+		t.Errorf("row width = %d, want %d: %q", got, width, plain)
+	}
+	if !strings.Contains(plain, "…") {
+		t.Errorf("expected the name to be truncated with an ellipsis, got %q", plain)
+	}
+	if !strings.Contains(plain, "ctrl+shift+x") {
+		t.Errorf("expected the key to remain intact, got %q", plain)
+	}
+	if strings.Contains(plain, "will not fit") {
+		t.Errorf("expected the tail of the long name to be cut, got %q", plain)
 	}
 }
 
