@@ -9,6 +9,17 @@ import (
 
 var gitignoreLines = []string{".DS_Store", "Thumbs.db", "desktop.ini", "*.notty-tmp", ".notty/recovery/", ".notty/lock"}
 
+func TestGitignoreEntries(t *testing.T) {
+	got := GitignoreEntries()
+	if strings.Join(got, "\n") != strings.Join(gitignoreLines, "\n") {
+		t.Fatalf("GitignoreEntries = %q, want %q", got, gitignoreLines)
+	}
+	got[0] = "changed"
+	if GitignoreEntries()[0] != gitignoreLines[0] {
+		t.Fatal("GitignoreEntries returned the internal slice")
+	}
+}
+
 func TestEnsureGitignore(t *testing.T) {
 	all := strings.Join(gitignoreLines, "\n") + "\n"
 	tests := []struct {

@@ -486,6 +486,119 @@ func TestClone(t *testing.T) {
 	}
 }
 
+func TestHelperEnv(t *testing.T) {
+	gittest.Isolate(t)
+	get := func(env []string, name string) (string, bool) {
+		var v string
+		var ok bool
+		for _, kv := range env {
+			if n, val, _ := strings.Cut(kv, "="); n == name {
+				v, ok = val, true // last one wins, as in exec
+			}
+		}
+		return v, ok
+	}
+	env := gitsync.HelperEnv("")
+	if v, _ := get(env, "GIT_TERMINAL_PROMPT"); v != "0" {
+		t.Errorf("GIT_TERMINAL_PROMPT = %q", v)
+	}
+	if v, _ := get(env, "GIT_SSH_COMMAND"); !strings.Contains(v, "BatchMode=yes") {
+		t.Errorf("GIT_SSH_COMMAND = %q, want batch mode", v)
+	}
+	t.Setenv("GIT_SSH_COMMAND", "my-ssh")
+	if v, _ := get(gitsync.HelperEnv(""), "GIT_SSH_COMMAND"); v != "my-ssh" {
+		t.Errorf("user GIT_SSH_COMMAND = %q, want it kept", v)
+	}
+}
+
+// noIdentity makes git refuse to guess an identity from the environment.
+func noIdentity(t *testing.T) {
+	t.Helper()
+	gittest.Isolate(t)
+	t.Setenv("EMAIL", "")
+	os.Unsetenv("EMAIL")
+	gittest.Git(t, "", "config", "--global", "user.useConfigOnly", "true")
+}
+
+func TestIdentity(t *testing.T) {
+	noIdentity(t)
+	if err := gitsync.CheckIdentity(ctx, ""); !errors.Is(err, gitsync.ErrNoIdentity) {
+		t.Fatalf("CheckIdentity without identity err = %v, want ErrNoIdentity", err)
+	}
+	r, err := gitsync.Init(t.TempDir(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gittest.Write(t, r, "a.md", "a")
+	if err := r.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Commit("x"); !errors.Is(err, gitsync.ErrNoIdentity) {
+		t.Fatalf("Commit without identity err = %v, want ErrNoIdentity", err)
+	}
+	// A repository-local identity is enough for that repository.
+	gittest.SetUser(t, r, "Local", "local@example.com")
+	if err := gitsync.CheckIdentity(ctx, r.Dir); err != nil {
+		t.Fatalf("CheckIdentity with a local identity: %v", err)
+	}
+	if err := gitsync.CheckIdentity(ctx, filepath.Join(t.TempDir(), "missing")); !errors.Is(err, gitsync.ErrNoIdentity) {
+		t.Fatalf("CheckIdentity on a missing dir err = %v, want ErrNoIdentity", err)
+	}
+	if err := gitsync.SetGlobalIdentity(ctx, "", "x@example.com"); err == nil {
+		t.Fatal("SetGlobalIdentity with an empty name succeeded")
+	}
+	if err := gitsync.SetGlobalIdentity(ctx, "Me", "me@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitsync.CheckIdentity(ctx, ""); err != nil {
+		t.Fatalf("CheckIdentity after SetGlobalIdentity: %v", err)
+	}
+	if got := gittest.Git(t, "", "config", "--global", "user.email"); got != "me@example.com" {
+		t.Fatalf("global user.email = %q", got)
+	}
+}
+
+func TestRemoteURLAndGitPath(t *testing.T) {
+	gittest.Isolate(t)
+	r, err := gitsync.Init(t.TempDir(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.RemoteURL(); !errors.Is(err, gitsync.ErrNoRemote) {
+		t.Fatalf("RemoteURL without origin err = %v, want ErrNoRemote", err)
+	}
+	if err := r.RemoteAdd("/srv/notes.git"); err != nil {
+		t.Fatal(err)
+	}
+	if u, err := r.RemoteURL(); err != nil || u != "/srv/notes.git" {
+		t.Fatalf("RemoteURL = %q, %v", u, err)
+	}
+	p, err := r.GitPath("info/exclude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(r.Dir, ".git", "info", "exclude"); p != want {
+		t.Fatalf("GitPath = %q, want %q", p, want)
+	}
+}
+
+func TestCloneBranch(t *testing.T) {
+	env := gittest.New(t)
+	gittest.Git(t, env.Laptop.Dir, "push", "-q", "origin", "main:trunk")
+	// The remote's HEAD points to a branch that does not exist.
+	gittest.Git(t, env.Remote, "symbolic-ref", "HEAD", "refs/heads/missing")
+	r, err := gitsync.CloneBranch(ctx, env.Remote, filepath.Join(t.TempDir(), "Notes"), "trunk")
+	if err != nil {
+		t.Fatalf("CloneBranch: %v", err)
+	}
+	if b, _ := r.CurrentBranch(); b != "trunk" || !r.HasUpstream() {
+		t.Fatalf("branch = %q, upstream %v; want trunk with upstream", b, r.HasUpstream())
+	}
+	if got := gittest.Read(t, r, "README.md"); got != "# Notes\n" {
+		t.Fatalf("README.md = %q", got)
+	}
+}
+
 func TestRenameBranch(t *testing.T) {
 	gittest.Isolate(t)
 	r, err := gitsync.Init(t.TempDir(), "main")
@@ -511,6 +624,17 @@ func TestRenameBranch(t *testing.T) {
 	if got := gittest.Git(t, r.Dir, "log", "--format=%s"); got != "a" {
 		t.Fatalf("history lost after rename: %q", got)
 	}
+	// An existing branch is never overwritten.
+	gittest.Git(t, r.Dir, "branch", "other")
+	gittest.Write(t, r, "b.md", "b")
+	gittest.CommitAll(t, r, "b")
+	before := gittest.Git(t, r.Dir, "rev-parse", "other")
+	if err := r.RenameBranch("other"); err == nil {
+		t.Fatal("RenameBranch onto an existing branch succeeded")
+	}
+	if b, _ := r.CurrentBranch(); b != "main" || gittest.Git(t, r.Dir, "rev-parse", "other") != before {
+		t.Fatalf("failed rename changed state: branch %q", b)
+	}
 }
 
 func TestMergeUnrelatedHistories(t *testing.T) {
@@ -531,8 +655,11 @@ func TestMergeUnrelatedHistories(t *testing.T) {
 	if err := r.Merge("origin/main", false); err == nil {
 		t.Fatalf("Merge of unrelated histories without allowUnrelated succeeded")
 	}
-	if err := r.Merge("origin/main", true); err != nil {
+	if err := r.MergeWithMessage("origin/main", true, "Merge · here"); err != nil {
 		t.Fatalf("Merge allowUnrelated: %v", err)
+	}
+	if s := gittest.Git(t, r.Dir, "log", "-1", "--format=%s"); s != "Merge · here" {
+		t.Fatalf("merge subject = %q", s)
 	}
 	if gittest.Read(t, r, "README.md") != "# Notes\n" || gittest.Read(t, r, "local.md") != "local\n" {
 		t.Fatalf("unrelated merge did not combine files")

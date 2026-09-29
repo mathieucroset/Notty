@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// pipeTTY reads from a pipe (embedding *os.File gives it Fd and
+// pipeTTY reads from a pipe (embedding *os.File gives it Fd, SyscallConn and
 // SetReadDeadline) and discards writes.
 type pipeTTY struct{ *os.File }
 
@@ -31,7 +31,7 @@ func TestDetectLeavesNoPendingRead(t *testing.T) {
 		name string
 		wrap func(*os.File) io.ReadWriter
 	}{
-		{"read deadline", func(f *os.File) io.ReadWriter { return pipeTTY{f} }},
+		{"file raw fd poll", func(f *os.File) io.ReadWriter { return pipeTTY{f} }},
 		{"poll fd", func(f *os.File) io.ReadWriter { return fdOnlyTTY{f} }},
 	}
 	for _, tt := range tests {
@@ -70,6 +70,53 @@ func TestDetectLeavesNoPendingRead(t *testing.T) {
 				t.Fatal("byte written after Detect was not received: a Read was left pending")
 			}
 		})
+	}
+}
+
+// TestDetectBlockingFile is the regression test for a file switched to
+// blocking mode by Fd(): SetReadDeadline then returns nil but no longer
+// bounds Read, so trusting it would block Detect forever.
+func TestDetectBlockingFile(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	_ = r.Fd() // switches r to blocking mode
+	done := make(chan Caps, 1)
+	start := time.Now()
+	go func() { done <- Detect("auto", envMap(), pipeTTY{r}, noRun(t)) }()
+	select {
+	case got := <-done:
+		if el := time.Since(start); el > 200*time.Millisecond {
+			t.Errorf("Detect took %v, want about 100ms", el)
+		}
+		if got.Inline != ProtoHalfBlocks {
+			t.Errorf("got %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		w.Close() // unblock the stuck Read
+		t.Fatal("Detect blocked on a file whose read deadline has no effect")
+	}
+}
+
+// TestDetectBlockingFileReadsReplies checks that replies are read through
+// the raw-fd poll path.
+func TestDetectBlockingFileReadsReplies(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	_ = r.Fd()
+	if _, err := w.WriteString(replyKittyOK + replyCell + replyDA1Six); err != nil {
+		t.Fatal(err)
+	}
+	got := Detect("auto", envMap(), pipeTTY{r}, noRun(t))
+	if got.Inline != ProtoKitty || got.CellW != 10 || got.CellH != 20 {
+		t.Errorf("got %+v", got)
 	}
 }
 

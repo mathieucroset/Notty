@@ -5,6 +5,7 @@ package gittest
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,7 +45,7 @@ func Isolate(t testing.TB) {
 	for _, k := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
 		"GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_TEMPLATE_DIR", "GIT_SSH_COMMAND", "GIT_SSH", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"} {
 		t.Setenv(k, "")
-		os.Unsetenv(k)
+		_ = os.Unsetenv(k)
 	}
 }
 
@@ -210,7 +211,8 @@ func Git(t testing.TB, dir string, args ...string) string {
 	out, err := cmd.Output()
 	if err != nil {
 		stderr := ""
-		if ee, ok := err.(*exec.ExitError); ok {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
 			stderr = string(ee.Stderr)
 		}
 		t.Fatalf("gittest: git %v: %v\n%s", args, err, stderr)
