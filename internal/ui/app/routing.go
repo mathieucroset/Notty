@@ -35,6 +35,9 @@ func (m *Model) keyContext() keys.Context {
 	if m.noteView == ViewPreview {
 		return keys.Preview
 	}
+	if m.note.path != "" {
+		return m.editorContext()
+	}
 	if m.opts.Config.Vim {
 		return keys.EditorNormal
 	}
@@ -70,8 +73,8 @@ func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	return m.handleMainKey(k)
 }
 
-// handleMainKey handles keys for the main pane. The editor, preview, Tasks
-// and Trash components take these over in later tasks.
+// handleMainKey sends a key to the main pane: the Tasks or Trash view, the
+// editor (editor and split views) or the preview (preview view).
 func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
 	var cmd tea.Cmd
 	switch m.mainView {
@@ -82,14 +85,21 @@ func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
 		m.trash, cmd = m.trash.Update(k)
 		return cmd
 	}
+	if m.note.path != "" {
+		if m.noteView != ViewPreview {
+			return m.handleEditorKey(k)
+		}
+		if k.String() == "esc" && m.dismissToast() {
+			return nil
+		}
+		return m.updatePreview(k)
+	}
 	switch k.String() {
 	case "tab":
 		return emit(msgs.FocusSidebarMsg{})
 	case "esc":
-		// The note view has no use for esc yet: it dismisses the newest
-		// error toast.
-		// TODO(editor pass): only when the editor does not use the esc
-		// (vim normal mode with nothing pending; never in insert mode).
+		// Nothing in the empty main pane uses esc: it dismisses the
+		// newest error toast.
 		m.dismissToast()
 	}
 	return nil
@@ -105,7 +115,7 @@ func (m *Model) handleAction(a keys.Action) tea.Cmd {
 	case keys.ToggleSidebar:
 		m.toggleSidebar()
 	case keys.CycleView:
-		m.cycleNoteView()
+		return m.cycleNoteView()
 	case keys.Finder:
 		return emit(msgs.OpenFinderMsg{})
 	case keys.Search:
@@ -115,8 +125,7 @@ func (m *Model) handleAction(a keys.Action) tea.Cmd {
 	case keys.Save:
 		return emit(msgs.SaveRequestMsg{})
 	case keys.ExternalEditor:
-		// TODO(editor pass): save the buffer first.
-		return m.openExternal(m.note.path)
+		return m.editExternal(m.note.path)
 	}
 	return nil
 }

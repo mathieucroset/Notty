@@ -37,7 +37,7 @@ func (m *Model) openHistory(p string) tea.Cmd {
 	if !strings.EqualFold(path.Ext(p), ".md") {
 		return m.pushToast(msgs.ToastInfo, "History is only available for notes")
 	}
-	v, current, open := m.opts.Vault, m.note.content, m.note.path == p
+	v, current, open := m.opts.Vault, m.editor.Content(), m.note.path == p
 	return func() tea.Msg {
 		if !gitsync.Available() {
 			return historyLoadedMsg{path: p, noGit: true}
@@ -87,8 +87,8 @@ func (m *Model) handleHistoryLoaded(msg historyLoadedMsg) tea.Cmd {
 }
 
 // restoreVersion writes an old version back as a new edit, then closes
-// the History view.
-// TODO(editor pass): write into the buffer when the note is open.
+// the History view. When the note is open the version replaces the buffer
+// as one undoable edit, which is then saved.
 func (m *Model) restoreVersion(msg history.RestoreVersionMsg) tea.Cmd {
 	if m.isConflicted(msg.Path) {
 		return m.pushToast(msgs.ToastWarn, "Resolve the conflict in "+msg.Path+" first")
@@ -98,15 +98,24 @@ func (m *Model) restoreVersion(msg history.RestoreVersionMsg) tea.Cmd {
 	if len(rev) > 7 {
 		rev = rev[:7]
 	}
-	save := m.saveNoteCmd(msg.Path, msg.Content, 0)
+	var edit tea.Cmd
+	content, version := msg.Content, uint64(0)
+	if msg.Path == m.editor.Path() {
+		m.editor, edit = m.editor.ReplaceAll(msg.Content)
+		if m.editor.Content() != msg.Content {
+			return m.pushToast(msgs.ToastWarn, "Could not restore "+displayName(msg.Path)+": the note cannot be edited right now")
+		}
+		_, content, version = m.editor.Snapshot()
+	}
+	save := m.saveNoteCmd(msg.Path, content, version)
 	if save == nil {
 		return nil
 	}
-	return func() tea.Msg {
+	return tea.Batch(edit, func() tea.Msg {
 		res, _ := save().(savedMsg)
 		res.restoredFrom = rev
 		return res
-	}
+	})
 }
 
 // updateHistoryMsg handles the History view's messages.

@@ -388,3 +388,77 @@ func TestReadOnlyCursorLineRaw(t *testing.T) {
 		t.Errorf("after j: line %d view %q", m.CursorLine(), rows)
 	}
 }
+
+func TestReplaceAll(t *testing.T) {
+	doc := "# Old\nline two\nline three"
+	m := newModel(t, testOptions(t), doc, buffer.Pos{Line: 2, Col: 4}, 40, 5)
+	m, cmd := m.ReplaceAll("# New\nsecond")
+	if m.Content() != "# New\nsecond" {
+		t.Fatalf("content = %q", m.Content())
+	}
+	if !m.Dirty() {
+		t.Error("ReplaceAll left the buffer clean; autosave would never write it")
+	}
+	if m.CursorLine() != 1 {
+		t.Errorf("cursor line = %d, want clamped to 1", m.CursorLine())
+	}
+	out := collect(cmd)
+	if _, ok := find[ChangedMsg](out); !ok {
+		t.Error("ReplaceAll does not report the change")
+	}
+	if tick, ok := find[AutosaveTickMsg](out); !ok || tick.Version != m.Version() {
+		t.Error("ReplaceAll does not schedule autosave")
+	}
+	m, _ = typeKeys(m, "u")
+	if m.Content() != doc {
+		t.Errorf("one undo gives %q, want the original", m.Content())
+	}
+
+	// Same text: nothing to do.
+	same := newModel(t, testOptions(t), doc, buffer.Pos{}, 40, 5)
+	same, cmd = same.ReplaceAll(doc)
+	if cmd != nil || same.Dirty() {
+		t.Error("replacing with identical text reported a change")
+	}
+
+	// Read-only notes are never changed.
+	ro := newModel(t, testOptions(t), doc, buffer.Pos{}, 40, 5).SetReadOnly(true, "")
+	ro, _ = ro.ReplaceAll("x")
+	if ro.Content() != doc {
+		t.Error("ReplaceAll changed a read-only note")
+	}
+}
+
+func TestSetCursor(t *testing.T) {
+	doc := "zero\none\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine"
+	m := newModel(t, testOptions(t), doc, buffer.Pos{}, 40, 4)
+	m = m.SetCursor(buffer.Pos{Line: 8})
+	if m.Cursor() != (buffer.Pos{Line: 8}) || m.Dirty() {
+		t.Fatalf("cursor = %+v dirty %v", m.Cursor(), m.Dirty())
+	}
+	if rows := plainView(m); !slices.Contains(rows, " eight") {
+		t.Errorf("line 8 not scrolled into view: %q", rows)
+	}
+	if c := m.CursorPosition(); c == nil {
+		t.Error("no cursor after SetCursor")
+	}
+	if m = m.SetCursor(buffer.Pos{Line: 99, Col: 9}); m.Cursor().Line != 9 {
+		t.Errorf("cursor not clamped: %+v", m.Cursor())
+	}
+}
+
+func TestSetPath(t *testing.T) {
+	m := newModel(t, testOptions(t), "a", buffer.Pos{}, 40, 5)
+	m, _ = typeKeys(m, "i", "x")
+	v := m.Version()
+	m = m.SetPath("moved/test.md")
+	if m.Path() != "moved/test.md" || !m.Dirty() || m.Content() != "xa" {
+		t.Fatalf("SetPath: path %q dirty %v content %q", m.Path(), m.Dirty(), m.Content())
+	}
+	if p, _, ver := m.Snapshot(); p != "moved/test.md" || ver != v {
+		t.Errorf("Snapshot = %q %d", p, ver)
+	}
+	if m = m.MarkSaved("moved/test.md", v); m.Dirty() {
+		t.Error("MarkSaved with the new path did not clear dirty")
+	}
+}

@@ -130,6 +130,41 @@ func (m Model) InsertText(text string) (Model, tea.Cmd) {
 	return m.afterExternal(before)
 }
 
+// ReplaceAll replaces the whole text as one undoable edit that leaves the
+// buffer dirty, so autosave writes it (the app restores a history version
+// this way when the note is open, spec §8). The cursor stays on its line
+// when that line still exists. Identical text changes nothing; a read-only
+// or locked note is left alone.
+func (m Model) ReplaceAll(content string) (Model, tea.Cmd) {
+	if m.readOnly || m.locked || content == m.buf.String() {
+		return m, nil
+	}
+	before, cur := m.buf.Version(), m.buf.Cursor()
+	m.ed.Resync(m.buf, func() {
+		m.buf.BeginGroupAt(cur)
+		m.buf.SetText(content)
+		m.buf.EndGroup()
+		m.buf.SetCursor(cur)
+	})
+	m.aux.forgetMissing()
+	return m.afterExternal(before)
+}
+
+// SetCursor moves the cursor to p, clamped to the text (the app jumps to a
+// search hit in the note already open this way), and scrolls it into view.
+// The engine keeps its mode.
+func (m Model) SetCursor(p buffer.Pos) Model {
+	m.ed.Resync(m.buf, func() { m.buf.SetCursor(p) })
+	return m.ensureVisible()
+}
+
+// SetPath renames the loaded note (after a rename or move made in the
+// app), keeping the buffer, its undo history and its dirty state.
+func (m Model) SetPath(path string) Model {
+	m.path = path
+	return m
+}
+
 // afterExternal restyles and reports a change made outside the engine.
 func (m Model) afterExternal(before uint64) (Model, tea.Cmd) {
 	var cmd tea.Cmd

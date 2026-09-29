@@ -516,7 +516,9 @@ func noIdentity(t *testing.T) {
 	t.Helper()
 	gittest.Isolate(t)
 	t.Setenv("EMAIL", "")
-	os.Unsetenv("EMAIL")
+	if err := os.Unsetenv("EMAIL"); err != nil {
+		t.Fatal(err)
+	}
 	gittest.Git(t, "", "config", "--global", "user.useConfigOnly", "true")
 }
 

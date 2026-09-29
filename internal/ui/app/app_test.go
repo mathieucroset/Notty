@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 	"github.com/mathieucroset/notty/internal/config"
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
+	"github.com/mathieucroset/notty/internal/ui/editor"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/vault"
@@ -63,51 +65,8 @@ func testOptions(t *testing.T) Options {
 		LocalPath:  localPath,
 		Pins:       &meta.State{Pins: []string{}},
 		ConfigPath: filepath.Join(t.TempDir(), "config.toml"),
+		Clipboard:  &fakeClipboard{},
 	}
-}
-
-// run feeds msg to m and executes every resulting command, feeding their
-// messages back in, until nothing is left. It returns every message the
-// commands produced (including tea.QuitMsg, which stops processing).
-func run(t *testing.T, m *Model, msg tea.Msg) []tea.Msg {
-	t.Helper()
-	var produced []tea.Msg
-	queue := []tea.Msg{msg}
-	for steps := 0; len(queue) > 0; steps++ {
-		if steps > 100 {
-			t.Fatal("too many message steps")
-		}
-		cur := queue[0]
-		queue = queue[1:]
-		_, cmd := m.Update(cur)
-		for _, res := range execCmd(cmd) {
-			produced = append(produced, res)
-			if _, quit := res.(tea.QuitMsg); quit {
-				return produced
-			}
-			queue = append(queue, res)
-		}
-	}
-	return produced
-}
-
-// execCmd runs cmd, flattening batches and sequences.
-func execCmd(cmd tea.Cmd) []tea.Msg {
-	if cmd == nil {
-		return nil
-	}
-	res := cmd()
-	switch r := res.(type) {
-	case nil:
-		return nil
-	case tea.BatchMsg:
-		var out []tea.Msg
-		for _, c := range r {
-			out = append(out, execCmd(c)...)
-		}
-		return out
-	}
-	return []tea.Msg{res}
 }
 
 func keyMsg(s string) tea.KeyPressMsg {
@@ -132,9 +91,7 @@ func start(t *testing.T, opts Options, w, h int) *Model {
 	t.Helper()
 	m := New(opts)
 	run(t, m, tea.WindowSizeMsg{Width: w, Height: h})
-	for _, msg := range execCmd(m.Init()) {
-		run(t, m, msg)
-	}
+	drive(t, m, execOne(t, m, m.Init()))
 	return m
 }
 
@@ -212,8 +169,13 @@ func TestViewDoesNotMutate(t *testing.T) {
 	run(t, m, msgs.OpenNoteMsg{Path: "ideas.md", Line: -1})
 	run(t, m, msgs.SyncStatusMsg{State: msgs.SyncSynced})
 	before := *m
+	edBefore := fmt.Sprintf("%+v", m.editor)
 	_ = m.View()
-	if !reflect.DeepEqual(before, *m) {
+	after := *m
+	// The editor holds a func (its MapMsg hook), which DeepEqual never
+	// treats as equal: compare it shallowly.
+	before.editor, after.editor = editor.Model{}, editor.Model{}
+	if !reflect.DeepEqual(before, after) || fmt.Sprintf("%+v", m.editor) != edBefore {
 		t.Error("View() changed the model")
 	}
 }

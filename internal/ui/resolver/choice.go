@@ -235,11 +235,14 @@ func decodePreview(b []byte) *preview {
 }
 
 // render returns the image fitted into cols×rows cells as half blocks,
-// reusing the last rendering when the size is unchanged.
+// reusing the last rendering when the size is unchanged. Like the preview
+// (spec §6.4) it never draws an image larger than its half-block sample
+// resolution: one pixel per column, two per row.
 func (p *preview) render(cols, rows, cellW, cellH int) []string {
 	if cellW <= 0 || cellH <= 0 {
 		cellW, cellH = 8, 16
 	}
+	cols, rows = max(1, min(cols, p.w)), max(1, min(rows, (p.h+1)/2))
 	c, r := imgrender.FitCells(p.w, p.h, cols, rows, cellW, cellH)
 	key := [2]int{c, r}
 	if p.lastRows != nil && p.lastKey == key {

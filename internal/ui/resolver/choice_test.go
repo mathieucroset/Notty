@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/mathieucroset/notty/internal/gitsync"
 )
 
@@ -173,6 +175,37 @@ func TestPreviewDownscaledAndCached(t *testing.T) {
 	other := p.render(10, 5, 8, 16)
 	if p.lastKey == [2]int{} || &other[0] == &first[0] {
 		t.Error("a new size did not replace the cached rendering")
+	}
+}
+
+func TestPreviewSizing(t *testing.T) {
+	tests := []struct {
+		w, h, cw, ch int
+		cols, rows   int
+	}{
+		// A small image stops at its sample resolution (64 columns, 16
+		// rows) instead of being blown up to the whole 80×40 area.
+		{64, 32, 8, 16, 64, 16},
+		{64, 32, 16, 32, 64, 16},
+		// Larger ones fill the area, aspect ratio preserved.
+		{800, 600, 8, 16, 80, 30},
+		{800, 600, 16, 32, 80, 30},
+		{3000, 2000, 8, 16, 80, 27},
+		{3000, 2000, 16, 32, 80, 27},
+	}
+	for _, tt := range tests {
+		p := decodePreview(pngBytes(t, tt.w, tt.h, color.White))
+		if p == nil {
+			t.Fatalf("%dx%d not decoded", tt.w, tt.h)
+		}
+		rows := p.render(80, 40, tt.cw, tt.ch)
+		cols := 0
+		if len(rows) > 0 {
+			cols = ansi.StringWidth(rows[0])
+		}
+		if cols != tt.cols || len(rows) != tt.rows {
+			t.Errorf("%dx%d at %dx%d: %dx%d cells, want %dx%d", tt.w, tt.h, tt.cw, tt.ch, cols, len(rows), tt.cols, tt.rows)
+		}
 	}
 }
 

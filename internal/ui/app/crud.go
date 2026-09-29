@@ -43,6 +43,20 @@ type externalDoneMsg struct {
 	err  error
 }
 
+// externalSavedMsg reports the save that runs before the open note is
+// handed to $EDITOR.
+type externalSavedMsg struct {
+	saved savedMsg
+	path  string
+}
+
+// execProcess and execCommand run a program or an ExecCommand with the
+// terminal released (tea.ExecProcess, tea.Exec); tests replace them.
+var (
+	execProcess = tea.ExecProcess
+	execCommand = tea.Exec
+)
+
 // displayName is the name shown for a vault path: its base name, without
 // ".md" for notes.
 func displayName(p string) string {
@@ -289,7 +303,7 @@ func (m *Model) handleFileOp(msg fileOpMsg) tea.Cmd {
 		m.pendingSelect = msg.path
 		cmds = append(cmds, m.pathRenamed(msg.old, msg.path))
 	case opTrash:
-		cmds = append(cmds, m.pathRemoved(msg.old), loadTrashCmd(m.opts.Vault),
+		cmds = append(cmds, m.pathRemoved(msg.old, false), loadTrashCmd(m.opts.Vault),
 			m.pushToast(msgs.ToastInfo, fmt.Sprintf("Moved '%s' to trash", displayName(msg.old))))
 	}
 	m.refreshIndexViews()
@@ -304,27 +318,42 @@ func (m *Model) pathRenamed(oldPath, newPath string) tea.Cmd {
 	m.sidebar.SetPins(m.opts.Pins.Pins)
 	m.opts.Local.Rename(oldPath, newPath)
 	m.sidebar.SetExpanded(m.opts.Local.Expanded)
+	var rearm tea.Cmd
 	if m.note.path != "" && isUnder(m.note.path, oldPath) {
 		m.note.path = newPath + m.note.path[len(oldPath):]
-		m.note.title = vault.Title(m.note.content, m.note.path)
+		m.note.title = vault.Title(m.editor.Content(), m.note.path)
+		m.editor = m.editor.SetPath(m.note.path)
+		m.sidebar.SetDirty(m.dirtyPath())
+		if m.editor.Dirty() {
+			// The pending autosave tick names the old path: schedule
+			// a new one so the buffer is saved under the new name.
+			rearm = m.editor.ChangeCmd()
+		}
+		// The buffer was saved before the operation; re-read the note
+		// so link rewrites made on disk by a move win.
+		rearm = tea.Batch(rearm, m.reloadNoteIf(m.note.path), m.syncPreview())
 	}
-	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd())
+	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd(), rearm)
 }
 
 // pathRemoved forgets p (and everything under it) in the pins, the local
-// state and the open note.
-func (m *Model) pathRemoved(p string) tea.Cmd {
+// state and the open note. With keepDirty (a deletion made outside the
+// app) an open note with unsaved edits stays open, so saving recreates it.
+func (m *Model) pathRemoved(p string, keepDirty bool) tea.Cmd {
 	m.opts.Pins.Remove(p)
 	m.sidebar.SetPins(m.opts.Pins.Pins)
 	m.opts.Local.Remove(p)
 	m.sidebar.SetExpanded(m.opts.Local.Expanded)
-	// TODO(editor pass): keep a dirty buffer open (and offer to save it)
-	// when its file is deleted outside the app.
+	var warn tea.Cmd
 	if m.note.path != "" && isUnder(m.note.path, p) {
-		m.note = note{}
-		m.openSeq++ // drop any load still in flight
+		if keepDirty && m.editor.Dirty() {
+			warn = m.pushToast(msgs.ToastWarn,
+				fmt.Sprintf("'%s' was deleted on disk; save to recreate it", displayName(m.note.path)))
+		} else {
+			m.closeNote()
+		}
 	}
-	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd())
+	return tea.Batch(m.savePinsCmd(), m.saveLocalCmd(), warn)
 }
 
 // editorCommand builds the $EDITOR command for the file at abs.
@@ -341,16 +370,47 @@ func (m *Model) openExternal(rel string) tea.Cmd {
 	if m.opts.Vault == nil || rel == "" {
 		return nil
 	}
-	return tea.ExecProcess(m.editorCommand(m.opts.Vault.Abs(rel)), func(err error) tea.Msg {
+	return execProcess(m.editorCommand(m.opts.Vault.Abs(rel)), func(err error) tea.Msg {
 		return externalDoneMsg{path: rel, err: err}
 	})
 }
 
+// editExternal hands rel to $EDITOR (ctrl+e, spec §5). The open note's
+// unsaved buffer is saved first; the note is reloaded from disk when the
+// editor exits.
+func (m *Model) editExternal(rel string) tea.Cmd {
+	if m.opts.Vault == nil || rel == "" {
+		return nil
+	}
+	if rel != m.editor.Path() || !m.editor.Dirty() {
+		return m.openExternal(rel)
+	}
+	save := m.saveEditorCmd()
+	if save == nil {
+		return m.openExternal(rel)
+	}
+	return func() tea.Msg {
+		res, _ := save().(savedMsg)
+		return externalSavedMsg{saved: res, path: rel}
+	}
+}
+
+// handleExternalSaved runs $EDITOR once the buffer is saved; a failed save
+// keeps the note in Notty.
+func (m *Model) handleExternalSaved(msg externalSavedMsg) tea.Cmd {
+	cmd := m.handleSaved(msg.saved)
+	if msg.saved.err != nil {
+		return cmd
+	}
+	return tea.Batch(cmd, m.openExternal(msg.path))
+}
+
 // handleExternalDone re-reads a file edited in $EDITOR.
 func (m *Model) handleExternalDone(msg externalDoneMsg) tea.Cmd {
+	ready := m.afterExec()
 	if msg.err != nil {
-		return m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err))
+		return tea.Batch(ready, m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err)))
 	}
 	m.queueReindex(msg.path)
-	return tea.Batch(reindexCmd(m.opts.Vault, m.ix, []string{msg.path}), loadTreeCmd(m.opts.Vault), m.reloadNoteIf(msg.path))
+	return tea.Batch(ready, reindexCmd(m.opts.Vault, m.ix, []string{msg.path}), loadTreeCmd(m.opts.Vault), m.reloadNoteIf(msg.path))
 }

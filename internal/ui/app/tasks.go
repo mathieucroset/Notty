@@ -38,11 +38,19 @@ func (m *Model) isConflicted(p string) bool {
 }
 
 // applyToggleInEditor applies a toggle to the open editor buffer (as one
-// undo step), reporting whether it did. Autosave then writes it.
-// TODO(editor pass): apply to the buffer when msg.Path is open.
-func (m *Model) applyToggleInEditor(msg msgs.ToggleTaskMsg) bool {
-	_ = msg
-	return false
+// undo step; autosave then writes it), reporting whether the note is open.
+// A task the buffer no longer has is reported with a warning toast, never
+// looked for on disk.
+func (m *Model) applyToggleInEditor(msg msgs.ToggleTaskMsg) (tea.Cmd, bool) {
+	if msg.Path == "" || msg.Path != m.editor.Path() {
+		return nil, false
+	}
+	ed, cmd, ok := m.editor.ApplyToggle(msg.Line, msg.Text)
+	if !ok {
+		return m.pushToast(msgs.ToastWarn, "That task changed in "+msg.Path+"; it was not toggled"), true
+	}
+	m.editor = ed
+	return cmd, true
 }
 
 // refreshTasks rebuilds the Tasks view and the sidebar counts from the
@@ -74,8 +82,8 @@ func (m *Model) toggleTask(msg msgs.ToggleTaskMsg) tea.Cmd {
 	if m.isConflicted(msg.Path) {
 		return m.pushToast(msgs.ToastWarn, "Resolve the conflict in "+msg.Path+" first")
 	}
-	if m.applyToggleInEditor(msg) {
-		return nil
+	if cmd, open := m.applyToggleInEditor(msg); open {
+		return cmd
 	}
 	if m.opts.Vault == nil {
 		return nil

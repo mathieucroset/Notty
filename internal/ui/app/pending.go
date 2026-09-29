@@ -9,6 +9,17 @@ import (
 	"github.com/mathieucroset/notty/internal/vault"
 )
 
+// opDone names a finished rename, move or trash for messages.
+func opDone(op opKind) string {
+	switch op {
+	case opRename:
+		return "renamed"
+	case opMove:
+		return "moved"
+	}
+	return "moved to trash"
+}
+
 // opKind is the action a dialog's result feeds.
 type opKind int
 
@@ -23,6 +34,8 @@ const (
 	opDeleteForever
 	opEmptyTrash
 	opCleanAttachments
+	opExternalChange
+	opImportImage
 )
 
 // pendingOp is what to do once a dialog is confirmed, with the data the
@@ -37,13 +50,35 @@ type pendingOp struct {
 	item vault.TrashItem
 	// files are the attachments to delete.
 	files []string
+	// note is the note an image is imported for; data and ext are the
+	// clipboard image bytes (nil when importing the file at path).
+	note string
+	data []byte
+	ext  string
 }
 
-// runPending performs op with the confirmed dialog result res.
+// runPendingMsg runs a confirmed operation once the buffer it touches is
+// saved.
+type runPendingMsg struct {
+	op  pendingOp
+	res dialog.ResultMsg
+}
+
+// runPending performs op with the confirmed dialog result res. Renaming,
+// moving or trashing the open note (or a folder holding it) saves its
+// buffer first, and is abandoned if that save fails.
 func (m *Model) runPending(op pendingOp, res dialog.ResultMsg) tea.Cmd {
 	v, value := m.opts.Vault, strings.TrimSpace(res.Value)
 	if v == nil {
 		return nil
+	}
+	switch op.kind {
+	case opRename, opMove, opTrash:
+		if m.note.path != "" && isUnder(m.note.path, op.path) {
+			if cmd := m.saveThen(runPendingMsg{op: op, res: res}, "it was not "+opDone(op.kind)); cmd != nil {
+				return cmd
+			}
+		}
 	}
 	switch op.kind {
 	case opNewNote:
@@ -69,6 +104,10 @@ func (m *Model) runPending(op pendingOp, res dialog.ResultMsg) tea.Cmd {
 		return emptyTrashCmd(v)
 	case opCleanAttachments:
 		return deleteFilesCmd(v, op.files)
+	case opExternalChange:
+		return m.resolveExternalChange(op.path, res.Choice)
+	case opImportImage:
+		return m.runImport(op)
 	}
 	return nil
 }

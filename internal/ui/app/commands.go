@@ -4,13 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/mathieucroset/notty/internal/attach"
 	"github.com/mathieucroset/notty/internal/config"
+	"github.com/mathieucroset/notty/internal/index"
 	"github.com/mathieucroset/notty/internal/ui/dialog"
+	"github.com/mathieucroset/notty/internal/ui/finder"
 	"github.com/mathieucroset/notty/internal/ui/help"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/palette"
@@ -44,6 +47,27 @@ func (m *Model) openPalette() {
 		WithCurrentTheme(m.opts.Palette.Name).
 		SetSize(m.width, m.height)
 	m.openOverlay(&overlayState{kind: overlayPalette, palette: p, paletteTheme: m.opts.Palette.Name})
+}
+
+// openFinder opens the fuzzy finder (ctrl+p) or full-text search (ctrl+f)
+// over a snapshot of the index.
+func (m *Model) openFinder(fullText bool) tea.Cmd {
+	if m.opts.WizardNeeded || m.opts.Vault == nil {
+		return nil
+	}
+	var notes []*index.Note
+	if m.ix != nil {
+		notes = m.ix.Notes()
+	}
+	mode := finder.Fuzzy
+	if fullText {
+		mode = finder.FullText
+	}
+	f := finder.New(mode, notes, slices.Clone(m.opts.Local.Recents), m.opts.Styles, m.opts.Palette).
+		SetSize(m.width, m.height)
+	f, cmd := f.Init()
+	m.openOverlay(&overlayState{kind: overlayFinder, finder: f})
+	return cmd
 }
 
 // toggleHelp opens the help overlay, or closes it when it is open (F1
@@ -106,6 +130,8 @@ func (m *Model) resizeOverlay() {
 		case overlayLog:
 			w, h := m.logSize()
 			o.log.SetSize(w, h)
+		case overlayFinder:
+			o.finder = o.finder.SetSize(m.width, m.height)
 		}
 	}
 }
@@ -124,6 +150,10 @@ func (m *Model) applyTheme(name string) {
 	m.toast = m.toast.SetStyles(st)
 	m.tasks = m.tasks.SetStyles(st)
 	m.trash = m.trash.SetTheme(st, p)
+	m.editor = m.editor.SetTheme(st, p)
+	var cmd tea.Cmd
+	m.preview, cmd = m.preview.SetTheme(st, p)
+	m.later(cmd)
 	for _, o := range m.overlays {
 		if o.kind == overlayPalette {
 			o.palette = o.palette.SetStyles(st)
@@ -159,18 +189,18 @@ func onOff(b bool) string {
 	return "off"
 }
 
-// toggleVim flips vim mode and saves it.
-// TODO(editor pass): switch the editor's input mode.
+// toggleVim flips vim mode, live in the editor, and saves it.
 func (m *Model) toggleVim() tea.Cmd {
 	m.opts.Config.Vim = !m.opts.Config.Vim
+	m.editor = m.editor.SetVim(m.opts.Config.Vim)
 	return tea.Batch(m.setConfigCmd("vim", m.opts.Config.Vim),
 		m.pushToast(msgs.ToastInfo, "Vim mode "+onOff(m.opts.Config.Vim)))
 }
 
-// toggleLineNumbers flips line numbers and saves the setting.
-// TODO(editor pass): show or hide the editor's line numbers.
+// toggleLineNumbers flips the editor's line numbers and saves the setting.
 func (m *Model) toggleLineNumbers() tea.Cmd {
 	m.opts.Config.LineNumbers = !m.opts.Config.LineNumbers
+	m.editor = m.editor.SetLineNumbers(m.opts.Config.LineNumbers)
 	return tea.Batch(m.setConfigCmd("line_numbers", m.opts.Config.LineNumbers),
 		m.pushToast(msgs.ToastInfo, "Line numbers "+onOff(m.opts.Config.LineNumbers)))
 }
@@ -197,16 +227,17 @@ func (m *Model) openResolver(p string) tea.Cmd {
 
 // openConfig opens config.toml in $EDITOR.
 func (m *Model) openConfig() tea.Cmd {
-	return tea.ExecProcess(m.editorCommand(m.configPath()), func(err error) tea.Msg {
+	return execProcess(m.editorCommand(m.configPath()), func(err error) tea.Msg {
 		return configEditedMsg{err: err}
 	})
 }
 
 func (m *Model) handleConfigEdited(msg configEditedMsg) tea.Cmd {
+	ready := m.afterExec()
 	if msg.err != nil {
-		return m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err))
+		return tea.Batch(ready, m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err)))
 	}
-	return m.pushToast(msgs.ToastInfo, "Restart Notty to apply every config change")
+	return tea.Batch(ready, m.pushToast(msgs.ToastInfo, "Restart Notty to apply every config change"))
 }
 
 // findUnusedCmd lists the attachments no note references.
@@ -303,15 +334,10 @@ func (m *Model) updateCommandMsg(msg tea.Msg) (tea.Cmd, bool) {
 		return m.openConfig(), true
 	case configEditedMsg:
 		return m.handleConfigEdited(msg), true
-	// TODO(integration pass B): the finder overlays and the editor save
-	// replace these placeholders.
 	case msgs.OpenFinderMsg:
-		if msg.FullText {
-			return m.pushToast(msgs.ToastInfo, "Full-text search is coming soon"), true
-		}
-		return m.pushToast(msgs.ToastInfo, "The fuzzy finder is coming soon"), true
-	case msgs.SaveRequestMsg:
-		return m.pushToast(msgs.ToastInfo, "Saving from the editor is coming soon"), true
+		return m.openFinder(msg.FullText), true
+	case finder.CloseMsg:
+		m.closeOverlayKind(overlayFinder)
 	case palette.CleanAttachmentsMsg:
 		if m.opts.Vault == nil {
 			return nil, true
