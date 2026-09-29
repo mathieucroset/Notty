@@ -1,0 +1,248 @@
+package buffer
+
+import (
+	"slices"
+	"strings"
+)
+
+// Pos is a position in the buffer. Col counts grapheme clusters, not bytes
+// or runes. Col == LineLen(Line) is the position just past the last cluster.
+type Pos struct{ Line, Col int }
+
+// Less reports whether p comes before q.
+func (p Pos) Less(q Pos) bool {
+	return p.Line < q.Line || (p.Line == q.Line && p.Col < q.Col)
+}
+
+// Range is a half-open span [Start, End). Operations normalize a range whose
+// Start is after its End, then clamp its endpoints: columns to the line, a
+// line before the first to the start of the buffer and a line past the last
+// to the end of the buffer.
+type Range struct{ Start, End Pos }
+
+// Normalized returns r with Start <= End.
+func (r Range) Normalized() Range {
+	if r.End.Less(r.Start) {
+		return Range{Start: r.End, End: r.Start}
+	}
+	return r
+}
+
+// bpos is an internal position with a byte offset instead of a grapheme
+// column. All edits are performed and recorded in byte coordinates, which
+// stay exact even when an edit merges or splits grapheme clusters.
+type bpos struct{ line, off int }
+
+// Buffer is a line-based text model. The zero value is not usable; call New.
+type Buffer struct {
+	lines           []string
+	trailingNewline bool // text ended with "\n"; restored by String
+	cursor          Pos
+
+	version      uint64
+	firstChanged int // lowest line touched since ResetChanged, -1 if none
+}
+
+// normalizeNewlines converts CRLF line endings to LF.
+func normalizeNewlines(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
+}
+
+// splitText normalizes line endings, strips one trailing "\n" and reports
+// whether it was present.
+func splitText(text string) (body string, trailing bool) {
+	text = normalizeNewlines(text)
+	if strings.HasSuffix(text, "\n") {
+		return text[:len(text)-1], true
+	}
+	return text, false
+}
+
+// New returns a buffer holding text. Lines are split on "\n" ("\r\n" is
+// normalized to "\n"). A single trailing newline is remembered so that
+// String round-trips the (normalized) input exactly.
+func New(text string) *Buffer {
+	body, trailing := splitText(text)
+	return &Buffer{
+		lines:           strings.Split(body, "\n"),
+		trailingNewline: trailing,
+		firstChanged:    -1,
+	}
+}
+
+// String returns the buffer contents, including the trailing newline if the
+// original text had one.
+func (b *Buffer) String() string {
+	s := strings.Join(b.lines, "\n")
+	if b.trailingNewline {
+		s += "\n"
+	}
+	return s
+}
+
+// LineCount returns the number of lines; always >= 1.
+func (b *Buffer) LineCount() int { return len(b.lines) }
+
+// Line returns line i without its newline, or "" if i is out of range.
+func (b *Buffer) Line(i int) string {
+	if i < 0 || i >= len(b.lines) {
+		return ""
+	}
+	return b.lines[i]
+}
+
+// LineLen returns the number of grapheme clusters on line i.
+func (b *Buffer) LineLen(i int) int { return graphemeCount(b.Line(i)) }
+
+// Cursor returns the cursor position.
+func (b *Buffer) Cursor() Pos { return b.cursor }
+
+// SetCursor moves the cursor, clamping it into the buffer.
+func (b *Buffer) SetCursor(p Pos) { b.cursor = b.Clamp(p) }
+
+// Clamp returns the nearest valid position to p: the line is clamped to
+// [0, LineCount-1] and the column to [0, LineLen(line)].
+func (b *Buffer) Clamp(p Pos) Pos {
+	p.Line = max(0, min(p.Line, len(b.lines)-1))
+	p.Col = max(0, min(p.Col, b.LineLen(p.Line)))
+	return p
+}
+
+// Version returns a counter that increases on every change to the text,
+// including undo and redo.
+func (b *Buffer) Version() uint64 { return b.version }
+
+// FirstChangedLine returns the lowest line index touched by an edit since the
+// last ResetChanged, or -1 if nothing changed.
+func (b *Buffer) FirstChangedLine() int { return b.firstChanged }
+
+// ResetChanged clears the FirstChangedLine tracking.
+func (b *Buffer) ResetChanged() { b.firstChanged = -1 }
+
+// toBpos converts a range endpoint to byte coordinates. Unlike Clamp it is
+// order-preserving: a position before the first line maps to the start of
+// the buffer and one past the last line to the end of the buffer, so a
+// normalized range stays normalized after clamping.
+func (b *Buffer) toBpos(p Pos) bpos {
+	last := len(b.lines) - 1
+	switch {
+	case p.Line < 0:
+		return bpos{}
+	case p.Line > last:
+		return bpos{line: last, off: len(b.lines[last])}
+	}
+	return bpos{line: p.Line, off: ColToByte(b.lines[p.Line], p.Col)}
+}
+
+// toPos converts byte coordinates to a grapheme position.
+func (b *Buffer) toPos(bp bpos) Pos {
+	return Pos{Line: bp.line, Col: ByteToCol(b.lines[bp.line], bp.off)}
+}
+
+// bRange converts r to normalized, clamped byte coordinates.
+func (b *Buffer) bRange(r Range) (start, end bpos) {
+	r = r.Normalized()
+	return b.toBpos(r.Start), b.toBpos(r.End)
+}
+
+// textBetween returns the text in [start, end) in byte coordinates.
+func (b *Buffer) textBetween(start, end bpos) string {
+	if start.line == end.line {
+		return b.lines[start.line][start.off:end.off]
+	}
+	var sb strings.Builder
+	sb.WriteString(b.lines[start.line][start.off:])
+	for i := start.line + 1; i < end.line; i++ {
+		sb.WriteByte('\n')
+		sb.WriteString(b.lines[i])
+	}
+	sb.WriteByte('\n')
+	sb.WriteString(b.lines[end.line][:end.off])
+	return sb.String()
+}
+
+// endOf returns the byte position just after text when text is placed at
+// start.
+func endOf(start bpos, text string) bpos {
+	n := strings.Count(text, "\n")
+	if n == 0 {
+		return bpos{line: start.line, off: start.off + len(text)}
+	}
+	return bpos{line: start.line + n, off: len(text) - strings.LastIndexByte(text, '\n') - 1}
+}
+
+// replaceBytes is the single low-level mutation: it swaps [start, end) for
+// text (already newline-normalized), bumps the version, tracks the first
+// changed line and keeps the cursor valid. It records nothing for undo.
+func (b *Buffer) replaceBytes(start, end bpos, text string) (removed string, newEnd bpos) {
+	removed = b.textBetween(start, end)
+	joined := b.lines[start.line][:start.off] + text + b.lines[end.line][end.off:]
+	b.lines = slices.Replace(b.lines, start.line, end.line+1, strings.Split(joined, "\n")...)
+
+	b.version++
+	if b.firstChanged < 0 || start.line < b.firstChanged {
+		b.firstChanged = start.line
+	}
+	b.cursor = b.Clamp(b.cursor)
+	return removed, endOf(start, text)
+}
+
+// Insert inserts text (which may contain newlines; CRLF is normalized) at p
+// and returns the position just after the inserted text. p is clamped like a
+// Range endpoint, so a line past the last one appends at the end.
+func (b *Buffer) Insert(p Pos, text string) Pos {
+	return b.Replace(Range{Start: p, End: p}, text)
+}
+
+// Delete removes the text in r (normalized and clamped; may span lines) and
+// returns it.
+func (b *Buffer) Delete(r Range) string {
+	start, end := b.bRange(r)
+	if start == end {
+		return ""
+	}
+	removed := b.textBetween(start, end)
+	b.edit(start, end, "")
+	return removed
+}
+
+// Replace swaps the text in r (normalized and clamped) for text and returns
+// the position just after the new text.
+func (b *Buffer) Replace(r Range, text string) Pos {
+	text = normalizeNewlines(text)
+	start, end := b.bRange(r)
+	if start == end && text == "" {
+		return b.toPos(start)
+	}
+	return b.toPos(b.edit(start, end, text))
+}
+
+// TextIn returns the text in r (normalized and clamped).
+func (b *Buffer) TextIn(r Range) string {
+	start, end := b.bRange(r)
+	return b.textBetween(start, end)
+}
+
+// SetText replaces the whole contents (e.g. on reload from disk) as one
+// change, keeping the cursor clamped. Identical text is a no-op. It does not
+// mark the buffer saved; callers do that if appropriate.
+func (b *Buffer) SetText(text string) {
+	body, trailing := splitText(text)
+	if trailing == b.trailingNewline && body == strings.Join(b.lines, "\n") {
+		return
+	}
+	last := len(b.lines) - 1
+	b.editTrailing(bpos{}, bpos{line: last, off: len(b.lines[last])}, body, trailing)
+}
+
+// edit applies a primitive change that keeps the trailing-newline flag.
+func (b *Buffer) edit(start, end bpos, text string) bpos {
+	return b.editTrailing(start, end, text, b.trailingNewline)
+}
+
+// editTrailing applies a primitive change and sets the trailing-newline flag.
+func (b *Buffer) editTrailing(start, end bpos, text string, trailing bool) bpos {
+	_, newEnd := b.replaceBytes(start, end, text)
+	b.trailingNewline = trailing
+	return newEnd
+}
