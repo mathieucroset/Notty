@@ -150,6 +150,44 @@ func TestRouteLayering(t *testing.T) {
 	}
 }
 
+// TestRouteMatrix checks every context against representative keys. g marks
+// a global action; "-" means the key goes to the context.
+func TestRouteMatrix(t *testing.T) {
+	keysUnderTest := []string{"ctrl+q", "f1", "ctrl+g", "ctrl+s", "ctrl+k", "ctrl+b", "q", "?", "tab", "esc"}
+	// Columns follow keysUnderTest.
+	matrix := map[Context][]string{
+		Global:         {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		Sidebar:        {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		EditorNormal:   {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		EditorInsert:   {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		EditorVisual:   {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		EditorCommand:  {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		EditorPlain:    {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		EditorReadOnly: {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		Preview:        {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		TasksView:      {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		TrashView:      {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
+		Resolver:       {"g", "g", "-", "-", "-", "-", "-", "-", "-", "-"},
+		ResolverEdit:   {"g", "g", "-", "-", "-", "-", "-", "-", "-", "-"},
+		History:        {"g", "g", "-", "-", "-", "-", "-", "-", "-", "-"},
+		ImageViewer:    {"g", "g", "-", "-", "-", "-", "-", "-", "-", "-"},
+		Wizard:         {"g", "-", "-", "-", "-", "-", "-", "-", "-", "-"},
+		WizardInput:    {"g", "-", "-", "-", "-", "-", "-", "-", "-", "-"},
+		Overlay:        {"g", "g", "-", "-", "-", "-", "-", "-", "-", "-"},
+	}
+	if len(matrix) != len(allContexts) {
+		t.Fatalf("matrix covers %d contexts, want %d", len(matrix), len(allContexts))
+	}
+	for ctx, row := range matrix {
+		for i, k := range keysUnderTest {
+			_, global := Route(ctx, false, press(t, k))
+			if want := row[i] == "g"; global != want {
+				t.Errorf("Route(%v, false, %s): global = %v, want %v", ctx, k, global, want)
+			}
+		}
+	}
+}
+
 func TestBindingsCoverEveryContext(t *testing.T) {
 	for _, ctx := range allContexts {
 		bs := Bindings(ctx)
