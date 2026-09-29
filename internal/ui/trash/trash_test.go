@@ -201,7 +201,7 @@ func TestMoveSelectionEmitsSelectionChanged(t *testing.T) {
 	// j at the bottom does nothing.
 	m, _ = send(m, "j")
 	m, _ = send(m, "j")
-	m, got = send(m, "j")
+	_, got = send(m, "j")
 	if got != nil {
 		t.Errorf("j at the bottom emitted %#v, want nil", got)
 	}
