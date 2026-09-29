@@ -16,28 +16,28 @@ type Config struct {
 	Vault       string
 	Theme       string
 	Vim         bool
-	LineNumbers bool
+	LineNumbers bool `toml:"line_numbers"`
 	Editor      string
-	AutosaveMS  int
+	AutosaveMS  int `toml:"autosave_ms"`
 
 	Sync struct {
-		Enabled        bool
-		CommitDelayS   int
-		FetchIntervalM int
+		Enabled        bool `toml:"enabled"`
+		CommitDelayS   int  `toml:"commit_delay_s"`
+		FetchIntervalM int  `toml:"fetch_interval_m"`
 	} `toml:"sync"`
 
 	Trash struct {
-		RetentionDays int
+		RetentionDays int `toml:"retention_days"`
 	} `toml:"trash"`
 
 	Tasks struct {
-		ShowDone    bool
-		DueSoonDays int
+		ShowDone    bool `toml:"show_done"`
+		DueSoonDays int  `toml:"due_soon_days"`
 	} `toml:"tasks"`
 
 	Images struct {
-		Protocol    string
-		MaxImportMB int
+		Protocol    string `toml:"protocol"`
+		MaxImportMB int    `toml:"max_import_mb"`
 	} `toml:"images"`
 }
 
@@ -211,12 +211,37 @@ func Load(localPath string, vaultRoot string) (Config, error) {
 	return c, nil
 }
 
+// validConfigKeys is the exact set of keys SetKey accepts, matching the
+// Config schema (spec §10): bare top-level keys, and dotted "table.field"
+// keys for the nested sections.
+var validConfigKeys = map[string]bool{
+	"vault":                 true,
+	"theme":                 true,
+	"vim":                   true,
+	"line_numbers":          true,
+	"editor":                true,
+	"autosave_ms":           true,
+	"sync.enabled":          true,
+	"sync.commit_delay_s":   true,
+	"sync.fetch_interval_m": true,
+	"trash.retention_days":  true,
+	"tasks.show_done":       true,
+	"tasks.due_soon_days":   true,
+	"images.protocol":       true,
+	"images.max_import_mb":  true,
+}
+
 // SetKey rewrites exactly one key in the local config file at localPath,
 // creating the file (and its parent directory) if it doesn't exist. key is
 // either a bare top-level key ("theme") or a dotted key into a table
 // ("sync.enabled"). Every other key already present in the file is left
-// untouched.
+// untouched. key must be one of the known config keys; anything else
+// returns an error.
 func SetKey(localPath string, key string, value any) error {
+	if !validConfigKeys[key] {
+		return fmt.Errorf("config: unknown key %q", key)
+	}
+
 	tree, err := readTOMLTree(localPath)
 	if err != nil {
 		return err
@@ -252,21 +277,31 @@ func readTOMLTree(path string) (map[string]any, error) {
 	return tree, nil
 }
 
+// writeTOMLTree writes tree to path atomically: it encodes into a temp
+// file created in the same directory, then renames it into place, so a
+// crash or concurrent read never observes a partially written config file.
 func writeTOMLTree(path string, tree map[string]any) error {
-	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("creating config directory %s: %w", dir, err)
-		}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("creating config directory %s: %w", dir, err)
 	}
 
-	f, err := os.Create(path)
+	tmp, err := os.CreateTemp(dir, ".notty-config-*.tmp")
 	if err != nil {
-		return fmt.Errorf("creating config %s: %w", path, err)
+		return fmt.Errorf("creating temp config file in %s: %w", dir, err)
 	}
-	defer f.Close()
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once the rename below succeeds
 
-	if err := toml.NewEncoder(f).Encode(tree); err != nil {
+	if err := toml.NewEncoder(tmp).Encode(tree); err != nil {
+		tmp.Close()
 		return fmt.Errorf("writing config %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing temp config file %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("renaming temp config file to %s: %w", path, err)
 	}
 	return nil
 }

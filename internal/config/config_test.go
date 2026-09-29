@@ -347,6 +347,87 @@ commit_delay_s = 5
 			t.Error("Vim = true, want false")
 		}
 	})
+
+	t.Run("valid dotted key is accepted and applied", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		if err := SetKey(local, "images.max_import_mb", 42); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		c, err := Load(local, "")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if c.Images.MaxImportMB != 42 {
+			t.Errorf("Images.MaxImportMB = %d, want 42", c.Images.MaxImportMB)
+		}
+	})
+
+	t.Run("rejects unknown top-level key", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		err := SetKey(local, "bogus", "x")
+		if err == nil {
+			t.Fatal("SetKey: want error, got nil")
+		}
+		if !strings.Contains(err.Error(), "bogus") {
+			t.Errorf("SetKey error = %v, want it to mention the key %q", err, "bogus")
+		}
+		if _, statErr := os.Stat(local); !os.IsNotExist(statErr) {
+			t.Error("SetKey: rejected key should not create the config file")
+		}
+	})
+
+	t.Run("rejects unknown dotted key under a known table", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		writeFile(t, local, `[sync]
+enabled = true
+`)
+		err := SetKey(local, "sync.bogus", true)
+		if err == nil {
+			t.Fatal("SetKey: want error, got nil")
+		}
+		if !strings.Contains(err.Error(), "sync.bogus") {
+			t.Errorf("SetKey error = %v, want it to mention the key %q", err, "sync.bogus")
+		}
+		// The existing file must be untouched by the rejected write.
+		c, loadErr := Load(local, "")
+		if loadErr != nil {
+			t.Fatalf("Load: %v", loadErr)
+		}
+		if !c.Sync.Enabled {
+			t.Error("Sync.Enabled = false, want true (file should be unmodified)")
+		}
+	})
+
+	t.Run("rejects key from the wrong table", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		err := SetKey(local, "vault.enabled", true)
+		if err == nil {
+			t.Fatal("SetKey: want error, got nil")
+		}
+	})
+
+	t.Run("writes atomically, leaving no temp file behind", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		if err := SetKey(local, "theme", "dracula"); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 1 || entries[0].Name() != "config.toml" {
+			names := make([]string, len(entries))
+			for i, e := range entries {
+				names[i] = e.Name()
+			}
+			t.Errorf("dir entries = %v, want only config.toml", names)
+		}
+	})
 }
 
 func TestEditorCommand(t *testing.T) {
