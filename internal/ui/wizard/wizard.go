@@ -221,6 +221,9 @@ type Model struct {
 	// Identity form and setup run.
 	run runState
 
+	// Theme step.
+	theme themeState
+
 	spinner  spinner.Model
 	spinning bool
 }
@@ -244,6 +247,7 @@ func New(mode Mode, defaultVault string, currentTheme string, env Env, styles th
 	m.vaultInput.SetValue(defaultVault)
 	m.vaultInput.CursorEnd()
 	m.run = newRunState()
+	m.theme.base = styles
 	m.repoInput = newInput("notes")
 	m.repoInput.SetValue("notes")
 	m.repoInput.CursorEnd()
@@ -541,6 +545,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.identityKey(msg)
 	case StageRun:
 		return m.runKey(msg)
+	case StageTheme:
+		return m.themeKey(msg)
 	}
 	return m, nil
 }
@@ -672,11 +678,6 @@ func (m Model) confirmURL() (Model, tea.Cmd) {
 	m.cancelRemote = cancel
 	m.remote = remoteCheck{url: url, busy: true}
 	return m, tea.Batch(m.remoteCmd(ctx, m.remoteSeq, url), m.spin())
-}
-
-// enterTheme follows a successful first-run setup.
-func (m Model) enterTheme() (Model, tea.Cmd) {
-	return m, emit(m.done(m.currentTheme))
 }
 
 // remoteError maps a remote failure to the text shown to the user.

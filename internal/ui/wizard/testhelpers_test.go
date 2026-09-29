@@ -20,7 +20,7 @@ func init() { inspectDelay = 0 }
 // fakeGH is a setup.GH with a fixed availability.
 type fakeGH struct{ ok bool }
 
-func (g fakeGH) Available(context.Context) bool                 { return g.ok }
+func (g fakeGH) Available(context.Context) bool                   { return g.ok }
 func (g fakeGH) CreateRepo(context.Context, string, string) error { return nil }
 
 // fakeEnv records what the wizard asked for.

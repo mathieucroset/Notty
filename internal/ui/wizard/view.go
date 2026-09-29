@@ -97,6 +97,8 @@ func (m Model) body(w int) string {
 		return m.identityView(w)
 	case StageRun:
 		return m.runView(w)
+	case StageTheme:
+		return m.themeView(w)
 	}
 	return ""
 }
@@ -183,6 +185,8 @@ func (m Model) footer() string {
 			return "r retry · esc back"
 		}
 		return "working…"
+	case StageTheme:
+		return "↑/↓ preview · enter finish · esc back"
 	}
 	return ""
 }
