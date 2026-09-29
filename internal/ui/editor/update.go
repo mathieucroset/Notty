@@ -124,8 +124,8 @@ func (m Model) ChangeCmd() tea.Cmd {
 
 // effects turns an engine Effect into messages and commands.
 func (m Model) effects(eff vim.Effect) (Model, []tea.Cmd) {
-	var cmds []tea.Cmd
-	add := func(msg tea.Msg) { cmds = append(cmds, emit(msg)) }
+	var cmds, ordered []tea.Cmd // ordered: messages delivered in order (":wq" saves first)
+	add := func(msg tea.Msg) { ordered = append(ordered, emit(msg)) }
 	blocked := eff.Blocked
 	if eff.Save {
 		if m.readOnly {
@@ -170,7 +170,7 @@ func (m Model) effects(eff vim.Effect) (Model, []tea.Cmd) {
 		m, cmd = m.flash()
 		cmds = append(cmds, cmd)
 	}
-	return m, cmds
+	return m, append(cmds, tea.Sequence(ordered...))
 }
 
 // notePath turns a `:e` argument into a vault-relative note path.

@@ -281,6 +281,7 @@ func (m Model) cursorAnchor() (anchor, int) {
 
 // ensureVisible scrolls so the cursor keeps the scroll margin.
 func (m Model) ensureVisible() Model {
+	m.lay.width = m.wrapWidth() // the gutter grows with the line count
 	if m.textHeight() <= 0 {
 		return m
 	}

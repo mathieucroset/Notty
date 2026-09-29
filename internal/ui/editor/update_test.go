@@ -34,6 +34,14 @@ func collect(cmd tea.Cmd) []tea.Msg {
 		}
 		return out
 	default:
+		// tea.Sequence returns an unexported []tea.Cmd type.
+		if v := reflect.ValueOf(msg); v.Kind() == reflect.Slice && v.Type().Elem() == reflect.TypeFor[tea.Cmd]() {
+			var out []tea.Msg
+			for i := range v.Len() {
+				out = append(out, collect(v.Index(i).Interface().(tea.Cmd))...)
+			}
+			return out
+		}
 		return []tea.Msg{msg}
 	}
 }
@@ -170,6 +178,7 @@ func TestEffectsToMessages(t *testing.T) {
 	}{
 		{":w", append(chars(":w"), "enter"), msgs.SaveRequestMsg{}},
 		{":q", append(chars(":q"), "enter"), msgs.QuitMsg{}},
+		{":wq quits", append(chars(":wq"), "enter"), msgs.QuitMsg{}},
 		{":e adds .md", append(chars(":e work/ideas"), "enter"), msgs.OpenNoteMsg{Path: "work/ideas.md", Line: -1}},
 		{":e keeps .md", append(chars(":e /a/b.md"), "enter"), msgs.OpenNoteMsg{Path: "a/b.md", Line: -1}},
 		{":help", append(chars(":help"), "enter"), msgs.OpenHelpMsg{}},
@@ -345,4 +354,21 @@ func TestNeedClipboard(t *testing.T) {
 			t.Errorf("content = %q", m.Content())
 		}
 	})
+}
+
+func TestWriteQuitOrder(t *testing.T) {
+	m := newModel(t, testOptions(t), "text", buffer.Pos{}, 40, 5)
+	_, out := typeKeys(m, append(chars(":wq"), "enter")...)
+	var order []string
+	for _, msg := range out {
+		switch msg.(type) {
+		case msgs.SaveRequestMsg:
+			order = append(order, "save")
+		case msgs.QuitMsg:
+			order = append(order, "quit")
+		}
+	}
+	if strings.Join(order, ",") != "save,quit" {
+		t.Errorf(":wq order = %v, want save then quit", order)
+	}
 }

@@ -172,3 +172,17 @@ func TestScrollFollowsCursor(t *testing.T) {
 		t.Fatalf("cursor after load at row %v, want 6 (bottom margin)", c)
 	}
 }
+
+func TestGutterGrowsWithLineCount(t *testing.T) {
+	opts := testOptions(t)
+	opts.LineNumbers = true
+	doc := strings.TrimSuffix(strings.Repeat("x\n", 99), "\n")
+	m := newModel(t, opts, doc, buffer.Pos{Line: 98}, 12, 5)
+	m, _ = typeKeys(m, "o", "a", "b", "c", "d", "e", "f", "g", "h", "esc") // line 100
+	rows := plainView(m)
+	// Gutter 4, text 8, wrap 7.
+	if got := rows[len(rows)-2:]; got[0] != "100 abcdefg" || got[1] != "    h" {
+		t.Errorf("last rows = %q, want the 3-digit gutter and a wrap at 7", got)
+	}
+	checkSize(t, m, 12, 5)
+}
