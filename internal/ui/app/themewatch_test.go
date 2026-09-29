@@ -108,7 +108,9 @@ func TestHandleThemeFiles(t *testing.T) {
 		// picker opens the theme picker on the start theme and highlights
 		// this theme before the steps ("" = no picker).
 		picker string
-		steps  []reloadStep
+		// setupSync opens the "Set up sync" wizard before the steps.
+		setupSync bool
+		steps     []reloadStep
 		// leave is sent after the steps (nil = nothing).
 		leave any
 		// wantShown is the palette displayed at the end: "v1" or "v2" (mineV1
@@ -161,6 +163,10 @@ func TestHandleThemeFiles(t *testing.T) {
 			files: map[string]string{}, configured: "mine", picker: "nord",
 			steps: []reloadStep{{"mine", mineV2}}, leave: keyMsg("esc"),
 			wantShown: "v2", wantH1: "#b2b2b2"},
+		{name: "startup fallback under the Set up sync wizard, then the file appears",
+			files: map[string]string{}, configured: "mine", setupSync: true,
+			steps:     []reloadStep{{"mine", mineV2}},
+			wantShown: "v2"},
 		{name: "unrelated theme files",
 			files: map[string]string{"mine": mineV1}, start: "mine",
 			steps:     []reloadStep{{"other", brokenThemeFile}, {"nord", brokenThemeFile}},
@@ -182,6 +188,11 @@ func TestHandleThemeFiles(t *testing.T) {
 			if tt.picker != "" {
 				openThemePicker(t, m)
 				highlightTheme(t, m, m.opts.Palette.Name, tt.picker)
+			}
+			if tt.setupSync {
+				// It has no theme step: nothing is previewed.
+				w := wizard.New(wizard.SetupSync, opts.Vault.Root, m.opts.Palette, opts.Catalog, *testWizardEnv(), m.opts.Styles)
+				m.wizard = &w
 			}
 			shown := m.opts.Palette.Key()
 
@@ -415,12 +426,23 @@ func TestThemeWatcherLifecycle(t *testing.T) {
 	}
 }
 
+// writeGap separates the writes of TestThemeWatcher: far below
+// themeDebounce, so the writes form one burst unless the machine stalls
+// for most of the debounce.
+const writeGap = 10 * time.Millisecond
+
 // TestThemeWatcher drives the watcher with real file events: writes are
 // debounced into one sorted batch of theme names.
+//
+// Timing: the writes span 2×writeGap = 20ms, and the debounce restarts on
+// each event, so they are split into two batches only if a write or the
+// watcher's goroutine is held up for over 180ms. A stall measured between
+// the writes skips the test rather than failing it; the batch is never
+// expected before themeDebounce, which holds however slow the machine.
 func TestThemeWatcher(t *testing.T) {
 	tests := []struct {
 		name   string
-		writes []string // file names, written 30ms apart
+		writes []string // file names, written writeGap apart
 		want   []string // nil = no batch
 	}{
 		{"rapid rewrites of one theme", []string{"mine.toml", "mine.toml", "mine.toml"}, []string{"mine"}},
@@ -437,13 +459,18 @@ func TestThemeWatcher(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = tw.Close() })
 			first := time.Now()
+			last := first
 			for i, f := range tt.writes {
 				if i > 0 {
-					time.Sleep(30 * time.Millisecond)
+					time.Sleep(writeGap)
 				}
 				if err := os.WriteFile(filepath.Join(dir, f), []byte(strconv.Itoa(i)), 0o644); err != nil {
 					t.Fatal(err)
 				}
+				if gap := time.Since(last); gap > themeDebounce/2 {
+					t.Skipf("writes %v apart: the machine is too loaded to test the debounce", gap)
+				}
+				last = time.Now()
 			}
 			if tt.want == nil {
 				select {
@@ -468,6 +495,78 @@ func TestThemeWatcher(t *testing.T) {
 			case got := <-tw.out:
 				t.Errorf("second batch %v, want one", got)
 			case <-time.After(2 * themeDebounce):
+			}
+		})
+	}
+}
+
+// TestThemeWatcherDirReplaced: when the themes directory itself is removed
+// or renamed, the watcher watches the directory at that path again
+// (re-created when absent) and reports the theme files it now holds.
+func TestThemeWatcherDirReplaced(t *testing.T) {
+	tests := []struct {
+		name    string
+		replace func(t *testing.T, dir string)
+		want    []string // names in the batch after the watch is back
+	}{
+		{"removed", func(t *testing.T, dir string) {
+			if err := os.RemoveAll(dir); err != nil {
+				t.Fatal(err)
+			}
+		}, nil},
+		{"renamed away", func(t *testing.T, dir string) {
+			if err := os.Rename(dir, dir+".old"); err != nil {
+				t.Fatal(err)
+			}
+		}, nil},
+		{"replaced by another directory", func(t *testing.T, dir string) {
+			next := dir + ".next"
+			if err := os.MkdirAll(next, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(next, "fresh.toml"), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(dir, dir+".old"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(next, dir); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{"fresh"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := filepath.Join(t.TempDir(), "themes")
+			tw, err := newThemeWatcher(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = tw.Close() })
+			tt.replace(t, dir)
+			recv := func(what string) []string {
+				t.Helper()
+				select {
+				case got := <-tw.out:
+					return got
+				case <-time.After(2 * time.Second):
+					t.Fatalf("no batch after 2s (%s)", what)
+				}
+				return nil
+			}
+			if got := recv("directory replaced"); !slices.Equal(got, tt.want) {
+				t.Errorf("batch = %v, want %v", got, tt.want)
+			}
+			if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+				t.Fatalf("themes directory not there: %v", err)
+			}
+			// The directory at the path is watched again.
+			if err := os.WriteFile(filepath.Join(dir, "mine.toml"), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := recv("theme written"); !slices.Equal(got, []string{"mine"}) {
+				t.Errorf("batch = %v, want [mine]", got)
 			}
 		})
 	}

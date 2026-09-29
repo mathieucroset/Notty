@@ -29,6 +29,7 @@ const themeDebounce = 200 * time.Millisecond
 // vault watcher.
 type themeWatcher struct {
 	w   *fsnotify.Watcher
+	dir string
 	out chan []string
 	// done is closed by Close; exited when the loop has returned.
 	done, exited chan struct{}
@@ -50,6 +51,7 @@ func newThemeWatcher(dir string) (*themeWatcher, error) {
 	}
 	tw := &themeWatcher{
 		w:      fw,
+		dir:    filepath.Clean(dir),
 		out:    make(chan []string, 1),
 		done:   make(chan struct{}),
 		exited: make(chan struct{}),
@@ -60,9 +62,15 @@ func newThemeWatcher(dir string) (*themeWatcher, error) {
 
 // loop collects the theme names of file events and sends them, sorted,
 // once no event came for themeDebounce.
+//
+// When the themes directory itself is removed or renamed, its watch is
+// gone: once the events settle, the directory at that path is watched
+// again (re-created when absent) and every theme file it holds is
+// reported, since it may be another directory altogether.
 func (tw *themeWatcher) loop() {
 	defer close(tw.exited)
 	pending := map[string]bool{}
+	rewatch := false
 	timer := time.NewTimer(themeDebounce)
 	timer.Stop()
 	defer timer.Stop()
@@ -75,6 +83,12 @@ func (tw *themeWatcher) loop() {
 			if ev.Op == fsnotify.Chmod {
 				continue // attributes only: the colors did not change
 			}
+			if filepath.Clean(ev.Name) == tw.dir && ev.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
+				slog.Warn("themes directory removed or renamed: watching it again", "dir", tw.dir, "op", ev.Op.String())
+				rewatch = true
+				timer.Reset(themeDebounce)
+				continue
+			}
 			if n, ok := strings.CutSuffix(filepath.Base(ev.Name), theme.ThemeExt); ok && n != "" {
 				pending[n] = true
 				timer.Reset(themeDebounce)
@@ -85,6 +99,10 @@ func (tw *themeWatcher) loop() {
 			}
 			slog.Warn("theme watcher", "err", err)
 		case <-timer.C:
+			if rewatch {
+				rewatch = false
+				tw.rewatch(pending)
+			}
 			names := slices.Sorted(maps.Keys(pending))
 			clear(pending)
 			select {
@@ -94,6 +112,31 @@ func (tw *themeWatcher) loop() {
 			}
 		case <-tw.done:
 			return
+		}
+	}
+}
+
+// rewatch watches the themes directory again after it was removed or
+// renamed, re-creating it when absent, and adds the theme files it holds
+// to pending. On failure live reload stops, with a log line.
+func (tw *themeWatcher) rewatch(pending map[string]bool) {
+	if err := os.MkdirAll(tw.dir, 0o700); err != nil {
+		slog.Warn("live theme reload stopped", "err", err)
+		return
+	}
+	_ = tw.w.Remove(tw.dir) // a stale watch of a renamed directory, if any
+	if err := tw.w.Add(tw.dir); err != nil {
+		slog.Warn("live theme reload stopped", "err", err)
+		return
+	}
+	entries, err := os.ReadDir(tw.dir)
+	if err != nil {
+		slog.Warn("theme watcher", "err", err)
+		return
+	}
+	for _, e := range entries {
+		if n, ok := strings.CutSuffix(e.Name(), theme.ThemeExt); ok && n != "" {
+			pending[n] = true
 		}
 	}
 }
@@ -160,8 +203,9 @@ func (m *Model) closeThemeWatcher() {
 // changed user theme the app shows or wants is read again.
 //
 //   - The displayed palette is replaced when its Name is the file's, or,
-//     with no picker or wizard open (nothing previewed), when it is the
-//     theme the user wants (a startup fallback whose file appeared).
+//     with neither the picker nor the first-run wizard open (nothing
+//     previewed), when it is the theme the user wants (a startup fallback
+//     whose file appeared).
 //   - With the picker open, the original it restores is replaced when its
 //     Name is the file's or the file is the theme the user wants, so
 //     leaving the picker shows the new colors.
@@ -187,7 +231,9 @@ func (m *Model) handleThemeFiles(names []string) tea.Cmd {
 		}
 		shown := m.opts.Palette.Name == n
 		orig := pal != nil && (pal.paletteOrig.Name == n || m.themeName == n)
-		want := pal == nil && m.wizard == nil && m.themeName == n
+		// The first-run wizard previews themes in its theme step; the
+		// "Set up sync" one has none.
+		want := pal == nil && (m.wizard == nil || !m.opts.WizardNeeded) && m.themeName == n
 		if !shown && !orig && !want {
 			continue
 		}
