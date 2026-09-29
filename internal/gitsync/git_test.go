@@ -54,7 +54,7 @@ func TestClassify(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := classify(tt.args, tt.network, tt.stdout, tt.stderr)
-			if got != tt.want {
+			if !errors.Is(got, tt.want) {
 				t.Fatalf("classify() = %v, want %v", got, tt.want)
 			}
 		})
@@ -92,7 +92,7 @@ func TestGitErrorWrapsKindAndStderr(t *testing.T) {
 		}
 	}
 	var ge *GitError
-	if !errors.As(fmt.Errorf("sync: %w", err), &ge) || ge.Kind != ErrNetwork {
+	if !errors.As(fmt.Errorf("sync: %w", err), &ge) || !errors.Is(ge.Kind, ErrNetwork) {
 		t.Fatalf("errors.As through wrapping failed")
 	}
 }

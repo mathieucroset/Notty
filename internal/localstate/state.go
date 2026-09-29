@@ -107,17 +107,17 @@ func (s *State) Save(path string) error {
 	}
 	tmpPath := tmp.Name()
 	// Best-effort cleanup; harmless if the rename below already moved it.
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	// os.CreateTemp creates the file with mode 0600; widen it to the usual
 	// 0644 for a regular config/state file before it takes its final name.
 	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("localstate: chmod temp file: %w", err)
 	}
 
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("localstate: write temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

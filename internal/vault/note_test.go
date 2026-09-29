@@ -292,7 +292,7 @@ func TestRenameErrors(t *testing.T) {
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("err = %v, want %v", err, tt.wantErr)
 			}
-			if tt.wantErr == ErrExists && !exists(v, tt.rel) {
+			if errors.Is(tt.wantErr, ErrExists) && !exists(v, tt.rel) {
 				t.Errorf("source %q vanished after failed rename", tt.rel)
 			}
 		})
@@ -354,7 +354,7 @@ func TestMoveErrors(t *testing.T) {
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("err = %v, want %v", err, tt.wantErr)
 			}
-			if tt.wantErr != os.ErrNotExist && tt.rel != "" && !exists(v, tt.rel) {
+			if !errors.Is(tt.wantErr, os.ErrNotExist) && tt.rel != "" && !exists(v, tt.rel) {
 				t.Errorf("source %q vanished after failed move", tt.rel)
 			}
 		})
