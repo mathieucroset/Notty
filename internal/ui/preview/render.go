@@ -196,11 +196,6 @@ func (j renderJob) renderTexts() {
 		var wg sync.WaitGroup
 		for range workers {
 			wg.Go(func() {
-				// Each worker read-locks the chroma registry for its renders.
-				// The parent must not hold it while it waits on the workers:
-				// they would queue behind a waiting writer and deadlock.
-				unlock := theme.RLockChroma()
-				defer unlock()
 				tr, err := glamour.NewTermRenderer(glamour.WithStyles(style), glamour.WithWordWrap(contentWidth(j.width)))
 				if err != nil {
 					tr = nil
@@ -211,7 +206,14 @@ func (j renderJob) renderTexts() {
 						return
 					}
 					i := todo[k]
+					// Glamour reads chroma's style registry while rendering:
+					// hold the read lock per segment, so a theme registration
+					// waits for one segment, not a whole job. Only workers
+					// take it, never the parent waiting on them (it would
+					// queue behind a waiting writer and deadlock).
+					unlock := theme.RLockChroma()
 					j.texts[i].lines = j.glamour(tr, j.texts[i].markdown)
+					unlock()
 				}
 			})
 		}
