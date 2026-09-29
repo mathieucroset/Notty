@@ -78,7 +78,12 @@ func Build(v *vault.Vault) (*Index, error) {
 	}
 	var rels []string
 	collect(root, &rels)
+	return buildFrom(v, rels), nil
+}
 
+// buildFrom indexes the notes at rels in parallel. Files that vanished
+// since they were listed are skipped silently.
+func buildFrom(v *vault.Vault, rels []string) *Index {
 	type result struct {
 		note *Note
 		err  error
@@ -89,6 +94,9 @@ func Build(v *vault.Vault) (*Index, error) {
 	for i, rel := range rels {
 		g.Go(func() error {
 			n, err := load(v, rel)
+			if errors.Is(err, fs.ErrNotExist) {
+				err = nil // deleted between listing and reading
+			}
 			results[i] = result{n, err}
 			return nil // per-file problems are not fatal
 		})
@@ -104,7 +112,7 @@ func Build(v *vault.Vault) (*Index, error) {
 			ix.problems[rels[i]] = r.err
 		}
 	}
-	return ix, nil
+	return ix
 }
 
 // collect appends the paths of all notes below n.

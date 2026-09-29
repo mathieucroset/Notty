@@ -164,6 +164,19 @@ func TestBuildProblems(t *testing.T) {
 	}
 }
 
+func TestBuildSkipsVanishedFiles(t *testing.T) {
+	// A file listed by Tree but deleted before it is read is skipped
+	// without a problem.
+	v := newVault(t, map[string]string{"ok.md": "# OK\n"})
+	ix := buildFrom(v, []string{"ok.md", "vanished.md"})
+	if got, want := paths(ix.Notes()), []string{"ok.md"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Notes = %v, want %v", got, want)
+	}
+	if probs := ix.Problems(); len(probs) != 0 {
+		t.Errorf("Problems = %v, want none", probs)
+	}
+}
+
 func TestBuildUnreadableRoot(t *testing.T) {
 	v := &vault.Vault{Root: filepath.Join(t.TempDir(), "missing")}
 	if _, err := Build(v); err == nil {
