@@ -37,10 +37,32 @@ var chromaMu sync.Mutex
 // highlighting call this so code-block colors always come from the same,
 // theme-specific chroma style rather than glamour's fixed "charm" style
 // name, which would otherwise freeze to whichever palette rendered first.
+//
+// Every built-in palette's style is registered at package init (see
+// RegisterChromaStyles), so for them this never writes to the registry
+// and is safe while other goroutines render with chroma.
 func ChromaStyleName(p Palette) string {
 	name := "notty-" + p.Name
 	registerChromaStyle(name, p)
 	return name
+}
+
+func init() { RegisterChromaStyles() }
+
+var chromaOnce sync.Once
+
+// RegisterChromaStyles registers the chroma style of every built-in
+// palette, once. The package calls it at init: chroma's registry is a
+// plain map that renderers read without a lock, so it must not be written
+// once rendering (the preview renders on several goroutines) has started.
+func RegisterChromaStyles() {
+	chromaOnce.Do(func() {
+		for _, n := range names {
+			if p, ok := palettes[n]; ok {
+				registerChromaStyle("notty-"+p.Name, p)
+			}
+		}
+	})
 }
 
 // chromaEntry builds a chroma StyleEntries value (e.g. "#89b4fa bold") from

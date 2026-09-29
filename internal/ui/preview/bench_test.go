@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +144,25 @@ func TestOrderedListOfOnesKeepsNumbering(t *testing.T) {
 	if got := ansi.Strip(m.doc.lines[32].text); !strings.HasPrefix(got, "33.") {
 		t.Fatalf("row 32 = %q, want it numbered 33.", got)
 	}
+}
+
+// TestConcurrentRendersAcrossPalettes renders code blocks under every
+// palette at once; with -race it catches writes to chroma's style registry
+// while other goroutines render.
+func TestConcurrentRendersAcrossPalettes(t *testing.T) {
+	content := "```go\nfunc a() int { return 1 }\n```\n\n" + bigTaskList(40)
+	var wg sync.WaitGroup
+	for _, name := range theme.Names() {
+		p, _ := theme.Get(name)
+		wg.Go(func() {
+			m := New(theme.NewStyles(p), p, imgrender.Caps{}, t.TempDir()).SetSize(80, 20)
+			m, _ = m.SetContent("n.md", content)
+			if d := m.startRender()().(renderedMsg).doc; len(d.lines) == 0 {
+				t.Errorf("%s: empty render", name)
+			}
+		})
+	}
+	wg.Wait()
 }
 
 func TestMapTasksIsFast(t *testing.T) {
