@@ -471,15 +471,27 @@ func TestTagCounts(t *testing.T) {
 	ix.UpdateContent("c.md", "#WORK #beta")
 	ix.UpdateContent("d.md", "#alpha #beta")
 	ix.UpdateContent("e.md", "no tags")
+	ix.UpdateContent("f.md", "#Work/Client/X")
+	ix.UpdateContent("g.md", "#solo/nested")
 	want := []TagCount{
-		{"Work", 3}, // grouped case-insensitively, spelling from first note by path
+		// Grouped case-insensitively, spelling from the first note by path;
+		// a note counts toward every tag it carries or nests under, once.
+		{"Work", 4},
 		{"beta", 2},
+		{"work/client", 2},
 		{"alpha", 1},
 		{"idea", 1},
-		{"work/client", 1},
+		{"solo/nested", 1}, // "solo" itself is never used, so not listed
+		{"Work/Client/X", 1},
 	}
-	if got := ix.TagCounts(); !reflect.DeepEqual(got, want) {
+	got := ix.TagCounts()
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("TagCounts =\n%v\nwant\n%v", got, want)
+	}
+	for _, tc := range got {
+		if n := len(ix.NotesWithTag(tc.Tag)); n != tc.Count {
+			t.Errorf("tag %q: count %d, NotesWithTag %d", tc.Tag, tc.Count, n)
+		}
 	}
 	if got := New().TagCounts(); len(got) != 0 {
 		t.Errorf("empty TagCounts = %v", got)

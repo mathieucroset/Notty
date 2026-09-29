@@ -332,26 +332,39 @@ func (ix *Index) Problems() []error {
 	return out
 }
 
-// TagCounts returns how many notes carry each tag. Tags are grouped
-// case-insensitively and shown with the spelling of the first note (by
-// path) that uses them. Nested tags count separately (#work/client does not
-// count toward #work). The result is sorted by count descending, then by
-// name ignoring case.
+// TagCounts lists every tag used in some note with the number of distinct
+// notes that carry it or a tag nested under it, so each count equals
+// len(NotesWithTag(tag)). Tags are grouped case-insensitively and shown
+// with the spelling of the first note (by path) that uses them. A parent
+// that is only used through nested tags (#a/b without any #a) is not
+// listed. The result is sorted by count descending, then by name ignoring
+// case.
 func (ix *Index) TagCounts() []TagCount {
-	counts := map[string]*TagCount{}
+	spelling := map[string]string{} // lowercased tag -> display spelling
+	counts := map[string]int{}      // lowercased tag or ancestor -> notes
 	for _, n := range ix.Notes() {
+		keys := map[string]bool{} // this note's tags and their ancestors
 		for _, t := range n.Tags {
 			key := strings.ToLower(t)
-			if c, ok := counts[key]; ok {
-				c.Count++
-			} else {
-				counts[key] = &TagCount{Tag: t, Count: 1}
+			if _, ok := spelling[key]; !ok {
+				spelling[key] = t
+			}
+			for k := key; ; {
+				keys[k] = true
+				i := strings.LastIndexByte(k, '/')
+				if i < 0 {
+					break
+				}
+				k = k[:i]
 			}
 		}
+		for k := range keys {
+			counts[k]++
+		}
 	}
-	out := make([]TagCount, 0, len(counts))
-	for _, c := range counts {
-		out = append(out, *c)
+	out := make([]TagCount, 0, len(spelling))
+	for key, t := range spelling {
+		out = append(out, TagCount{Tag: t, Count: counts[key]})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
