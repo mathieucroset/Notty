@@ -82,12 +82,6 @@ type Machine struct {
 	unnamed    register
 	pasteCount int // count of a "+p waiting for PasteClipboard
 
-	// undo cursor restoration: buffer version after a change -> cursor
-	// before it (and the mirror for redo)
-	undoCur, redoCur map[uint64]buffer.Pos
-	chgCursor        buffer.Pos
-	chgVersion       uint64
-
 	groupBuf *buffer.Buffer // buffer of the open change group
 
 	// command line and search
@@ -112,7 +106,7 @@ var (
 
 // New returns a Machine in normal mode.
 func New() *Machine {
-	return &Machine{undoCur: map[uint64]buffer.Pos{}, redoCur: map[uint64]buffer.Pos{}}
+	return &Machine{}
 }
 
 // Mode returns the current mode.

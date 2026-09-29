@@ -106,10 +106,11 @@ func (m *Machine) execVisual(b *buffer.Buffer, c cmd) {
 			return
 		}
 		m.recordVisual(b, c)
-		m.beginChange(b)
-		if m.anchor.Less(m.chgCursor) {
-			m.chgCursor = m.anchor // undo returns to the start of the selection
+		start := b.Cursor()
+		if m.anchor.Less(start) {
+			start = m.anchor // undo returns to the start of the selection
 		}
+		m.beginChangeAt(b, start)
 		m.visualOp(b, c)
 		if m.mode != Insert {
 			m.endChange(b)

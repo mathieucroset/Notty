@@ -25,38 +25,30 @@ func (m *Machine) setRegister(reg, text string, lw bool) {
 // Register returns the unnamed register's text and whether it is linewise.
 func (m *Machine) Register() (string, bool) { return m.unnamed.text, m.unnamed.linewise }
 
-// beginChange opens the undo group of a change and remembers the cursor so
-// that undoing the change puts the cursor back where it was.
-func (m *Machine) beginChange(b *buffer.Buffer) {
-	b.BeginGroup()
+// beginChange opens the undo group of a change. The buffer records the
+// cursor so that undoing the change puts the cursor back where it was.
+func (m *Machine) beginChange(b *buffer.Buffer) { m.beginChangeAt(b, b.Cursor()) }
+
+// beginChangeAt is beginChange with an explicit cursor to restore on undo.
+func (m *Machine) beginChangeAt(b *buffer.Buffer, cursor buffer.Pos) {
+	b.BeginGroupAt(cursor)
 	m.groupBuf = b
-	m.chgCursor = b.Cursor()
-	m.chgVersion = b.Version()
 }
 
 // endChange closes the undo group opened by beginChange.
 func (m *Machine) endChange(b *buffer.Buffer) {
 	b.EndGroup()
-	if b.Version() != m.chgVersion {
-		m.undoCur[b.Version()] = m.chgCursor
-	}
+	m.groupBuf = nil
 }
 
-// undo undoes n steps, restoring the cursor from before each change.
+// undo undoes n steps; the buffer restores the cursor from before each
+// change.
 func (m *Machine) undo(b *buffer.Buffer, n int) {
 	for ; n > 0; n-- {
-		v := b.Version()
-		p, ok := b.Undo()
-		if !ok {
+		if _, ok := b.Undo(); !ok {
 			m.eff.Message = "Already at oldest change"
 			break
 		}
-		if c, found := m.undoCur[v]; found {
-			delete(m.undoCur, v)
-			m.redoCur[b.Version()] = c
-			p = c
-		}
-		b.SetCursor(p)
 	}
 	m.clampNormal(b)
 }
@@ -64,14 +56,9 @@ func (m *Machine) undo(b *buffer.Buffer, n int) {
 // redo redoes n steps; the cursor goes to the start of the change.
 func (m *Machine) redo(b *buffer.Buffer, n int) {
 	for ; n > 0; n-- {
-		v := b.Version()
 		if _, ok := b.Redo(); !ok {
 			m.eff.Message = "Already at newest change"
 			break
-		}
-		if c, found := m.redoCur[v]; found {
-			delete(m.redoCur, v)
-			m.undoCur[b.Version()] = c
 		}
 	}
 	m.clampNormal(b)

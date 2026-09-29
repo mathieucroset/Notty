@@ -190,6 +190,42 @@ func TestUndoRedo(t *testing.T) {
 	})
 }
 
+func TestUndoCursorAcrossLevels(t *testing.T) {
+	m := New()
+	b := newBuf("one\ntw|o\nthree")
+	feed(m, b, "dd") // cursor lands on "three"
+	feed(m, b, "$x") // cursor on the last char of "three"
+	feed(m, b, "u")
+	if got := show(b); got != "one\nthre|e" {
+		t.Errorf("first undo: %q", got)
+	}
+	feed(m, b, "u")
+	if got := show(b); got != "one\ntw|o\nthree" {
+		t.Errorf("second undo: %q", got)
+	}
+	// Redo then undo again keeps the restored cursor.
+	feed(m, b, "<c-r>u")
+	if got := show(b); got != "one\ntw|o\nthree" {
+		t.Errorf("undo after redo: %q", got)
+	}
+}
+
+func TestUndoCursorTwoBuffers(t *testing.T) {
+	m := New()
+	b1 := newBuf("a\nb|b\nc")
+	b2 := newBuf("x|yz\nw")
+	feed(m, b1, "dd")
+	feed(m, b2, "lx")
+	feed(m, b1, "u")
+	if got := show(b1); got != "a\nb|b\nc" {
+		t.Errorf("b1 undo: %q", got)
+	}
+	feed(m, b2, "u")
+	if got := show(b2); got != "xy|z\nw" {
+		t.Errorf("b2 undo: %q", got)
+	}
+}
+
 func TestUndoMessages(t *testing.T) {
 	_, _, eff := run(t, "|a", "u")
 	if eff.Message != "Already at oldest change" {
