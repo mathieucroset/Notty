@@ -10,9 +10,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mathieucroset/notty/internal/ui/msgs"
+	"github.com/mathieucroset/notty/internal/ui/textutil"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -165,37 +165,14 @@ func (m Model) renderToast(t toastItem, outerWidth int) string {
 	contentWidth := max(outerWidth-4, 1)
 	textWidth := max(contentWidth-2, 1) // icon + space
 
-	wrapped := ansi.Wordwrap(t.text, textWidth, "")
-	lines := strings.Split(wrapped, "\n")
-	for i, l := range lines {
+	wrapped := textutil.Wrap(t.text, textWidth)
+	for i, l := range wrapped {
 		prefix := "  "
 		if i == 0 {
 			prefix = icon(t.level) + " "
 		}
-		lines[i] = padLine(prefix+l, contentWidth)
+		wrapped[i] = textutil.PadLine(prefix+l, contentWidth)
 	}
 
-	return style.Width(outerWidth).Render(strings.Join(lines, "\n"))
-}
-
-// padLine pads or truncates s (which may contain ANSI escape codes) to
-// exactly width w, measured in visible columns.
-func padLine(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if sw := ansi.StringWidth(s); sw > w {
-		return ansi.Truncate(s, w, "")
-	} else if sw < w {
-		return s + strings.Repeat(" ", w-sw)
-	}
-	return s
-}
-
-// wrapLines word-wraps s to width w, returning one string per visual line.
-func wrapLines(s string, w int) []string {
-	if w <= 0 {
-		return []string{s}
-	}
-	return strings.Split(ansi.Wordwrap(s, w, ""), "\n")
+	return style.Width(outerWidth).Render(strings.Join(wrapped, "\n"))
 }
