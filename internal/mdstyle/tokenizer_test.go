@@ -239,14 +239,19 @@ func TestCacheIncremental(t *testing.T) {
 		"end",
 	}
 
-	t.Run("initial tokenizes all", func(t *testing.T) {
+	t.Run("initial computes state only, spans lazily and once", func(t *testing.T) {
 		c := NewCache()
 		c.Update(doc, 0)
-		if c.tokenizeCalls != len(doc) {
-			t.Fatalf("tokenizeCalls = %d, want %d", c.tokenizeCalls, len(doc))
+		if c.stateSteps != len(doc) || c.tokenizeCalls != 0 {
+			t.Fatalf("after Update: stateSteps = %d, tokenizeCalls = %d; want %d, 0", c.stateSteps, c.tokenizeCalls, len(doc))
 		}
 		if got := describe(doc[0], c.Spans(0)); fmtSpans(got) != fmtSpans([]sp{{"# ", Markup}, {"Title", H1}}) {
 			t.Errorf("spans(0) = %s", fmtSpans(got))
+		}
+		touchAll(c, len(doc))
+		touchAll(c, len(doc))
+		if c.tokenizeCalls != len(doc) {
+			t.Fatalf("tokenizeCalls = %d, want %d (memoized)", c.tokenizeCalls, len(doc))
 		}
 		if c.Spans(-1) != nil || c.Spans(len(doc)) != nil {
 			t.Error("out-of-range Spans should be nil")
@@ -256,23 +261,40 @@ func TestCacheIncremental(t *testing.T) {
 	t.Run("paragraph edit re-tokenizes one line", func(t *testing.T) {
 		c := NewCache()
 		c.Update(doc, 0)
-		c.tokenizeCalls = 0
+		touchAll(c, len(doc))
+		resetCounters(c)
 		edited := append([]string(nil), doc...)
 		edited[3] = "para **two**"
 		c.Update(edited, 3)
-		if c.tokenizeCalls != 1 {
-			t.Fatalf("tokenizeCalls = %d, want 1", c.tokenizeCalls)
+		touchAll(c, len(edited))
+		if c.stateSteps != 1 || c.tokenizeCalls != 1 {
+			t.Fatalf("stateSteps = %d, tokenizeCalls = %d; want 1, 1", c.stateSteps, c.tokenizeCalls)
 		}
 		assertCacheMatchesFresh(t, c, edited)
 	})
 
-	t.Run("fence opener re-tokenizes to end", func(t *testing.T) {
+	t.Run("fence opener steps state to end, highlights lazily", func(t *testing.T) {
 		c := NewCache()
 		c.Update(doc, 0)
-		c.tokenizeCalls = 0
+		touchAll(c, len(doc))
+		resetCounters(c)
 		edited := append([]string(nil), doc...)
 		edited[2] = "```"
 		c.Update(edited, 2)
+		if want := len(doc) - 2; c.stateSteps != want {
+			t.Fatalf("stateSteps = %d, want %d", c.stateSteps, want)
+		}
+		if c.tokenizeCalls != 0 || c.highlightCalls != 0 {
+			t.Fatalf("Update computed spans: tokenizeCalls = %d, highlightCalls = %d", c.tokenizeCalls, c.highlightCalls)
+		}
+		c.Spans(5)
+		if c.highlightCalls != 1 {
+			t.Fatalf("highlightCalls after one access = %d, want 1", c.highlightCalls)
+		}
+		touchAll(c, len(edited))
+		if want := len(doc) - 3; c.highlightCalls != want {
+			t.Fatalf("highlightCalls = %d, want %d", c.highlightCalls, want)
+		}
 		if want := len(doc) - 2; c.tokenizeCalls != want {
 			t.Fatalf("tokenizeCalls = %d, want %d", c.tokenizeCalls, want)
 		}
@@ -286,12 +308,12 @@ func TestCacheIncremental(t *testing.T) {
 		assertCacheMatchesFresh(t, c, edited)
 
 		// Closing the fence again stabilizes after the closer.
-		c.tokenizeCalls = 0
+		resetCounters(c)
 		closed := append([]string(nil), edited...)
 		closed[4] = "```"
 		c.Update(closed, 4)
-		if want := len(doc) - 4; c.tokenizeCalls != want {
-			t.Fatalf("after close: tokenizeCalls = %d, want %d", c.tokenizeCalls, want)
+		if want := len(doc) - 4; c.stateSteps != want {
+			t.Fatalf("after close: stateSteps = %d, want %d", c.stateSteps, want)
 		}
 		assertCacheMatchesFresh(t, c, closed)
 	})
@@ -299,13 +321,15 @@ func TestCacheIncremental(t *testing.T) {
 	t.Run("insert line in middle", func(t *testing.T) {
 		c := NewCache()
 		c.Update(doc, 0)
-		c.tokenizeCalls = 0
+		touchAll(c, len(doc))
+		resetCounters(c)
 		inserted := append([]string(nil), doc[:3]...)
 		inserted = append(inserted, "new **line**")
 		inserted = append(inserted, doc[3:]...)
 		c.Update(inserted, 3)
-		if c.tokenizeCalls != 1 {
-			t.Fatalf("tokenizeCalls = %d, want 1", c.tokenizeCalls)
+		touchAll(c, len(inserted))
+		if c.stateSteps != 1 || c.tokenizeCalls != 1 {
+			t.Fatalf("stateSteps = %d, tokenizeCalls = %d; want 1, 1", c.stateSteps, c.tokenizeCalls)
 		}
 		assertCacheMatchesFresh(t, c, inserted)
 	})
@@ -313,12 +337,14 @@ func TestCacheIncremental(t *testing.T) {
 	t.Run("delete line in middle", func(t *testing.T) {
 		c := NewCache()
 		c.Update(doc, 0)
-		c.tokenizeCalls = 0
+		touchAll(c, len(doc))
+		resetCounters(c)
 		deleted := append([]string(nil), doc[:3]...)
 		deleted = append(deleted, doc[4:]...)
 		c.Update(deleted, 3)
-		if c.tokenizeCalls > 1 {
-			t.Fatalf("tokenizeCalls = %d, want <= 1", c.tokenizeCalls)
+		touchAll(c, len(deleted))
+		if c.stateSteps > 1 || c.tokenizeCalls > 1 {
+			t.Fatalf("stateSteps = %d, tokenizeCalls = %d; want <= 1", c.stateSteps, c.tokenizeCalls)
 		}
 		assertCacheMatchesFresh(t, c, deleted)
 	})

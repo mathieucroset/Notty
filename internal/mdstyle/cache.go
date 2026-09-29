@@ -1,16 +1,26 @@
 package mdstyle
 
-// entry is the cached tokenization of one line.
+// entry is the cached state of one line. Spans are computed lazily.
 type entry struct {
-	text    string
-	in, out State
-	spans   []Span
+	text     string
+	in, out  State
+	spans    []Span
+	computed bool // spans is valid
 }
 
-// Cache holds per-line spans for a document and re-tokenizes incrementally.
+// Cache holds per-line state and spans for a document. Update only
+// propagates line states (cheap); spans are computed on first access by
+// Spans and memoized, so only the lines the editor actually renders are
+// tokenized or syntax-highlighted.
+//
+// A Cache is not safe for concurrent use: both Update and Spans mutate it.
 type Cache struct {
-	lines         []entry
-	tokenizeCalls int // number of TokenizeLine calls, for tests
+	lines []entry
+
+	// Counters for tests.
+	stateSteps     int // nextState calls made by Update
+	tokenizeCalls  int // span computations made by Spans (all line kinds)
+	highlightCalls int // the subset of tokenizeCalls for code lines inside a fence
 }
 
 // NewCache returns an empty cache.
@@ -21,20 +31,21 @@ func NewCache() *Cache { return &Cache{} }
 // assumed unchanged and kept as is. The line count may differ from the
 // previous call (inserted or deleted lines).
 //
-// From firstChanged down, each line is re-tokenized unless a cached line
-// with the same text and the same incoming state is available at the
-// matching position (shifted by the change in line count), in which case its
-// spans are reused. An ordinary edit therefore re-tokenizes one line, while
-// opening or closing a fence re-tokenizes every line whose incoming state
-// changed.
+// From firstChanged down, each line keeps its cached entry (including any
+// memoized spans) when a cached line with the same text and the same
+// incoming state exists at the matching position (shifted by the change in
+// line count). Otherwise its outgoing state is recomputed and its spans are
+// invalidated. An ordinary edit therefore invalidates one line, while
+// opening, closing or retagging a fence invalidates every line whose
+// incoming state changed, at the cost of one cheap state step per line.
 func (c *Cache) Update(lines []string, firstChanged int) {
 	old := c.lines
 	delta := len(lines) - len(old)
 	keep := max(0, min(firstChanged, len(old), len(lines)))
 
 	// Reusing an entry is always safe when text and incoming state match,
-	// because tokenization is a pure function of the two. With an unchanged
-	// line count the slice is updated in place.
+	// because both the outgoing state and the spans are pure functions of
+	// the two. With an unchanged line count the slice is updated in place.
 	next := old
 	if delta != 0 {
 		next = make([]entry, len(lines))
@@ -53,18 +64,28 @@ func (c *Cache) Update(lines []string, firstChanged int) {
 			next[i] = old[i]
 			continue
 		}
-		spans, out := TokenizeLine(lines[i], in)
-		c.tokenizeCalls++
-		next[i] = entry{text: lines[i], in: in, out: out, spans: spans}
+		c.stateSteps++
+		next[i] = entry{text: lines[i], in: in, out: nextState(lines[i], in)}
 	}
 	c.lines = next
 }
 
-// Spans returns the cached spans of line, or nil when out of range. The
-// returned slice is shared with the cache and must not be modified.
+// Spans returns the spans of line, or nil when out of range. Spans are
+// computed on first access and memoized, so Spans mutates the cache and must
+// be called from the same goroutine as Update. The returned slice is shared
+// with the cache and must not be modified.
 func (c *Cache) Spans(line int) []Span {
 	if line < 0 || line >= len(c.lines) {
 		return nil
 	}
-	return c.lines[line].spans
+	e := &c.lines[line]
+	if !e.computed {
+		e.spans, _ = TokenizeLine(e.text, e.in)
+		e.computed = true
+		c.tokenizeCalls++
+		if e.in.InFence && e.out.InFence {
+			c.highlightCalls++
+		}
+	}
+	return e.spans
 }

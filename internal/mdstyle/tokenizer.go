@@ -78,20 +78,34 @@ type State struct {
 // TokenizeLine tokenizes one line given the state at its start, returning
 // its spans and the state at its end.
 func TokenizeLine(line string, in State) ([]Span, State) {
+	out := nextState(line, in)
+	switch {
+	case in.InFence && out.InFence: // code inside a fence
+		return HighlightCode(in.FenceLang, line), out
+	case in.InFence: // closing fence
+		return []Span{{Start: 0, End: len(line), Kind: CodeFence, Lang: in.FenceLang}}, out
+	case out.InFence: // opening fence
+		return []Span{{Start: 0, End: len(line), Kind: CodeFence, Lang: out.FenceLang}}, out
+	case line == "":
+		return nil, out
+	}
+	return tokenizeBlock(line), out
+}
+
+// nextState returns the state after line given the state before it. It only
+// looks at fence openers and closers, so it is much cheaper than
+// TokenizeLine; Cache uses it to propagate state without computing spans.
+func nextState(line string, in State) State {
 	if in.InFence {
 		if tags.IsFenceClose(line, in.FenceMarker) {
-			return []Span{{Start: 0, End: len(line), Kind: CodeFence, Lang: in.FenceLang}}, State{}
+			return State{}
 		}
-		return HighlightCode(in.FenceLang, line), in
-	}
-	if line == "" {
-		return nil, State{}
+		return in
 	}
 	if marker, lang, ok := tags.FenceOpen(line); ok {
-		return []Span{{Start: 0, End: len(line), Kind: CodeFence, Lang: lang}},
-			State{InFence: true, FenceLang: lang, FenceMarker: marker}
+		return State{InFence: true, FenceLang: lang, FenceMarker: marker}
 	}
-	return tokenizeBlock(line), State{}
+	return State{}
 }
 
 func tokenizeBlock(line string) []Span {
