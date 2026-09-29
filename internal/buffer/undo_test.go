@@ -286,6 +286,40 @@ func TestDirtyInsideGroup(t *testing.T) {
 	b.EndGroup()
 }
 
+// Regression: MarkSaved in the middle of an open group, followed by another
+// edit in the same group, must leave the buffer dirty.
+func TestMarkSavedInsideGroup(t *testing.T) {
+	b := New("")
+	b.BeginGroup()
+	b.Insert(P(0, 0), "a")
+	b.MarkSaved() // saved text: "a"
+	b.Insert(P(0, 1), "b")
+	if !b.Dirty() {
+		t.Fatal("clean after edit following mid-group MarkSaved")
+	}
+	b.EndGroup()
+	if !b.Dirty() {
+		t.Fatal("clean after EndGroup")
+	}
+	b.Undo() // back to "", which is not the saved text
+	if b.String() != "" || !b.Dirty() {
+		t.Fatalf("after undo String() = %q, Dirty() = %v; want \"\", true", b.String(), b.Dirty())
+	}
+	b.Redo() // to "ab", also not the saved text
+	if b.String() != "ab" || !b.Dirty() {
+		t.Fatalf("after redo String() = %q, Dirty() = %v; want \"ab\", true", b.String(), b.Dirty())
+	}
+	b.MarkSaved()
+	if b.Dirty() {
+		t.Fatal("dirty right after MarkSaved")
+	}
+	b.Undo()
+	b.Redo()
+	if b.Dirty() {
+		t.Error("dirty after undo+redo back to saved state")
+	}
+}
+
 func TestVersionIncrementsOnUndoRedo(t *testing.T) {
 	b := New("a")
 	b.Insert(P(0, 1), "b")

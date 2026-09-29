@@ -60,12 +60,18 @@ func (b *Buffer) newStep() *step {
 	return s
 }
 
-// record stores a primitive edit for undo and clears the redo stack.
+// record stores a primitive edit for undo and clears the redo stack. Every
+// edit gets a fresh state id, even inside a group, so that a MarkSaved
+// between two edits of one group is not mistaken for the group's end state.
 func (b *Buffer) record(c change) {
 	b.redo = nil
 	if b.groupDepth > 0 {
 		if b.pending == nil {
 			b.pending = b.newStep()
+		} else {
+			b.lastState++
+			b.pending.after = b.lastState
+			b.state = b.lastState
 		}
 		b.pending.changes = append(b.pending.changes, c)
 		return
