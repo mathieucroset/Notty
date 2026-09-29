@@ -602,3 +602,57 @@ func TestConcurrentReadsDuringUpdate(t *testing.T) {
 		t.Errorf("Len = %d, want 20", ix.Len())
 	}
 }
+
+func TestFold(t *testing.T) {
+	tests := []struct{ a, b string }{
+		{"hello", "HELLO"},
+		{"Straße", "STRAßE"},
+		{"k", "\u212a"}, // Kelvin sign
+		{"s", "\u017f"}, // long s
+		{"Ünïcode", "üNÏCODE"},
+		{"İstanbul", "İSTANBUL"},
+	}
+	for _, tt := range tests {
+		if Fold(tt.a) != Fold(tt.b) {
+			t.Errorf("Fold(%q) = %q != Fold(%q) = %q", tt.a, Fold(tt.a), tt.b, Fold(tt.b))
+		}
+	}
+	if Fold("i") == Fold("İ") {
+		t.Error(`"i" and "İ" are not simple-fold equivalents`)
+	}
+	if got := Fold("ABC"); got != "ABC" {
+		t.Errorf(`Fold("ABC") = %q, want unchanged`, got)
+	}
+}
+
+func TestContainsFold(t *testing.T) {
+	built := NewNote("n.md", "# Title\nThe Quick \u212aelvin Straße\n", time.Now())
+	literal := &Note{Path: "n.md", Content: built.Content} // no precomputed fold
+	tests := []struct {
+		needle string
+		want   bool
+	}{
+		{"quick", true},
+		{"QUICK KELVIN", true},
+		{"straSSe", false}, // multi-rune folds are not simple folds
+		{"STRAßE", true},
+		{"missing", false},
+		{"", true},
+	}
+	for _, tt := range tests {
+		for name, n := range map[string]*Note{"built": built, "literal": literal} {
+			if got := n.ContainsFold(tt.needle); got != tt.want {
+				t.Errorf("%s ContainsFold(%q) = %v, want %v", name, tt.needle, got, tt.want)
+			}
+		}
+	}
+}
+
+func TestNewNote(t *testing.T) {
+	mt := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
+	n := NewNote("Dir/x.md", "# X\n#tag\n- [ ] do\n", mt)
+	if n.Path != "Dir/x.md" || n.Title != "X" || !n.ModTime.Equal(mt) ||
+		!reflect.DeepEqual(n.Tags, []string{"tag"}) || len(n.Tasks) != 1 {
+		t.Errorf("NewNote = %+v", n)
+	}
+}

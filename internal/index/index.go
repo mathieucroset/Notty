@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/sync/errgroup"
@@ -35,11 +36,15 @@ import (
 var ErrInvalidUTF8 = errors.New("invalid UTF-8")
 
 // Note is one indexed note. Path is vault-relative with "/" separators.
+// Build notes with NewNote so the folded content used by ContainsFold is
+// precomputed.
 type Note struct {
 	Path, Title, Content string
 	ModTime              time.Time
 	Tags                 []string
 	Tasks                []tasks.Task
+
+	folded string // Fold(Content)
 }
 
 // TagCount is a tag with the number of notes carrying it.
@@ -140,14 +145,16 @@ func load(v *vault.Vault, rel string) (*Note, error) {
 	if err != nil {
 		return nil, fmt.Errorf("index: %w", err)
 	}
-	n := newNote(rel, content, fi.ModTime())
+	n := NewNote(rel, content, fi.ModTime())
 	if !utf8.ValidString(content) {
 		return n, fmt.Errorf("index: %q: %w", rel, ErrInvalidUTF8)
 	}
 	return n, nil
 }
 
-func newNote(rel, content string, mod time.Time) *Note {
+// NewNote builds a Note for content at the vault-relative path rel,
+// deriving its title, tags, tasks and case-folded content.
+func NewNote(rel, content string, mod time.Time) *Note {
 	return &Note{
 		Path:    rel,
 		Title:   vault.Title(content, rel),
@@ -155,7 +162,44 @@ func newNote(rel, content string, mod time.Time) *Note {
 		ModTime: mod,
 		Tags:    tags.Parse(content),
 		Tasks:   tasks.Parse(content),
+		folded:  Fold(content),
 	}
+}
+
+// ContainsFold reports whether needle occurs in the note's content under
+// Unicode simple case folding (as strings.EqualFold compares runes). It
+// uses the folded copy precomputed by NewNote; a Note built as a literal
+// is folded on every call.
+func (n *Note) ContainsFold(needle string) bool {
+	f := n.folded
+	if f == "" && n.Content != "" {
+		f = Fold(n.Content)
+	}
+	return strings.Contains(f, Fold(needle))
+}
+
+// Fold maps every rune of s to the smallest rune of its unicode.SimpleFold
+// orbit, so two strings are equal under simple case folding exactly when
+// their folds are equal, and substring tests on folded strings are
+// case-insensitive. ASCII letters fold to upper case. Invalid UTF-8 bytes
+// become U+FFFD. A string that is already folded is returned unchanged
+// without allocating.
+func Fold(s string) string {
+	return strings.Map(foldRune, s)
+}
+
+func foldRune(r rune) rune {
+	if r < utf8.RuneSelf {
+		if 'a' <= r && r <= 'z' {
+			return r - ('a' - 'A')
+		}
+		return r
+	}
+	lo := r
+	for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+		lo = min(lo, f)
+	}
+	return lo
 }
 
 // Update re-reads the file at rel. When nothing exists at rel any more, the
@@ -228,7 +272,7 @@ func (ix *Index) UpdateContent(rel, content string) {
 	if !isNotePath(rel) {
 		return
 	}
-	n := newNote(rel, content, time.Now())
+	n := NewNote(rel, content, time.Now())
 	ix.mu.Lock()
 	ix.notes[rel] = n
 	delete(ix.problems, rel)
