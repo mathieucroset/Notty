@@ -154,22 +154,62 @@ func (m Model) twoColumn(width int) []string {
 // formatSection renders sec's title and rows to lines of exactly width,
 // with the key column styled Accent and the description left plain. The
 // section title uses SidebarSection, and a blank line follows for spacing.
+//
+// The key column's width is the longest Keys string in the section, capped
+// at a fraction of width so a single long multi-key label (e.g. vim text
+// objects: "iw aw i\" a\" i( a( ip ap") can't blow out every row's
+// alignment. A row whose Keys text is still wider than that cap is never
+// truncated — see formatRow.
 func formatSection(sec Section, styles theme.Styles, width int) []string {
-	keyWidth := width / 3
-	if keyWidth > 20 {
-		keyWidth = 20
-	}
-	if keyWidth < 4 {
-		keyWidth = 4
-	}
+	keyWidth := sectionKeyWidth(sec, width)
 
 	lines := []string{padLine(styles.SidebarSection.Render(sec.Title), width)}
 	for _, r := range sec.Rows {
-		line := styles.Accent.Render(padRight(r.Keys, keyWidth)) + " " + r.Desc
-		lines = append(lines, padLine(line, width))
+		lines = append(lines, formatRow(r, styles, width, keyWidth)...)
 	}
 	lines = append(lines, padLine("", width))
 	return lines
+}
+
+// sectionKeyWidth is sec's key column width: the longest Keys string in the
+// section, capped at 40% of width (so it never crowds out the description
+// column) and floored at 4.
+func sectionKeyWidth(sec Section, width int) int {
+	capWidth := width * 2 / 5
+	if capWidth < 6 {
+		capWidth = 6
+	}
+
+	longest := 0
+	for _, r := range sec.Rows {
+		if w := ansi.StringWidth(r.Keys); w > longest {
+			longest = w
+		}
+	}
+
+	switch {
+	case longest > capWidth:
+		return capWidth
+	case longest < 4:
+		return 4
+	default:
+		return longest
+	}
+}
+
+// formatRow renders one Row to a single line of exactly width when its
+// Keys text fits within keyWidth. When it doesn't, the key label is never
+// silently truncated: instead the full Keys text gets its own line, padded
+// to width, and the description follows on the next line, indented to
+// where it would otherwise start.
+func formatRow(r Row, styles theme.Styles, width, keyWidth int) []string {
+	if ansi.StringWidth(r.Keys) <= keyWidth {
+		line := styles.Accent.Render(padRight(r.Keys, keyWidth)) + " " + r.Desc
+		return []string{padLine(line, width)}
+	}
+	keyLine := padLine(styles.Accent.Render(r.Keys), width)
+	descLine := padLine(strings.Repeat(" ", keyWidth+1)+r.Desc, width)
+	return []string{keyLine, descLine}
 }
 
 // innerWidth is the width available for content inside the Dialog style's

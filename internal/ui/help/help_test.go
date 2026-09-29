@@ -1,6 +1,7 @@
 package help
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -131,6 +132,47 @@ func TestSetSizeNeverExceedsTinyTerminal(t *testing.T) {
 		}
 		// Rendering at this size must not panic.
 		_ = m.View()
+	}
+}
+
+// TestFormatSectionNeverTruncatesLongKeyLabel guards against silently
+// clipping a long multi-key label (like the vim text-object row, whose
+// Keys ends in "ip ap") when the key column is capped below its width: the
+// label must wrap onto its own line instead of losing characters.
+func TestFormatSectionNeverTruncatesLongKeyLabel(t *testing.T) {
+	var longRow Row
+	for _, sec := range Sections() {
+		for _, r := range sec.Rows {
+			if strings.Contains(r.Keys, "ip ap") {
+				longRow = r
+			}
+		}
+	}
+	if longRow.Keys == "" {
+		t.Fatal("expected to find the vim text-object row (Keys containing \"ip ap\") in Sections()")
+	}
+
+	sec := Section{Title: "Test", Rows: []Row{longRow}}
+	// Narrower than the full key label, but wide enough to hold it on a
+	// line of its own.
+	width := 40
+	if w := ansi.StringWidth(longRow.Keys); w >= width {
+		width = w + 10
+	}
+
+	lines := formatSection(sec, testStyles(t), width)
+	plain := ansi.Strip(strings.Join(lines, "\n"))
+
+	if !strings.Contains(plain, longRow.Keys) {
+		t.Errorf("expected the complete key label %q to appear verbatim, got:\n%s", longRow.Keys, plain)
+	}
+	if !strings.Contains(plain, "ip ap") {
+		t.Errorf("expected the label's tail \"ip ap\" to survive un-truncated, got:\n%s", plain)
+	}
+	for _, l := range lines {
+		if w := ansi.StringWidth(l); w > width {
+			t.Errorf("line exceeds width %d: %q", width, l)
+		}
 	}
 }
 
