@@ -21,6 +21,25 @@ const maxHeightPct = 60
 // CloseMsg asks the app to close the command palette overlay.
 type CloseMsg struct{}
 
+// ThemePreviewMsg is emitted as the highlight moves in the theme picker, so
+// the app can re-render live with the previewed theme.
+type ThemePreviewMsg struct{ Name string }
+
+// ThemeChosenMsg is emitted when enter confirms a theme in the picker.
+type ThemeChosenMsg struct{ Name string }
+
+// ThemeCancelMsg is emitted when esc cancels the theme picker. The app
+// should restore Original.
+type ThemeCancelMsg struct{ Original string }
+
+// mode is the palette's internal display mode.
+type mode int
+
+const (
+	modeCommands mode = iota
+	modeTheme
+)
+
 // match is one command that survived the current fuzzy filter, together
 // with the indexes of the runes in its Name that matched.
 type match struct {
@@ -35,6 +54,14 @@ type Model struct {
 	matches  []match
 	cursor   int
 
+	mode mode
+
+	// Theme picker state.
+	themeNames    []string
+	themeCursor   int
+	originalTheme string
+	currentTheme  string
+
 	styles theme.Styles
 	width  int
 	height int
@@ -44,6 +71,13 @@ type Model struct {
 func New(cmds []Command, styles theme.Styles) Model {
 	m := Model{commands: cmds, styles: styles}
 	m.refilter()
+	return m
+}
+
+// WithCurrentTheme sets the theme marked ✓ in the theme picker, and the
+// theme esc restores when the picker is cancelled.
+func (m Model) WithCurrentTheme(name string) Model {
+	m.currentTheme = name
 	return m
 }
 
@@ -89,6 +123,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	if m.mode == modeTheme {
+		return m.updateTheme(k)
+	}
 	return m.updateCommands(k)
 }
 
@@ -118,22 +155,62 @@ func (m Model) updateCommands(k tea.KeyPressMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// runSelected runs the highlighted command: it emits its message and
-// closes the palette.
+// runSelected runs the highlighted command: "Switch theme" opens the
+// internal theme picker; everything else emits its message and closes.
 func (m Model) runSelected() (Model, tea.Cmd) {
 	if m.cursor < 0 || m.cursor >= len(m.matches) {
 		return m, nil
 	}
 	cmd := m.matches[m.cursor].cmd
+	if cmd.ID == idSwitchTheme {
+		m.mode = modeTheme
+		m.themeNames = theme.Names()
+		m.originalTheme = m.currentTheme
+		m.themeCursor = indexOf(m.themeNames, m.currentTheme)
+		return m, nil
+	}
 	return m, tea.Batch(cmd.Msg, closeCmd())
+}
+
+func (m Model) updateTheme(k tea.KeyPressMsg) (Model, tea.Cmd) {
+	switch k.String() {
+	case "esc":
+		m.mode = modeCommands
+		orig := m.originalTheme
+		return m, func() tea.Msg { return ThemeCancelMsg{Original: orig} }
+	case "enter":
+		name := m.currentTheme
+		if m.themeCursor >= 0 && m.themeCursor < len(m.themeNames) {
+			name = m.themeNames[m.themeCursor]
+		}
+		return m, tea.Batch(func() tea.Msg { return ThemeChosenMsg{Name: name} }, closeCmd())
+	case "down", "ctrl+j":
+		m.themeCursor = clampInt(m.themeCursor+1, 0, max(len(m.themeNames)-1, 0))
+		return m, m.previewCmd()
+	case "up", "ctrl+k":
+		m.themeCursor = clampInt(m.themeCursor-1, 0, max(len(m.themeNames)-1, 0))
+		return m, m.previewCmd()
+	}
+	return m, nil
+}
+
+func (m Model) previewCmd() tea.Cmd {
+	if m.themeCursor < 0 || m.themeCursor >= len(m.themeNames) {
+		return nil
+	}
+	name := m.themeNames[m.themeCursor]
+	return func() tea.Msg { return ThemePreviewMsg{Name: name} }
 }
 
 func closeCmd() tea.Cmd {
 	return func() tea.Msg { return CloseMsg{} }
 }
 
-// View renders the palette's command list.
+// View renders the palette: the command list, or the theme picker.
 func (m Model) View() string {
+	if m.mode == modeTheme {
+		return m.viewTheme()
+	}
 	return m.viewCommands()
 }
 
@@ -174,6 +251,30 @@ func (m Model) renderRow(mt match, selected bool, width int) string {
 	return line
 }
 
+func (m Model) viewTheme() string {
+	inner := m.innerWidth()
+	lines := []string{padLine(m.styles.DialogTitle.Render("Switch theme"), inner)}
+	rows := m.listRows()
+	start := 0
+	if m.themeCursor >= rows {
+		start = m.themeCursor - rows + 1
+	}
+	end := min(start+rows, len(m.themeNames))
+	for i := start; i < end; i++ {
+		name := m.themeNames[i]
+		mark := "  "
+		if name == m.currentTheme {
+			mark = "✓ "
+		}
+		line := padLine(mark+name, inner)
+		if i == m.themeCursor {
+			line = m.styles.Selection.Render(line)
+		}
+		lines = append(lines, line)
+	}
+	return m.styles.Dialog.Width(m.width).Render(strings.Join(lines, "\n"))
+}
+
 // innerWidth is the width available for content inside the Dialog style's
 // border and padding.
 func (m Model) innerWidth() int {
@@ -184,10 +285,10 @@ func (m Model) innerWidth() int {
 	return w
 }
 
-// listRows is the number of command rows that fit below the prompt line,
-// given m.height.
+// listRows is the number of command/theme rows that fit below the
+// prompt/title line, given m.height.
 func (m Model) listRows() int {
-	avail := m.height - 2 - 2 - 1 // border (2) + vertical padding (2) + prompt line
+	avail := m.height - 2 - 2 - 1 // border (2) + vertical padding (2) + prompt/title line
 	if avail < 1 {
 		avail = 1
 	}
@@ -223,6 +324,15 @@ func padLine(s string, w int) string {
 		return s + strings.Repeat(" ", w-sw)
 	}
 	return s
+}
+
+func indexOf(list []string, s string) int {
+	for i, v := range list {
+		if v == s {
+			return i
+		}
+	}
+	return 0
 }
 
 func clampInt(v, lo, hi int) int {

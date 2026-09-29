@@ -67,7 +67,7 @@ func hasMsgType(list []tea.Msg, want any) bool {
 
 func newTestPalette(t *testing.T) Model {
 	t.Helper()
-	m := New(DefaultCommands(), testStyles(t))
+	m := New(DefaultCommands(), testStyles(t)).WithCurrentTheme("catppuccin-mocha")
 	return m.SetSize(100, 40)
 }
 
@@ -156,6 +156,100 @@ func TestCursorMoveIsBounded(t *testing.T) {
 	}
 }
 
+// findCommand moves the palette's cursor to the command with the given ID.
+func findCommand(t *testing.T, m Model, id string) Model {
+	t.Helper()
+	for i, mt := range m.matches {
+		if mt.cmd.ID == id {
+			m.cursor = i
+			return m
+		}
+	}
+	t.Fatalf("command %q not found", id)
+	return m
+}
+
+func TestSwitchThemeOpensPickerAndPreviewsOnMove(t *testing.T) {
+	m := newTestPalette(t)
+	m = findCommand(t, m, idSwitchTheme)
+
+	m, cmd := m.Update(key("enter"))
+	if cmd != nil {
+		t.Errorf("expected no message when opening the theme picker, got %v", collectMsgs(cmd))
+	}
+	if m.mode != modeTheme {
+		t.Fatal("expected the palette to be in theme mode")
+	}
+	if len(m.themeNames) == 0 {
+		t.Fatal("expected theme names to be populated")
+	}
+
+	before := m.themeCursor
+	m, cmd = m.Update(key("down"))
+	got := collectMsgs(cmd)
+	if len(got) != 1 {
+		t.Fatalf("expected exactly one message on move, got %v", got)
+	}
+	preview, ok := got[0].(ThemePreviewMsg)
+	if !ok {
+		t.Fatalf("expected ThemePreviewMsg, got %T", got[0])
+	}
+	if preview.Name != m.themeNames[m.themeCursor] {
+		t.Errorf("preview name = %q, want %q", preview.Name, m.themeNames[m.themeCursor])
+	}
+	if m.themeCursor == before {
+		t.Error("expected the theme cursor to move")
+	}
+}
+
+func TestSwitchThemeEnterChoosesAndCloses(t *testing.T) {
+	m := newTestPalette(t)
+	m = findCommand(t, m, idSwitchTheme)
+	m, _ = m.Update(key("enter"))
+
+	m, _ = m.Update(key("down"))
+	want := m.themeNames[m.themeCursor]
+
+	_, cmd := m.Update(key("enter"))
+	got := collectMsgs(cmd)
+
+	chosen, ok := findMsg[ThemeChosenMsg](got)
+	if !ok {
+		t.Fatalf("expected ThemeChosenMsg among %v", got)
+	}
+	if chosen.Name != want {
+		t.Errorf("chosen theme = %q, want %q", chosen.Name, want)
+	}
+	if !hasMsgType(got, CloseMsg{}) {
+		t.Errorf("expected CloseMsg among %v", got)
+	}
+}
+
+func TestSwitchThemeEscCancelsThenClosesOnSecondEsc(t *testing.T) {
+	m := newTestPalette(t)
+	m = findCommand(t, m, idSwitchTheme)
+	m, _ = m.Update(key("enter"))
+
+	m, cmd := m.Update(key("esc"))
+	got := collectMsgs(cmd)
+	cancel, ok := findMsg[ThemeCancelMsg](got)
+	if !ok {
+		t.Fatalf("expected ThemeCancelMsg among %v", got)
+	}
+	if cancel.Original != "catppuccin-mocha" {
+		t.Errorf("cancel original = %q, want %q", cancel.Original, "catppuccin-mocha")
+	}
+	if m.mode != modeCommands {
+		t.Fatal("expected esc to return to the command list")
+	}
+
+	_, cmd = m.Update(key("esc"))
+	got = collectMsgs(cmd)
+	if !hasMsgType(got, CloseMsg{}) {
+		t.Errorf("expected the second esc to close the palette, got %v", got)
+	}
+}
+
 func TestSetSizeClampsWidthAndHeight(t *testing.T) {
 	m := New(DefaultCommands(), testStyles(t))
 
@@ -203,3 +297,14 @@ func splitLines(s string) []string {
 	lines = append(lines, s[start:])
 	return lines
 }
+
+func findMsg[T any](list []tea.Msg) (T, bool) {
+	var zero T
+	for _, m := range list {
+		if v, ok := m.(T); ok {
+			return v, true
+		}
+	}
+	return zero, false
+}
+
