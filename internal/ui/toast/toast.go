@@ -5,6 +5,7 @@
 package toast
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -120,6 +121,18 @@ func (m Model) visible() []toastItem {
 	return m.active[len(m.active)-maxVisible:]
 }
 
+// errorCount is how many sticky (error) toasts are currently active,
+// visible or not.
+func (m Model) errorCount() int {
+	n := 0
+	for _, t := range m.active {
+		if t.level == msgs.ToastError {
+			n++
+		}
+	}
+	return n
+}
+
 func icon(level msgs.ToastLevel) string {
 	switch level {
 	case msgs.ToastWarn:
@@ -144,16 +157,21 @@ func (m Model) styleFor(level msgs.ToastLevel) lipgloss.Style {
 
 // View renders the visible toasts stacked, each a rounded box up to 48
 // columns wide (or width, if narrower), for the app to place bottom-right
-// as a layer.
+// as a layer. When more than maxVisible sticky errors are active, an extra
+// "+N more" line below the stack hints at the ones dismissing the visible
+// errors will reveal.
 func (m Model) View(width int) string {
 	w := boxWidth
 	if width > 0 && width < w {
 		w = width
 	}
 	items := m.visible()
-	boxes := make([]string, 0, len(items))
+	boxes := make([]string, 0, len(items)+1)
 	for _, t := range items {
 		boxes = append(boxes, m.renderToast(t, w))
+	}
+	if extra := m.errorCount() - maxVisible; extra > 0 {
+		boxes = append(boxes, textutil.PadLine(m.styles.Muted.Render(fmt.Sprintf("+%d more", extra)), w))
 	}
 	return strings.Join(boxes, "\n")
 }

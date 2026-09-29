@@ -140,6 +140,31 @@ func TestMaxThreeVisible(t *testing.T) {
 	}
 }
 
+func TestMoreThanThreeStickyErrorsShowsMoreCount(t *testing.T) {
+	m := New(testStyles(t))
+	for i := 0; i < 3; i++ {
+		m, _ = m.Push(msgs.ToastError, "error "+string(rune('A'+i)))
+	}
+	if strings.Contains(strip(m.View(80)), "more") {
+		t.Fatal("expected no \"+N more\" hint with exactly 3 sticky errors")
+	}
+
+	m, _ = m.Push(msgs.ToastError, "error D")
+	m, _ = m.Push(msgs.ToastError, "error E")
+	view := strip(m.View(80))
+	if !strings.Contains(view, "+2 more") {
+		t.Fatalf("expected a \"+2 more\" hint with 5 sticky errors, got:\n%s", view)
+	}
+
+	// Dismissing one of the hidden extras (from the front) brings the count
+	// down.
+	m = m.Dismiss() // dismisses the newest, error E
+	view = strip(m.View(80))
+	if !strings.Contains(view, "+1 more") {
+		t.Fatalf("expected \"+1 more\" after a dismiss, got:\n%s", view)
+	}
+}
+
 func TestLogCappedAt100NewestFirst(t *testing.T) {
 	m := New(testStyles(t))
 	for i := 0; i < 150; i++ {
