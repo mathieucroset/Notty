@@ -23,21 +23,33 @@ type ImageLink struct {
 // optional angle-bracket target. Capturing groups: 1=alt, 2=target.
 var imgRe = regexp.MustCompile(`!\[([^\]]*)\]\((<[^>]*>|[^)\s]+)(?:\s+"[^"]*")?\)`)
 
-// FindImages returns every image link in content, skipping fenced code
+// imageMatch is the internal, fuller record of a single image match within
+// a line: it additionally tracks the byte span of the raw target token
+// (including its angle brackets, if any) so callers that need to rewrite
+// only the target can splice precisely, leaving the alt text and any title
+// untouched.
+type imageMatch struct {
+	line                   int
+	start, end             int // whole "![alt](target ...)" span
+	targetStart, targetEnd int // span of the raw target token in the line
+	alt                    string
+	target                 string // decoded target, angle brackets stripped
+	bracketed              bool
+}
+
+// findImageMatches scans content for image links, skipping fenced code
 // blocks (``` or ~~~) and inline code spans (`...`).
-func FindImages(content string) []ImageLink {
+func findImageMatches(content string) []imageMatch {
 	lines := strings.Split(content, "\n")
-	var result []ImageLink
+	var result []imageMatch
 	inFence := false
-	var fenceChar byte
+	var fenceMark byte
 	for lineNo, line := range lines {
-		trimmed := strings.TrimLeft(line, " \t")
-		if isFenceDelim(trimmed) {
-			ch := trimmed[0]
+		if ch, ok := fenceDelim(line); ok {
 			if !inFence {
 				inFence = true
-				fenceChar = ch
-			} else if ch == fenceChar {
+				fenceMark = ch
+			} else if ch == fenceMark {
 				inFence = false
 			}
 			continue
@@ -54,33 +66,81 @@ func FindImages(content string) []ImageLink {
 				continue
 			}
 			alt := line[m[2]:m[3]]
-			target := line[m[4]:m[5]]
-			if len(target) >= 2 && target[0] == '<' && target[len(target)-1] == '>' {
-				target = target[1 : len(target)-1]
+			targetStart, targetEnd := m[4], m[5]
+			rawTarget := line[targetStart:targetEnd]
+			bracketed := len(rawTarget) >= 2 && rawTarget[0] == '<' && rawTarget[len(rawTarget)-1] == '>'
+			target := rawTarget
+			if bracketed {
+				target = rawTarget[1 : len(rawTarget)-1]
 			}
-			result = append(result, ImageLink{
-				Line:   lineNo,
-				Start:  start,
-				End:    end,
-				Alt:    alt,
-				Target: target,
+			result = append(result, imageMatch{
+				line:        lineNo,
+				start:       start,
+				end:         end,
+				targetStart: targetStart,
+				targetEnd:   targetEnd,
+				alt:         alt,
+				target:      target,
+				bracketed:   bracketed,
 			})
 		}
 	}
 	return result
 }
 
-// isFenceDelim reports whether s (already left-trimmed) opens or closes a
-// fenced code block: a run of at least 3 backticks or tildes.
-func isFenceDelim(s string) bool {
-	if len(s) < 3 {
-		return false
+// FindImages returns every image link in content, skipping fenced code
+// blocks (``` or ~~~) and inline code spans (`...`).
+func FindImages(content string) []ImageLink {
+	matches := findImageMatches(content)
+	result := make([]ImageLink, 0, len(matches))
+	for _, m := range matches {
+		result = append(result, ImageLink{
+			Line:   m.line,
+			Start:  m.start,
+			End:    m.end,
+			Alt:    m.alt,
+			Target: m.target,
+		})
 	}
-	c := s[0]
+	return result
+}
+
+// fenceDelim reports whether line opens or closes a fenced code block: a
+// run of at least 3 backticks or tildes preceded by at most 3 leading
+// spaces of indentation, per CommonMark (4 or more leading spaces makes it
+// an indented code block instead, not a fence). A leading tab counts as
+// advancing to the next multiple of 4.
+func fenceDelim(line string) (byte, bool) {
+	width := 0
+	i := 0
+loop:
+	for i < len(line) {
+		switch line[i] {
+		case ' ':
+			width++
+			i++
+		case '\t':
+			width += 4 - (width % 4)
+			i++
+		default:
+			break loop
+		}
+	}
+	if width > 3 {
+		return 0, false
+	}
+	rest := line[i:]
+	if len(rest) < 3 {
+		return 0, false
+	}
+	c := rest[0]
 	if c != '`' && c != '~' {
-		return false
+		return 0, false
 	}
-	return s[0] == c && s[1] == c && s[2] == c
+	if rest[0] == c && rest[1] == c && rest[2] == c {
+		return c, true
+	}
+	return 0, false
 }
 
 type byteSpan struct{ start, end int }
@@ -183,31 +243,40 @@ func Resolve(target, noteRel string) (vaultRel string, external bool) {
 // (from oldNoteRel) to a file that exists in the vault, so they remain
 // valid after the note moves to newNoteRel. Root-relative ("/...") and
 // external links are left untouched, as are links that do not resolve to
-// an existing vault file. Returns the (possibly unchanged) content and
-// whether anything changed.
+// an existing vault file.
+//
+// Only the target token is replaced; the alt text and any title are left
+// byte-for-byte untouched. If the target was originally wrapped in angle
+// brackets, the rewritten target keeps them; if it wasn't, but the new
+// target contains a space or ')' (which would otherwise break the plain
+// "(target)" syntax), it is wrapped in angle brackets.
+//
+// Returns the (possibly unchanged) content and whether anything changed.
 func RewriteForMove(content, oldNoteRel, newNoteRel string, exists func(vaultRel string) bool) (string, bool) {
-	images := FindImages(content)
-	if len(images) == 0 {
+	matches := findImageMatches(content)
+	if len(matches) == 0 {
 		return content, false
 	}
 
-	byLine := make(map[int][]ImageLink)
-	for _, im := range images {
-		byLine[im.Line] = append(byLine[im.Line], im)
+	byLine := make(map[int][]imageMatch)
+	for _, m := range matches {
+		byLine[m.line] = append(byLine[m.line], m)
 	}
 
 	lines := strings.Split(content, "\n")
 	changed := false
 	newDir := path.Dir(newNoteRel)
 
-	for lineNo, ims := range byLine {
-		sort.Slice(ims, func(i, j int) bool { return ims[i].Start > ims[j].Start })
+	for lineNo, ms := range byLine {
+		// Process rightmost matches first so earlier byte offsets on the
+		// same line stay valid as we splice.
+		sort.Slice(ms, func(i, j int) bool { return ms[i].targetStart > ms[j].targetStart })
 		line := lines[lineNo]
-		for _, im := range ims {
-			if strings.HasPrefix(im.Target, "/") {
+		for _, m := range ms {
+			if strings.HasPrefix(m.target, "/") {
 				continue
 			}
-			vaultRel, external := Resolve(im.Target, oldNoteRel)
+			vaultRel, external := Resolve(m.target, oldNoteRel)
 			if external || vaultRel == "" {
 				continue
 			}
@@ -215,8 +284,11 @@ func RewriteForMove(content, oldNoteRel, newNoteRel string, exists func(vaultRel
 				continue
 			}
 			newTarget := RelPath(newDir, vaultRel)
-			replacement := "![" + im.Alt + "](" + newTarget + ")"
-			line = line[:im.Start] + replacement + line[im.End:]
+			replacement := newTarget
+			if m.bracketed || strings.ContainsAny(newTarget, " )") {
+				replacement = "<" + newTarget + ">"
+			}
+			line = line[:m.targetStart] + replacement + line[m.targetEnd:]
 			changed = true
 		}
 		lines[lineNo] = line

@@ -134,6 +134,63 @@ func TestRewriteForMove(t *testing.T) {
 			t.Errorf("got %q, want unchanged %q", got, content)
 		}
 	})
+
+	t.Run("titled image preserves title", func(t *testing.T) {
+		content := `![pic](../img.png "My Title")` + "\n"
+		got, changed := RewriteForMove(content, "a/b/n.md", "n.md", exists)
+		if !changed {
+			t.Fatal("expected changed = true")
+		}
+		want := `![pic](a/img.png "My Title")` + "\n"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("angle-bracket target whose new path has spaces", func(t *testing.T) {
+		content := "![pic](<../my img.png>)\n"
+		spaceExists := func(vaultRel string) bool { return vaultRel == "a/my img.png" }
+		got, changed := RewriteForMove(content, "a/b/n.md", "n.md", spaceExists)
+		if !changed {
+			t.Fatal("expected changed = true")
+		}
+		want := "![pic](<a/my img.png>)\n"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("unbracketed target wrapped when new path has a space", func(t *testing.T) {
+		// Note and image start in the same space-named directory, so the
+		// original link needs no traversal and no brackets. After the note
+		// moves to the vault root, the new relative path must traverse
+		// through "a b", introducing a space for the first time.
+		content := "![pic](img.png)\n"
+		spaceExists := func(vaultRel string) bool { return vaultRel == "a b/img.png" }
+		got, changed := RewriteForMove(content, "a b/note.md", "note.md", spaceExists)
+		if !changed {
+			t.Fatal("expected changed = true")
+		}
+		want := "![pic](<a b/img.png>)\n"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("two images on one line", func(t *testing.T) {
+		content := "![a](../img.png) and ![b](../img2.png)\n"
+		twoExists := func(vaultRel string) bool {
+			return vaultRel == "a/img.png" || vaultRel == "a/img2.png"
+		}
+		got, changed := RewriteForMove(content, "a/b/n.md", "n.md", twoExists)
+		if !changed {
+			t.Fatal("expected changed = true")
+		}
+		want := "![a](a/img.png) and ![b](a/img2.png)\n"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
 }
 
 func TestImageOnlyParagraph(t *testing.T) {
@@ -175,6 +232,34 @@ func TestRelPath(t *testing.T) {
 		got := RelPath(c.fromDir, c.toRel)
 		if got != c.want {
 			t.Errorf("RelPath(%q, %q) = %q, want %q", c.fromDir, c.toRel, got, c.want)
+		}
+	}
+}
+
+func TestFenceIndentRule(t *testing.T) {
+	// Per CommonMark, a fence delimiter indented 4 or more spaces is not a
+	// fence (it would be an indented code block instead); FindImages should
+	// not treat it as one, so images "inside" it are still found. Only a
+	// delimiter indented 3 spaces or fewer opens/closes a real fence.
+	content := strings.Join([]string{
+		`![before](before.png)`,         // 0
+		"    ```",                       // 1 (4 spaces: not a fence)
+		`![not fenced](not-fenced.png)`, // 2
+		"    ```",                       // 3 (4 spaces: not a fence)
+		"   ```",                        // 4 (3 spaces: is a fence)
+		`![fenced](fenced.png)`,         // 5
+		"   ```",                        // 6 (3 spaces: closes the fence)
+		`![after](after.png)`,           // 7
+	}, "\n")
+
+	got := FindImages(content)
+	wantLines := []int{0, 2, 7}
+	if len(got) != len(wantLines) {
+		t.Fatalf("FindImages returned %d images, want %d: %+v", len(got), len(wantLines), got)
+	}
+	for i, l := range wantLines {
+		if got[i].Line != l {
+			t.Errorf("got[%d].Line = %d, want %d", i, got[i].Line, l)
 		}
 	}
 }
