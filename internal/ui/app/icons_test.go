@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mathieucroset/notty/internal/ui/icons"
+	"github.com/mathieucroset/notty/internal/ui/msgs"
 )
 
 // TestIconsSettingReachesTheScreen checks that the icons config key picks
@@ -21,6 +22,11 @@ func TestIconsSettingReachesTheScreen(t *testing.T) {
 			}
 			if s := screen(m); !strings.Contains(s, set.Logo+" Notty") {
 				t.Errorf("sidebar title lacks the %s logo:\n%s", name, s)
+			}
+			run(t, m, msgs.OpenNoteMsg{Path: "ideas.md", Line: 0})
+			typeText(t, m, "ix")
+			if top := strings.Split(screen(m), "\n")[0]; !strings.Contains(top, " "+set.Dirty+" ─╮") {
+				t.Errorf("pane title lacks the %s dirty mark: %q", name, top)
 			}
 			m.applyTheme("nord")
 			if got := m.opts.Styles.Icons.Name; got != name {

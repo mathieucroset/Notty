@@ -108,7 +108,7 @@ var unicode = Set{
 	Error:            "✗",
 	Check:            "✓",
 	Pending:          "○",
-	Image:            "🖼️", // emoji presentation: two columns everywhere
+	Image:            "🖼\ufe0f", // emoji presentation: two columns everywhere
 	KindText:         "≡",
 	KindBinary:       "◆",
 	KindModifyDelete: "±",

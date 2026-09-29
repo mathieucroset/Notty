@@ -414,7 +414,8 @@ func taskGlyph(set icons.Set, units []unit, line string, spans []mdstyle.Span, r
 }
 
 // chips renders an image-only line as one chip per image:
-// "🖼️ name.png  640×480", or "missing" when the file cannot be read.
+// "<image icon> name.png  640×480", or "missing" when the file cannot be
+// read.
 func (m Model) chips(line string) []unit {
 	imgs := links.FindImages(line)
 	if len(imgs) == 0 {

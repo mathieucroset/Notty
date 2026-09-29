@@ -488,7 +488,7 @@ func (m Model) SetReadOnly(ro bool, banner string) Model {
 
 // bannerView renders the read-only banner row, reversed while flashing.
 func (m Model) bannerView() string {
-	text := " ⚠ " + strings.NewReplacer("\n", " ", "\t", " ").Replace(sanitize(m.banner)) + " "
+	text := " " + m.opts.Styles.Icons.Warn + " " + strings.NewReplacer("\n", " ", "\t", " ").Replace(sanitize(m.banner)) + " "
 	if ansi.StringWidth(text) > m.w {
 		text = ansi.Truncate(text, m.w, "…")
 	}

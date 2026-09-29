@@ -36,6 +36,11 @@ func TestRenderIconSets(t *testing.T) {
 				}
 			}
 			checkSize(t, m, 40, 8)
+
+			ro := newModel(t, opts, "conflicted", buffer.Pos{}, 70, 5).SetReadOnly(true, "")
+			if got, want := strings.TrimSpace(plainView(ro)[0]), set.Warn+" "+DefaultBanner; got != want {
+				t.Errorf("banner = %q, want %q", got, want)
+			}
 		})
 	}
 }

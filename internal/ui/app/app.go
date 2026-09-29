@@ -808,7 +808,7 @@ func (m *Model) renderMain(l Layout) string {
 			right = append(right, "preview")
 		}
 		if m.editor.Dirty() {
-			right = append(right, "●")
+			right = append(right, st.Icons.Dirty)
 		}
 	}
 
