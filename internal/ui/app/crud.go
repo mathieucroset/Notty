@@ -83,6 +83,10 @@ func (m *Model) requestNewNote(folder string) tea.Cmd {
 	if m.opts.Vault == nil {
 		return nil
 	}
+	if folder == "" {
+		// From the palette: the sidebar's selection decides, as n would.
+		folder = m.sidebar.SelectedFolder()
+	}
 	d := dialog.NewInput(dlgNewNote, inFolder("New note", folder), "Note title", "", requireName, m.opts.Styles)
 	m.openDialog(d, pendingOp{kind: opNewNote, path: folder})
 	return nil
@@ -91,6 +95,9 @@ func (m *Model) requestNewNote(folder string) tea.Cmd {
 func (m *Model) requestNewFolder(parent string) tea.Cmd {
 	if m.opts.Vault == nil {
 		return nil
+	}
+	if parent == "" {
+		parent = m.sidebar.SelectedFolder()
 	}
 	d := dialog.NewInput(dlgNewFolder, inFolder("New folder", parent), "Folder name", "", requireName, m.opts.Styles)
 	m.openDialog(d, pendingOp{kind: opNewFolder, path: parent})

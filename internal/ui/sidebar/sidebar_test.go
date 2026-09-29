@@ -63,6 +63,22 @@ func newTest(t *testing.T) Model {
 	return m
 }
 
+func TestSelectedFolder(t *testing.T) {
+	m := newTest(t)
+	m.Select("Work/Sub/deep.md")
+	if got := m.SelectedFolder(); got != "Work/Sub" {
+		t.Errorf("SelectedFolder on a note = %q, want Work/Sub", got)
+	}
+	m.Select("Work")
+	if got := m.SelectedFolder(); got != "Work" {
+		t.Errorf("SelectedFolder on a folder = %q, want Work", got)
+	}
+	m.Select("readme.md")
+	if got := m.SelectedFolder(); got != "" {
+		t.Errorf("SelectedFolder at the root = %q, want \"\"", got)
+	}
+}
+
 // nodePaths lists the tree rows currently visible, in order.
 func nodePaths(m Model) []string {
 	var out []string

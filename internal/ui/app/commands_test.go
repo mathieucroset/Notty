@@ -61,8 +61,9 @@ func TestPaletteNewNoteOpensDialog(t *testing.T) {
 	if m.topOverlay() == nil || m.topOverlay().kind != overlayDialog || m.topOverlay().pending.kind != opNewNote {
 		t.Fatalf("new note dialog not open: %+v", m.topOverlay())
 	}
-	if m.topOverlay().pending.path != "" {
-		t.Errorf("palette new note targets %q, want the vault root", m.topOverlay().pending.path)
+	// The sidebar cursor is on the Work folder (the first row).
+	if m.topOverlay().pending.path != "Work" {
+		t.Errorf("palette new note targets %q, want the sidebar's folder Work", m.topOverlay().pending.path)
 	}
 }
 
