@@ -25,6 +25,7 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/app"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/vault"
+	"github.com/mathieucroset/notty/internal/watcher"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -237,6 +238,18 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 	if opts.Pins, err = meta.Load(v.Root); err != nil {
 		_, _ = fmt.Fprintf(e.stderr, "notty: ignoring pins: %v\n", err)
 		opts.Pins = &meta.State{Pins: []string{}}
+	}
+	// The watcher notices edits made outside the app (spec §3). Without it
+	// the app still works; it just misses external changes.
+	if w, err := watcher.New(v.Root); err != nil {
+		_, _ = fmt.Fprintf(e.stderr, "notty: not watching the vault for changes: %v\n", err)
+	} else {
+		opts.Watcher = w
+		unlock := release
+		release = func() {
+			_ = w.Close()
+			unlock()
+		}
 	}
 	return opts, release, nil
 }

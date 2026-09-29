@@ -323,16 +323,3 @@ func (m *Model) handleExternalDone(msg externalDoneMsg) tea.Cmd {
 	}
 	return tea.Batch(reindexCmd(m.opts.Vault, m.ix, []string{msg.path}), loadTreeCmd(m.opts.Vault), m.reloadNoteIf(msg.path))
 }
-
-// reindexCmd re-reads paths into the index off the UI goroutine.
-func reindexCmd(v *vault.Vault, ix *index.Index, paths []string) tea.Cmd {
-	if ix == nil || len(paths) == 0 {
-		return nil
-	}
-	return func() tea.Msg {
-		for _, p := range paths {
-			_ = ix.Update(v, p)
-		}
-		return indexChangedMsg{}
-	}
-}

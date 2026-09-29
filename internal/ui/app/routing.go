@@ -80,8 +80,7 @@ func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
 func (m *Model) handleAction(a keys.Action) tea.Cmd {
 	switch a {
 	case keys.Quit:
-		// TODO(Task 19/32): full quit sequence (save, kitty cleanup, syncer).
-		return tea.Quit
+		return m.quit()
 	case keys.Help:
 		return emit(msgs.OpenHelpMsg{})
 	case keys.ToggleSidebar:

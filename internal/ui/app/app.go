@@ -24,6 +24,7 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/ui/toast"
 	"github.com/mathieucroset/notty/internal/vault"
+	"github.com/mathieucroset/notty/internal/watcher"
 )
 
 // Options configures the app. Later tasks add fields (capabilities, the
@@ -41,6 +42,9 @@ type Options struct {
 	Caps imgrender.Caps
 	// WizardNeeded starts the app in first-run wizard mode, without a vault.
 	WizardNeeded bool
+	// Watcher reports changes made outside the app. The app listens to it
+	// from Init and closes it on quit; nil disables watching.
+	Watcher *watcher.Watcher
 }
 
 // Focus is the pane with keyboard focus.
@@ -164,7 +168,7 @@ func (m *Model) Init() tea.Cmd {
 		return nil
 	}
 	m.indexing = true
-	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault))
+	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault), listenWatcherCmd(m.opts.Watcher))
 }
 
 // Update handles a message.
@@ -223,8 +227,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case msgs.CycleNoteViewMsg:
 		m.cycleNoteView()
 	case msgs.QuitMsg:
-		// TODO(Task 19/32): full quit sequence.
-		return m, tea.Quit
+		return m, m.quit()
 	case msgs.ActivateEntryMsg:
 		switch msg.Entry {
 		case msgs.EntryTasks:
@@ -270,6 +273,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleExternalDone(msg)
 	case noteReloadedMsg:
 		m.handleNoteReloaded(msg)
+	case watchEventMsg:
+		return m, m.handleWatchEvent(msg)
+	case watchErrMsg:
+		return m, m.handleWatchErr(msg)
+	case savedMsg:
+		return m, m.handleSaved(msg)
 	case dialog.ResultMsg:
 		return m, m.handleDialogResult(msg)
 	default:
@@ -279,6 +288,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// quit stops the watcher and ends the program.
+// TODO(syncer pass): the full quit sequence (buffer save, kitty cleanup,
+// syncer flush; plan amendment A7).
+func (m *Model) quit() tea.Cmd {
+	m.closeWatcher()
+	return tea.Quit
 }
 
 // showNote records the open note and moves focus to the main pane.
