@@ -29,14 +29,6 @@ func testToday() time.Time {
 	return time.Date(2026, 9, 29, 0, 0, 0, 0, time.Local)
 }
 
-func due(s string) *time.Time {
-	t, err := time.ParseInLocation("2006-01-02", s, time.Local)
-	if err != nil {
-		panic(err)
-	}
-	return &t
-}
-
 // ref builds an index.TaskRef. text may contain an inline "@YYYY-MM-DD" due
 // date, which is parsed the same way tasks.ParseLine would.
 func ref(path, title string, line int, done bool, text string) index.TaskRef {
