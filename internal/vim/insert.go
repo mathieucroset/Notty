@@ -92,6 +92,28 @@ func (m *Machine) insertApply(b *buffer.Buffer, k Key, tok string) {
 		b.SetCursor(b.Insert(cur, " "))
 	case "<c-v>":
 		m.eff.NeedClipboard = true
+	case "<c-w>", "<c-u>":
+		if cur.Col == 0 {
+			m.insertApply(b, k, "<bs>")
+			return
+		}
+		start := pos(cur.Line, 0)
+		if tok == "<c-w>" {
+			// Delete the word (and the blanks after it) before the cursor.
+			t := newText(b)
+			start = cur
+			for start.Col > 0 && t.cls(pos(cur.Line, start.Col-1), false) == clsBlank {
+				start.Col--
+			}
+			if start.Col > 0 {
+				c := t.cls(pos(cur.Line, start.Col-1), false)
+				for start.Col > 0 && t.cls(pos(cur.Line, start.Col-1), false) == c {
+					start.Col--
+				}
+			}
+		}
+		b.Delete(buffer.Range{Start: start, End: cur})
+		b.SetCursor(start)
 	default:
 		if !m.insertSpecial(b, tok) && isPrintable(k) {
 			b.SetCursor(b.Insert(cur, k.Text))

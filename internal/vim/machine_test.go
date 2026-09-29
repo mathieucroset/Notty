@@ -2,6 +2,16 @@ package vim
 
 import "testing"
 
+func TestInsertDeleteWord(t *testing.T) {
+	runEditCases(t, []editCase{
+		{"c-w deletes word", "foo bar|", "A<c-w>", "foo |"},
+		{"c-w deletes word and blanks", "foo bar  |", "A<c-w>", "foo |"},
+		{"c-w punct", "foo.bar|", "A<c-w>", "foo.|"},
+		{"c-w at col 0 joins", "ab\n|cd", "i<c-w>", "ab|cd"},
+		{"c-u deletes to line start", "  ab|cd", "i<c-u>", "|cd"},
+	})
+}
+
 func TestMultiGraphemeKeys(t *testing.T) {
 	m := New()
 	b := newBuf("|x foo")
