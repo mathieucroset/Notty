@@ -125,6 +125,10 @@ func (m *Model) handleEditorChanged(msg editor.ChangedMsg) tea.Cmd {
 	m.note.title = vault.Title(content, msg.Path)
 	m.note.words = len(strings.Fields(content))
 	m.sidebar.SetDirty(m.dirtyPath())
+	if m.mainView == ViewTasks {
+		// A task toggled in the Tasks view shows its new state now.
+		m.refreshTasks()
+	}
 	cmd := m.syncPreview()
 	m.followCursor()
 	return cmd
