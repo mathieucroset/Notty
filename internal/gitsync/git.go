@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -108,6 +109,10 @@ type Repo struct {
 	Host string // short hostname used in commit messages
 	run  runner
 
+	// sshCommand is core.sshCommand as configured for this repo (read once by
+	// Open); it gets "-o BatchMode=yes" appended instead of being replaced.
+	sshCommand string
+
 	mu        sync.Mutex
 	lastMerge mergeRecord // output of the last Merge run through this Repo
 }
@@ -132,7 +137,28 @@ func Open(dir string) *Repo {
 		dir = abs
 	}
 	h, _ := os.Hostname()
-	return &Repo{Dir: dir, Host: shortHost(h), run: execRunner}
+	ssh := configuredSSHCommand(dir)
+	return &Repo{Dir: dir, Host: shortHost(h), run: newExecRunner(ssh), sshCommand: ssh}
+}
+
+// configuredSSHCommand returns core.sshCommand as git sees it from dir, or
+// from the global and system config when dir is "". It returns "" when unset
+// or when git cannot be run.
+func configuredSSHCommand(dir string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), localTimeout)
+	defer cancel()
+	scopes := [][]string{nil}
+	if dir == "" {
+		scopes = [][]string{{"--global"}, {"--system"}}
+	}
+	for _, scope := range scopes {
+		args := append(append([]string{"config"}, scope...), "--get", "core.sshCommand")
+		res, err := execRunner(ctx, dir, args...)
+		if v := strings.TrimSpace(string(res.Stdout)); err == nil && v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func shortHost(h string) string {
@@ -309,30 +335,57 @@ func hasConflictLine(s string) bool {
 	return false
 }
 
-// gitEnv returns the environment for git: the caller's environment plus
-// GIT_TERMINAL_PROMPT=0, LC_ALL=C and a batch-mode GIT_SSH_COMMAND unless the
-// user already set one.
-func gitEnv(base []string) []string {
-	env := make([]string, 0, len(base)+3)
-	hasSSH := false
+// strippedEnv lists variables removed from the caller's environment: ours
+// are re-added with fixed values, and repository-location overrides would
+// point git at some other repository than Repo.Dir.
+var strippedEnv = []string{
+	"GIT_TERMINAL_PROMPT", "LC_ALL", "GIT_LITERAL_PATHSPECS",
+	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+}
+
+// gitEnv returns the environment for git: the caller's environment without
+// strippedEnv, plus GIT_TERMINAL_PROMPT=0, LC_ALL=C, GIT_LITERAL_PATHSPECS=1
+// (paths like "a[1].md" or ":x.md" are never globs or magic), and a
+// batch-mode GIT_SSH_COMMAND. The user's own GIT_SSH or GIT_SSH_COMMAND is
+// left untouched; otherwise sshCommand (core.sshCommand) is kept with
+// "-o BatchMode=yes" appended, falling back to plain ssh.
+func gitEnv(base []string, sshCommand string) []string {
+	env := make([]string, 0, len(base)+4)
+	userSSH := false
 	for _, kv := range base {
-		switch {
-		case strings.HasPrefix(kv, "GIT_TERMINAL_PROMPT="), strings.HasPrefix(kv, "LC_ALL="):
+		name, value, _ := strings.Cut(kv, "=")
+		if slices.Contains(strippedEnv, name) {
 			continue
-		case strings.HasPrefix(kv, "GIT_SSH_COMMAND="):
-			hasSSH = true
+		}
+		if (name == "GIT_SSH" || name == "GIT_SSH_COMMAND") && value != "" {
+			userSSH = true
 		}
 		env = append(env, kv)
 	}
-	env = append(env, "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
-	if !hasSSH {
-		env = append(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+	env = append(env, "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_LITERAL_PATHSPECS=1")
+	if !userSSH {
+		if sshCommand == "" {
+			sshCommand = "ssh"
+		}
+		env = append(env, "GIT_SSH_COMMAND="+sshCommand+" -o BatchMode=yes")
 	}
 	return env
 }
 
-// execRunner runs the real git binary.
+// newExecRunner returns a runner for the real git binary that uses
+// sshCommand (core.sshCommand, may be "") for the batch-mode ssh command.
+func newExecRunner(sshCommand string) runner {
+	return func(ctx context.Context, dir string, args ...string) (result, error) {
+		return runExec(ctx, sshCommand, dir, args...)
+	}
+}
+
+// execRunner runs the real git binary without a configured ssh command.
 func execRunner(ctx context.Context, dir string, args ...string) (result, error) {
+	return runExec(ctx, "", dir, args...)
+}
+
+func runExec(ctx context.Context, sshCommand, dir string, args ...string) (result, error) {
 	path, err := exec.LookPath("git")
 	if err != nil {
 		return result{}, fmt.Errorf("gitsync: %w", ErrGitMissing)
@@ -342,7 +395,7 @@ func execRunner(ctx context.Context, dir string, args ...string) (result, error)
 		full = append([]string{"-C", dir}, args...)
 	}
 	cmd := exec.CommandContext(ctx, path, full...)
-	cmd.Env = gitEnv(os.Environ())
+	cmd.Env = gitEnv(os.Environ(), sshCommand)
 	cmd.Stdin = nil
 	// ssh children may hold the pipes open after git is killed on timeout.
 	cmd.WaitDelay = 2 * time.Second

@@ -98,26 +98,85 @@ func TestGitErrorWrapsKindAndStderr(t *testing.T) {
 }
 
 func TestGitEnv(t *testing.T) {
-	t.Run("adds defaults", func(t *testing.T) {
-		env := gitEnv([]string{"HOME=/h", "LC_ALL=fr_FR.UTF-8"})
-		for _, want := range []string{"HOME=/h", "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_SSH_COMMAND=ssh -o BatchMode=yes"} {
-			if !slices.Contains(env, want) {
-				t.Errorf("env missing %q: %v", want, env)
+	tests := []struct {
+		name       string
+		base       []string
+		configured string
+		want       []string
+		notWant    []string
+	}{
+		{
+			name:    "defaults",
+			base:    []string{"HOME=/h", "LC_ALL=fr_FR.UTF-8", "GIT_LITERAL_PATHSPECS=0"},
+			want:    []string{"HOME=/h", "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_LITERAL_PATHSPECS=1", "GIT_SSH_COMMAND=ssh -o BatchMode=yes"},
+			notWant: []string{"LC_ALL=fr_FR.UTF-8", "GIT_LITERAL_PATHSPECS=0"},
+		},
+		{
+			name:       "core.sshCommand keeps its options",
+			configured: "ssh -i ~/.ssh/notes_key",
+			want:       []string{"GIT_SSH_COMMAND=ssh -i ~/.ssh/notes_key -o BatchMode=yes"},
+			notWant:    []string{"GIT_SSH_COMMAND=ssh -o BatchMode=yes"},
+		},
+		{
+			name:       "user GIT_SSH_COMMAND wins",
+			base:       []string{"GIT_SSH_COMMAND=ssh -i key"},
+			configured: "ssh -i other",
+			want:       []string{"GIT_SSH_COMMAND=ssh -i key"},
+			notWant:    []string{"GIT_SSH_COMMAND=ssh -o BatchMode=yes", "GIT_SSH_COMMAND=ssh -i other -o BatchMode=yes"},
+		},
+		{
+			name:    "user GIT_SSH is left alone",
+			base:    []string{"GIT_SSH=/usr/bin/plink"},
+			want:    []string{"GIT_SSH=/usr/bin/plink"},
+			notWant: []string{"GIT_SSH_COMMAND=ssh -o BatchMode=yes"},
+		},
+		{
+			name:    "repository overrides are stripped",
+			base:    []string{"GIT_DIR=/elsewhere/.git", "GIT_WORK_TREE=/elsewhere", "GIT_INDEX_FILE=/x/index", "GIT_OBJECT_DIRECTORY=/x/objects", "GIT_DIR_EXTRA=kept"},
+			want:    []string{"GIT_DIR_EXTRA=kept"},
+			notWant: []string{"GIT_DIR=/elsewhere/.git", "GIT_WORK_TREE=/elsewhere", "GIT_INDEX_FILE=/x/index", "GIT_OBJECT_DIRECTORY=/x/objects"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := gitEnv(tt.base, tt.configured)
+			for _, w := range tt.want {
+				if !slices.Contains(env, w) {
+					t.Errorf("env missing %q: %v", w, env)
+				}
 			}
-		}
-		if slices.Contains(env, "LC_ALL=fr_FR.UTF-8") {
-			t.Errorf("env kept caller LC_ALL: %v", env)
-		}
-	})
-	t.Run("keeps user ssh command", func(t *testing.T) {
-		env := gitEnv([]string{"GIT_SSH_COMMAND=ssh -i key"})
-		if !slices.Contains(env, "GIT_SSH_COMMAND=ssh -i key") {
-			t.Errorf("user GIT_SSH_COMMAND dropped: %v", env)
-		}
-		if slices.Contains(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes") {
-			t.Errorf("user GIT_SSH_COMMAND overridden: %v", env)
-		}
-	})
+			for _, nw := range tt.notWant {
+				if slices.Contains(env, nw) {
+					t.Errorf("env has %q: %v", nw, env)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenReadsCoreSSHCommand(t *testing.T) {
+	if !Available() {
+		t.Skip("git not installed")
+	}
+	home := t.TempDir()
+	cfg := filepath.Join(home, "gitconfig")
+	if err := os.WriteFile(cfg, []byte("[core]\n\tsshCommand = ssh -i /keys/notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(home))
+	if got := Open(t.TempDir()).sshCommand; got != "ssh -i /keys/notes" {
+		t.Fatalf("Open().sshCommand = %q, want the global core.sshCommand", got)
+	}
+	if got := configuredSSHCommand(""); got != "ssh -i /keys/notes" {
+		t.Fatalf("configuredSSHCommand(\"\") = %q", got)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	if got := Open(t.TempDir()).sshCommand; got != "" {
+		t.Fatalf("Open().sshCommand = %q with no config, want \"\"", got)
+	}
 }
 
 func TestRunGitMissing(t *testing.T) {

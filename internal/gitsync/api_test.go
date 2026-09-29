@@ -158,6 +158,39 @@ func TestAddAndRemove(t *testing.T) {
 	}
 }
 
+func TestAddRemoveLiteralPaths(t *testing.T) {
+	env := gittest.New(t)
+	r := env.Laptop
+	for _, p := range []string{"a[1].md", "a1.md", ":odd.md", "*.md"} {
+		gittest.Write(t, r, p, p+"\n")
+	}
+	if err := r.Add("a[1].md", ":odd.md"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if got := gittest.Git(t, r.Dir, "diff", "--cached", "--name-only"); got != ":odd.md\na[1].md" {
+		t.Fatalf("staged = %q, want only the literal paths", got)
+	}
+	gittest.CommitAll(t, r, "all")
+
+	if err := r.Remove("a[1].md", "*.md"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if got := gittest.Git(t, r.Dir, "ls-files"); got != ":odd.md\nREADME.md\na1.md" {
+		t.Fatalf("tracked after Remove = %q, want a1.md and README.md kept", got)
+	}
+	for _, p := range []string{"a1.md", ":odd.md", "README.md"} {
+		if _, err := os.Stat(filepath.Join(r.Dir, p)); err != nil {
+			t.Errorf("%s deleted by Remove of a glob-like path: %v", p, err)
+		}
+	}
+	if err := r.Remove(":odd.md"); err != nil {
+		t.Fatalf("Remove(:odd.md): %v", err)
+	}
+	if got := gittest.Git(t, r.Dir, "ls-files"); got != "README.md\na1.md" {
+		t.Fatalf("tracked after Remove(:odd.md) = %q", got)
+	}
+}
+
 func TestFetchMergePushRoundTrip(t *testing.T) {
 	env := gittest.New(t)
 	lap, desk := env.Laptop, env.Desktop

@@ -60,7 +60,8 @@ func Clone(ctx context.Context, url, dir string) (*Repo, error) {
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return nil, fmt.Errorf("gitsync: clone: %w", err)
 	}
-	if _, err := runGit(ctx, execRunner, parent, true, "clone", "-q", "--", url, abs); err != nil {
+	run := newExecRunner(configuredSSHCommand(""))
+	if _, err := runGit(ctx, run, parent, true, "clone", "-q", "--", url, abs); err != nil {
 		return nil, fmt.Errorf("gitsync: clone %s: %w", url, err)
 	}
 	return Open(abs), nil
@@ -74,7 +75,8 @@ func LsRemote(ctx context.Context, url string) (hasHistory bool, defaultBranch s
 	if err := checkArg("url", url); err != nil {
 		return false, "", err
 	}
-	res, err := runGit(ctx, execRunner, "", true, "ls-remote", "--symref", url, "HEAD")
+	run := newExecRunner(configuredSSHCommand(""))
+	res, err := runGit(ctx, run, "", true, "ls-remote", "--symref", url, "HEAD")
 	if err != nil {
 		return false, "", fmt.Errorf("gitsync: ls-remote: %w", err)
 	}
@@ -82,7 +84,7 @@ func LsRemote(ctx context.Context, url string) (hasHistory bool, defaultBranch s
 	if hasHead {
 		return true, symref, nil
 	}
-	res, err = runGit(ctx, execRunner, "", true, "ls-remote", "--heads", url)
+	res, err = runGit(ctx, run, "", true, "ls-remote", "--heads", url)
 	if err != nil {
 		return false, "", fmt.Errorf("gitsync: ls-remote: %w", err)
 	}
