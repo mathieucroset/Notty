@@ -125,8 +125,7 @@ func (m *Model) handleAction(a keys.Action) tea.Cmd {
 	case keys.Save:
 		return emit(msgs.SaveRequestMsg{})
 	case keys.ExternalEditor:
-		// TODO(editor pass): save the buffer first.
-		return m.openExternal(m.note.path)
+		return m.editExternal(m.note.path)
 	}
 	return nil
 }

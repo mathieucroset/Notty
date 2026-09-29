@@ -365,7 +365,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileOpMsg:
 		return m, m.handleFileOp(msg)
 	case msgs.OpenFileExternalMsg:
-		return m, m.openExternal(msg.Path)
+		return m, m.editExternal(msg.Path)
+	case externalSavedMsg:
+		return m, m.handleExternalSaved(msg)
 	case externalDoneMsg:
 		return m, m.handleExternalDone(msg)
 	case noteReloadedMsg:

@@ -124,6 +124,10 @@ func (m *Model) applyTheme(name string) {
 	m.toast = m.toast.SetStyles(st)
 	m.tasks = m.tasks.SetStyles(st)
 	m.trash = m.trash.SetTheme(st, p)
+	m.editor = m.editor.SetTheme(st, p)
+	var cmd tea.Cmd
+	m.preview, cmd = m.preview.SetTheme(st, p)
+	m.later(cmd)
 	for _, o := range m.overlays {
 		if o.kind == overlayPalette {
 			o.palette = o.palette.SetStyles(st)
@@ -159,18 +163,18 @@ func onOff(b bool) string {
 	return "off"
 }
 
-// toggleVim flips vim mode and saves it.
-// TODO(editor pass): switch the editor's input mode.
+// toggleVim flips vim mode, live in the editor, and saves it.
 func (m *Model) toggleVim() tea.Cmd {
 	m.opts.Config.Vim = !m.opts.Config.Vim
+	m.editor = m.editor.SetVim(m.opts.Config.Vim)
 	return tea.Batch(m.setConfigCmd("vim", m.opts.Config.Vim),
 		m.pushToast(msgs.ToastInfo, "Vim mode "+onOff(m.opts.Config.Vim)))
 }
 
-// toggleLineNumbers flips line numbers and saves the setting.
-// TODO(editor pass): show or hide the editor's line numbers.
+// toggleLineNumbers flips the editor's line numbers and saves the setting.
 func (m *Model) toggleLineNumbers() tea.Cmd {
 	m.opts.Config.LineNumbers = !m.opts.Config.LineNumbers
+	m.editor = m.editor.SetLineNumbers(m.opts.Config.LineNumbers)
 	return tea.Batch(m.setConfigCmd("line_numbers", m.opts.Config.LineNumbers),
 		m.pushToast(msgs.ToastInfo, "Line numbers "+onOff(m.opts.Config.LineNumbers)))
 }
@@ -197,7 +201,7 @@ func (m *Model) openResolver(p string) tea.Cmd {
 
 // openConfig opens config.toml in $EDITOR.
 func (m *Model) openConfig() tea.Cmd {
-	return tea.ExecProcess(m.editorCommand(m.configPath()), func(err error) tea.Msg {
+	return execProcess(m.editorCommand(m.configPath()), func(err error) tea.Msg {
 		return configEditedMsg{err: err}
 	})
 }

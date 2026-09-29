@@ -43,6 +43,20 @@ type externalDoneMsg struct {
 	err  error
 }
 
+// externalSavedMsg reports the save that runs before the open note is
+// handed to $EDITOR.
+type externalSavedMsg struct {
+	saved savedMsg
+	path  string
+}
+
+// execProcess and execCommand run a program or an ExecCommand with the
+// terminal released (tea.ExecProcess, tea.Exec); tests replace them.
+var (
+	execProcess = tea.ExecProcess
+	execCommand = tea.Exec
+)
+
 // displayName is the name shown for a vault path: its base name, without
 // ".md" for notes.
 func displayName(p string) string {
@@ -348,9 +362,39 @@ func (m *Model) openExternal(rel string) tea.Cmd {
 	if m.opts.Vault == nil || rel == "" {
 		return nil
 	}
-	return tea.ExecProcess(m.editorCommand(m.opts.Vault.Abs(rel)), func(err error) tea.Msg {
+	return execProcess(m.editorCommand(m.opts.Vault.Abs(rel)), func(err error) tea.Msg {
 		return externalDoneMsg{path: rel, err: err}
 	})
+}
+
+// editExternal hands rel to $EDITOR (ctrl+e, spec §5). The open note's
+// unsaved buffer is saved first; the note is reloaded from disk when the
+// editor exits.
+func (m *Model) editExternal(rel string) tea.Cmd {
+	if m.opts.Vault == nil || rel == "" {
+		return nil
+	}
+	if rel != m.editor.Path() || !m.editor.Dirty() {
+		return m.openExternal(rel)
+	}
+	save := m.saveEditorCmd()
+	if save == nil {
+		return m.openExternal(rel)
+	}
+	return func() tea.Msg {
+		res, _ := save().(savedMsg)
+		return externalSavedMsg{saved: res, path: rel}
+	}
+}
+
+// handleExternalSaved runs $EDITOR once the buffer is saved; a failed save
+// keeps the note in Notty.
+func (m *Model) handleExternalSaved(msg externalSavedMsg) tea.Cmd {
+	cmd := m.handleSaved(msg.saved)
+	if msg.saved.err != nil {
+		return cmd
+	}
+	return tea.Batch(cmd, m.openExternal(msg.path))
 }
 
 // handleExternalDone re-reads a file edited in $EDITOR.
