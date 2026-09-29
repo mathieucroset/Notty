@@ -64,7 +64,8 @@ func prepareText(seg Segment, imgs []links.ImageLink, notePath string, defs []re
 	}
 	md := strings.Join(lines, "\n")
 	var used []string
-	if len(defs) > 0 {
+	// Definitions appended after an unclosed fence would show as code.
+	if len(defs) > 0 && !inFence {
 		lower := strings.ToLower(md)
 		for _, d := range defs {
 			if strings.Contains(lower, "["+d.label+"]") {

@@ -419,6 +419,14 @@ func TestReferenceLinksRender(t *testing.T) {
 	}
 }
 
+func TestReferenceDefsNotAppendedIntoOpenFence(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	m, _ = setContent(t, m, "n.md", "[a]: x.md\n\n```\ncode [a]\n")
+	if v := ansi.Strip(m.View()); strings.Contains(v, "x.md") {
+		t.Fatalf("definition leaked into the open code block:\n%s", v)
+	}
+}
+
 func TestCodeSpans(t *testing.T) {
 	cases := map[string][][2]int{
 		"a `b` c":       {{2, 5}},
