@@ -46,7 +46,7 @@ func controlGlyph(g string) (string, bool) {
 	case r == '\t':
 		return "", false
 	case r < 0x20:
-		return string(rune(0x2400 + r)), true
+		return string(0x2400 + r), true
 	case r == 0x7f:
 		return "\u2421", true
 	case r >= 0x80 && r <= 0x9f:

@@ -24,8 +24,10 @@ func writePNG(t *testing.T, path string, w, h int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
 	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, w, h))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
