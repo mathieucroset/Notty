@@ -18,7 +18,7 @@ func HalfBlocks(img image.Image, cols, rows int) []string {
 	if img == nil || cols <= 0 || rows <= 0 {
 		return nil
 	}
-	px := scaleImage(img, cols, rows*2)
+	px := scaleRGBA(img, cols, rows*2)
 	out := make([]string, rows)
 	var b strings.Builder
 	for r := range rows {

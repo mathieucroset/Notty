@@ -197,6 +197,30 @@ func TestKittyTransmitChunking(t *testing.T) {
 	assertPNG(t, all.String(), 120, 80)
 }
 
+func TestKittyTransmitDownscales(t *testing.T) {
+	tests := []struct {
+		name       string
+		w, h       int
+		cols, rows int
+		wantW      int
+		wantH      int
+	}{
+		{"wide photo limited by width", 2000, 1000, 10, 5, 200, 100},
+		{"tall photo limited by height", 1000, 4000, 10, 5, 50, 200},
+		{"small image sent as is", 30, 20, 10, 5, 30, 20},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			img := solidImage(tt.w, tt.h, color.RGBA{0, 128, 255, 255})
+			var payload strings.Builder
+			for _, c := range parseKitty(t, KittyTransmit(img, 5, tt.cols, tt.rows)) {
+				payload.WriteString(c.payload)
+			}
+			assertPNG(t, payload.String(), tt.wantW, tt.wantH)
+		})
+	}
+}
+
 func TestKittyTransmitNil(t *testing.T) {
 	if got := KittyTransmit(nil, 1, 1, 1); got != "" {
 		t.Errorf("nil image: got %q, want empty", got)

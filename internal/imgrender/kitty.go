@@ -14,11 +14,18 @@ import (
 	"github.com/charmbracelet/x/ansi/kitty"
 )
 
+// Pixel budget per cell for images sent by [KittyTransmit].
+const (
+	kittyMaxCellW = 20
+	kittyMaxCellH = 40
+)
+
 // KittyTransmit returns the APC sequence(s) that transmit img to a Kitty
 // terminal as PNG and create a virtual placement of cols x rows cells for the
 // given image id (a=T,U=1). Responses are suppressed (q=2) so nothing leaks
 // into the input stream. Payloads larger than 4096 base64 bytes are split into
-// chunks: every chunk but the last carries m=1, the last m=0.
+// chunks: every chunk but the last carries m=1, the last m=0. Sources larger
+// than cols*20 x rows*40 pixels are downscaled first (aspect preserved).
 //
 // The image becomes visible wherever the frame contains the cells returned by
 // [KittyPlaceholders] for the same id. It returns "" for a nil image or when
@@ -27,6 +34,11 @@ func KittyTransmit(img image.Image, id uint32, cols, rows int) string {
 	if img == nil {
 		return ""
 	}
+	// Never ship more pixels than the placement can show (20x40 px per
+	// cell covers dense HiDPI cells); the terminal scales the rest.
+	bounds := img.Bounds()
+	w, h := fitWithin(bounds.Dx(), bounds.Dy(), max(cols, 1)*kittyMaxCellW, max(rows, 1)*kittyMaxCellH)
+	img = Scale(img, w, h)
 	var b strings.Builder
 	err := kitty.EncodeGraphics(&b, img, &kitty.Options{
 		Action:           kitty.TransmitAndPut,

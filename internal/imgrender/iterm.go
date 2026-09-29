@@ -18,7 +18,7 @@ func ITerm(img image.Image, pxW, pxH int) string {
 		return ""
 	}
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, sized(img, pxW, pxH)); err != nil {
+	if err := png.Encode(&buf, Scale(img, pxW, pxH)); err != nil {
 		return ""
 	}
 	return ansi.ITerm2(iterm2.File{

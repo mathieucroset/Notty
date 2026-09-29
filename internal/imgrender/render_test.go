@@ -113,9 +113,9 @@ func TestHalfBlocksCases(t *testing.T) {
 			want: []string{"\x1b[38;2;255;0;0;48;2;255;0;0m▀▀▀\x1b[0m"},
 		},
 		{
-			name: "downscale averages pixels",
+			name: "downscale blends pixels (bilinear)",
 			img:  checker(4, 4), cols: 2, rows: 1,
-			want: []string{"\x1b[38;2;128;128;128;48;2;128;128;128m▀▀\x1b[0m"},
+			want: []string{"\x1b[38;2;127;127;127;48;2;127;127;127m▀▀\x1b[0m"},
 		},
 		{
 			name: "transparency uses default colors",
@@ -168,22 +168,51 @@ func column(px ...color.RGBA) *image.RGBA {
 	return img
 }
 
-func TestScaleImage(t *testing.T) {
+func TestScale(t *testing.T) {
 	// Offset bounds must be handled; output always starts at (0,0).
 	src := img2x4().SubImage(image.Rect(0, 1, 2, 3)) // blue white / black gray
-	got := scaleImage(src, 4, 2)
+	got := Scale(src, 4, 2)
 	if b := got.Bounds(); b != image.Rect(0, 0, 4, 2) {
 		t.Fatalf("bounds %v", b)
 	}
-	want := [][]color.RGBA{
-		{{0, 0, 255, 255}, {0, 0, 255, 255}, {255, 255, 255, 255}, {255, 255, 255, 255}},
-		{{0, 0, 0, 255}, {0, 0, 0, 255}, {128, 128, 128, 255}, {128, 128, 128, 255}},
+	corners := map[image.Point]color.RGBA{
+		{0, 0}: {0, 0, 255, 255},
+		{3, 0}: {255, 255, 255, 255},
+		{0, 1}: {0, 0, 0, 255},
+		{3, 1}: {128, 128, 128, 255},
 	}
-	for y := range want {
-		for x := range want[y] {
-			if c := got.RGBAAt(x, y); c != want[y][x] {
-				t.Errorf("(%d,%d) = %v, want %v", x, y, c, want[y][x])
-			}
+	for p, want := range corners {
+		if c := color.RGBAModel.Convert(got.At(p.X, p.Y)); c != want {
+			t.Errorf("%v = %v, want %v", p, c, want)
+		}
+	}
+
+	same := img2x4()
+	if Scale(same, 2, 4) != image.Image(same) {
+		t.Error("same size must return the source unchanged")
+	}
+	if b := Scale(same, 0, 3).Bounds(); !b.Empty() {
+		t.Errorf("zero width gave %v", b)
+	}
+
+	// A large noisy photo shrinks to the requested size.
+	big := noiseImage(1200, 800)
+	if b := Scale(big, 30, 20).Bounds(); b != image.Rect(0, 0, 30, 20) {
+		t.Errorf("downscale bounds %v", b)
+	}
+}
+
+func TestFitWithin(t *testing.T) {
+	tests := []struct{ w, h, maxW, maxH, wantW, wantH int }{
+		{2000, 1000, 200, 200, 200, 100},
+		{1000, 2000, 200, 200, 100, 200},
+		{100, 50, 200, 200, 100, 50}, // never enlarged
+		{5000, 1, 100, 100, 100, 1},  // never below 1
+	}
+	for _, tt := range tests {
+		w, h := fitWithin(tt.w, tt.h, tt.maxW, tt.maxH)
+		if w != tt.wantW || h != tt.wantH {
+			t.Errorf("fitWithin(%d,%d,%d,%d) = %dx%d, want %dx%d", tt.w, tt.h, tt.maxW, tt.maxH, w, h, tt.wantW, tt.wantH)
 		}
 	}
 }

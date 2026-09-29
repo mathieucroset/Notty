@@ -16,7 +16,7 @@ func Sixel(img image.Image, pxW, pxH int) string {
 	}
 	var payload bytes.Buffer
 	var enc sixel.Encoder
-	if err := enc.Encode(&payload, sized(img, pxW, pxH)); err != nil {
+	if err := enc.Encode(&payload, Scale(img, pxW, pxH)); err != nil {
 		return ""
 	}
 	// P2=1 keeps unset pixels transparent instead of painting a black bar.

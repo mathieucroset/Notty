@@ -2,8 +2,9 @@ package imgrender
 
 import (
 	"image"
-	"image/color"
 	"math"
+
+	"golang.org/x/image/draw"
 )
 
 // FitCells returns the largest cell size (cols x rows) that shows an imgW x
@@ -31,57 +32,42 @@ func clamp(v, lo, hi int) int {
 	return max(lo, min(v, hi))
 }
 
-// maxSamples bounds how many source pixels per axis are averaged into one
-// destination pixel, so shrinking a huge photo stays cheap.
-const maxSamples = 8
-
-// scaleImage resizes img to w x h with a box filter: each destination pixel
-// averages the source pixels under it (sampling at most maxSamples per axis),
-// which degrades to nearest neighbour when enlarging. Averaging happens on
-// premultiplied values, so transparent pixels do not darken edges. The result
-// always has its origin at (0,0).
-func scaleImage(img image.Image, w, h int) *image.RGBA {
-	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+// Scale returns img resized to w x h pixels with its origin at (0,0), using
+// x/image/draw's ApproxBiLinear interpolator (which has fast paths for the
+// common RGBA, NRGBA, YCbCr and Gray sources). img is returned unchanged when
+// it already has that size and origin. A non-positive size yields an empty
+// image.
+func Scale(img image.Image, w, h int) image.Image {
+	if w <= 0 || h <= 0 || img == nil {
+		return image.NewRGBA(image.Rect(0, 0, max(w, 0), max(h, 0)))
+	}
 	b := img.Bounds()
-	sw, sh := b.Dx(), b.Dy()
-	if sw <= 0 || sh <= 0 {
-		return dst
+	if b.Min == (image.Point{}) && b.Dx() == w && b.Dy() == h {
+		return img
 	}
-	for y := range h {
-		sy0 := y * sh / h
-		sy1 := max(sy0+1, (y+1)*sh/h)
-		stepY := max(1, (sy1-sy0)/maxSamples)
-		for x := range w {
-			sx0 := x * sw / w
-			sx1 := max(sx0+1, (x+1)*sw/w)
-			stepX := max(1, (sx1-sx0)/maxSamples)
-			var r, g, bl, a, n uint64
-			for sy := sy0; sy < sy1; sy += stepY {
-				for sx := sx0; sx < sx1; sx += stepX {
-					cr, cg, cb, ca := img.At(b.Min.X+sx, b.Min.Y+sy).RGBA()
-					r += uint64(cr >> 8)
-					g += uint64(cg >> 8)
-					bl += uint64(cb >> 8)
-					a += uint64(ca >> 8)
-					n++
-				}
-			}
-			dst.SetRGBA(x, y, color.RGBA{
-				R: uint8((r + n/2) / n),
-				G: uint8((g + n/2) / n),
-				B: uint8((bl + n/2) / n),
-				A: uint8((a + n/2) / n),
-			})
-		}
-	}
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), img, b, draw.Src, nil)
 	return dst
 }
 
-// sized returns img unchanged when it already is w x h with origin (0,0),
-// otherwise a scaled copy.
-func sized(img image.Image, w, h int) image.Image {
-	if b := img.Bounds(); b.Min == (image.Point{}) && b.Dx() == w && b.Dy() == h {
-		return img
+// scaleRGBA is [Scale] returning an *image.RGBA, converting when Scale
+// returned the source unchanged.
+func scaleRGBA(img image.Image, w, h int) *image.RGBA {
+	s := Scale(img, w, h)
+	if rgba, ok := s.(*image.RGBA); ok {
+		return rgba
 	}
-	return scaleImage(img, w, h)
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(dst, dst.Bounds(), s, s.Bounds().Min, draw.Src)
+	return dst
+}
+
+// fitWithin returns w x h shrunk, aspect preserved, to at most maxW x maxH
+// (never enlarged, never below 1x1).
+func fitWithin(w, h, maxW, maxH int) (int, int) {
+	if w <= maxW && h <= maxH {
+		return w, h
+	}
+	s := math.Min(float64(maxW)/float64(w), float64(maxH)/float64(h))
+	return max(1, int(math.Round(float64(w)*s))), max(1, int(math.Round(float64(h)*s)))
 }
