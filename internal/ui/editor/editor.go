@@ -114,14 +114,16 @@ func (m Model) Load(path, content string, cursor buffer.Pos) Model {
 }
 
 // Reload replaces the text after an external change, keeping the cursor on
-// the same line when it still exists, and marks the buffer saved. The change
-// is undoable.
+// the same line when it still exists, and marks the buffer saved. The
+// engine keeps its mode (keys queued during the merge window replay in the
+// same mode) and the change is its own undo step.
 func (m Model) Reload(content string) Model {
 	cur := m.buf.Cursor()
-	m.buf.SetText(content)
-	m.buf.SetCursor(cur)
+	m.ed.Resync(m.buf, func() {
+		m.buf.SetText(content)
+		m.buf.SetCursor(cur)
+	})
 	m.buf.MarkSaved()
-	m.ed.Reset(m.buf)
 	m.syncStyle()
 	m.aux.forgetMissing()
 	return m.ensureVisible()

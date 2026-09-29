@@ -257,3 +257,34 @@ func TestLoadReplacesBuffer(t *testing.T) {
 		t.Errorf("undo crossed notes: %q", m.Content())
 	}
 }
+
+func TestReloadKeepsModeAndUndo(t *testing.T) {
+	t.Run("keys queued in insert mode replay literally", func(t *testing.T) {
+		m := newModel(t, testOptions(t), "alpha\nbeta\ngamma\n", buffer.Pos{Line: 1, Col: 4}, 40, 10)
+		m, _ = typeKeys(m, "A")
+		m = m.SetLocked(true)
+		m, _ = typeKeys(m, " ", "d", "d", " ", "x")
+		m = m.Reload("alpha\nbeta\ngamma\ndelta\n")
+		if m.ModeName() != "INSERT" {
+			t.Fatalf("Reload changed the mode to %s", m.ModeName())
+		}
+		m, _, _ = m.Unlock(true)
+		if got := m.Content(); got != "alpha\nbeta dd x\ngamma\ndelta\n" {
+			t.Errorf("content after replay = %q", got)
+		}
+	})
+	t.Run("undo does not merge the reload with typing", func(t *testing.T) {
+		m := newModel(t, testOptions(t), "alpha\nbeta\n", buffer.Pos{Line: 1}, 40, 10)
+		m, _ = typeKeys(m, "i", "h", "i")
+		m = m.MarkSaved(m.Version())
+		m = m.Reload("alpha\nhibeta\ngamma\n")
+		m, _ = typeKeys(m, "!", "esc", "u")
+		if got := m.Content(); got != "alpha\nhibeta\ngamma\n" {
+			t.Errorf("first undo gives %q, want only the typing after the reload undone", got)
+		}
+		m, _ = typeKeys(m, "u")
+		if got := m.Content(); got != "alpha\nhibeta\n" {
+			t.Errorf("second undo gives %q, want the reload undone", got)
+		}
+	})
+}
