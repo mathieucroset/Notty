@@ -461,7 +461,7 @@ func TestDoneRowStrikethroughHiddenByDefault(t *testing.T) {
 	if !strings.Contains(view, "finished task") {
 		t.Errorf("done task should show with show_done=true:\n%s", view)
 	}
-	if !strings.Contains(view, glyphDone) {
+	if !strings.Contains(view, m.styles.Icons.TaskDone) {
 		t.Errorf("expected done glyph in view:\n%s", view)
 	}
 }
