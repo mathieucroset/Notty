@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/mathieucroset/notty/internal/recovery"
 	"github.com/mathieucroset/notty/internal/ui/dialog"
 	"github.com/mathieucroset/notty/internal/vault"
 )
@@ -36,6 +37,7 @@ const (
 	opCleanAttachments
 	opExternalChange
 	opImportImage
+	opRecovered
 )
 
 // pendingOp is what to do once a dialog is confirmed, with the data the
@@ -55,6 +57,8 @@ type pendingOp struct {
 	note string
 	data []byte
 	ext  string
+	// recovered is the recovery file offered back.
+	recovered recovery.File
 }
 
 // runPendingMsg runs a confirmed operation once the buffer it touches is

@@ -254,6 +254,10 @@ type Model struct {
 
 	// recorded is the buffer state last copied to Options.Snapshot.
 	recorded bufferMark
+	// recovered are the recovery files still to offer back, of
+	// recoveredTotal found at start; recoveredShown were offered so far.
+	recovered                      []recovery.File
+	recoveredTotal, recoveredShown int
 }
 
 // New builds the root model.
@@ -323,7 +327,8 @@ func (m *Model) Init() tea.Cmd {
 	}
 	m.indexing = true
 	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault), m.startupTrashCmd(),
-		listenWatcherCmd(m.opts.Watcher), m.reopenLastNoteCmd(), m.readyTickCmd(), m.startSyncCmds())
+		listenWatcherCmd(m.opts.Watcher), m.reopenLastNoteCmd(), m.readyTickCmd(), m.startSyncCmds(),
+		listRecoveredCmd(m.opts.Vault))
 }
 
 // reopenLastNoteCmd reopens the note open when the app last quit, at its
@@ -464,6 +469,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sidebar.SetPins(msg.pins)
 	case msgs.ToastMsg:
 		return m, m.pushToast(msg.Level, msg.Text)
+	case recoveredListMsg:
+		return m, m.handleRecoveredList(msg)
+	case recoveredDoneMsg:
+		return m, m.handleRecoveredDone(msg)
 	case indexBuiltMsg:
 		return m, m.handleIndexBuilt(msg)
 	case indexChangedMsg:
