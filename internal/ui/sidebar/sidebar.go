@@ -22,28 +22,6 @@ import (
 	"github.com/mathieucroset/notty/internal/vault"
 )
 
-// Glyphs are the symbols the sidebar draws. They are plain Unicode so they
-// render without a Nerd Font.
-type Glyphs struct {
-	FolderOpen, FolderClosed string
-	Note, File, Pin          string
-	Tasks, Conflicts, Trash  string
-	Dirty                    string
-}
-
-// DefaultGlyphs is the default glyph set.
-var DefaultGlyphs = Glyphs{
-	FolderOpen:   "▾",
-	FolderClosed: "▸",
-	Note:         "•",
-	File:         "·",
-	Pin:          "★",
-	Tasks:        "☐",
-	Conflicts:    "⚠",
-	Trash:        "⌫",
-	Dirty:        "●",
-}
-
 type itemKind int
 
 const (
@@ -105,7 +83,6 @@ func entryName(e msgs.Entry) string {
 // Model is the sidebar component.
 type Model struct {
 	styles theme.Styles
-	glyphs Glyphs
 
 	root                    *vault.Node
 	pins                    []string
@@ -132,7 +109,6 @@ type Model struct {
 func New(styles theme.Styles) Model {
 	m := Model{
 		styles:   styles,
-		glyphs:   DefaultGlyphs,
 		expanded: map[string]bool{},
 		cursor:   -1,
 	}
@@ -737,37 +713,41 @@ func (m Model) row(it item, selected bool) string {
 	case kindHint:
 		return padLine(m.styles.Muted.Render("    "+it.text), m.width)
 	case kindPin:
-		glyph, label = m.glyphs.Pin, noteName(path.Base(it.path))
+		glyph, label = m.styles.Icons.Pin, noteName(path.Base(it.path))
 		glyphStyle = m.styles.Accent
 	case kindNode:
 		indent += strings.Repeat("  ", it.depth)
 		n := it.node
 		switch {
 		case n.IsDir:
-			glyph = m.glyphs.FolderClosed
+			glyph = m.styles.Icons.FolderClosed
 			if m.isOpen(n.Path) {
-				glyph = m.glyphs.FolderOpen
+				glyph = m.styles.Icons.FolderOpen
 			}
 			glyphStyle, label = m.styles.Accent, n.Name
 		case n.IsNote:
-			glyph, label = m.glyphs.Note, noteName(n.Name)
+			glyph, label = m.styles.Icons.Note, noteName(n.Name)
 		default:
-			glyph, label = m.glyphs.File, n.Name
+			glyph, label = m.styles.Icons.File, n.Name
 			labelStyle = m.styles.SidebarDim
 		}
 	case kindEntry:
 		switch it.entry {
 		case msgs.EntryTasks:
-			glyph, label = m.glyphs.Tasks, "Tasks ("+strconv.Itoa(m.tasks)+")"
+			glyph, label = m.styles.Icons.Tasks, "Tasks ("+strconv.Itoa(m.tasks)+")"
 		case msgs.EntryConflicts:
-			glyph, label = m.glyphs.Conflicts, "Conflicts ("+strconv.Itoa(m.conflicts)+")"
+			glyph, label = m.styles.Icons.Conflicts, "Conflicts ("+strconv.Itoa(m.conflicts)+")"
 			glyphStyle, labelStyle = m.styles.Warning, m.styles.Warning
 		case msgs.EntryTrash:
-			glyph, label = m.glyphs.Trash, "Trash ("+strconv.Itoa(m.trash)+")"
+			glyph, label = m.styles.Icons.Trash, "Trash ("+strconv.Itoa(m.trash)+")"
 		}
+		// Pad to the widest entry glyph so the labels line up.
+		ic := m.styles.Icons
+		w := max(ansi.StringWidth(ic.Tasks), ansi.StringWidth(ic.Conflicts), ansi.StringWidth(ic.Trash))
+		glyph += strings.Repeat(" ", w-ansi.StringWidth(glyph))
 	}
 	if (it.kind == kindPin || it.kind == kindNode) && it.path == m.dirty && m.dirty != "" {
-		suffix = " " + m.glyphs.Dirty
+		suffix = " " + m.styles.Icons.Dirty
 	}
 
 	prefix := indent + glyph + " "
