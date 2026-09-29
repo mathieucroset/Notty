@@ -2,6 +2,9 @@ package app
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
 	"github.com/mathieucroset/notty/internal/index"
+	"github.com/mathieucroset/notty/internal/meta"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/watcher"
 )
@@ -69,6 +73,30 @@ func TestWatchEventReindexesNewFolder(t *testing.T) {
 	run(t, m, watchEventMsg{paths: []string{"Archive"}})
 	if _, ok := m.ix.Get("Archive/2024/old.md"); !ok {
 		t.Error("note inside a new folder not indexed")
+	}
+}
+
+func TestExternalDeletePrunesPinsAndLocalState(t *testing.T) {
+	opts := testOptions(t)
+	opts.Pins = &meta.State{Pins: []string{"Work/Standup notes.md", "ideas.md"}}
+	opts.Local.Expanded = []string{"Work"}
+	m := start(t, opts, 120, 30)
+	if err := os.RemoveAll(filepath.Join(opts.Vault.Root, "Work")); err != nil {
+		t.Fatal(err)
+	}
+	run(t, m, watchEventMsg{paths: []string{"Work", "ideas.md"}})
+	if !reflect.DeepEqual(opts.Pins.Pins, []string{"ideas.md"}) {
+		t.Errorf("pins = %v, want the deleted note's pin gone", opts.Pins.Pins)
+	}
+	if len(opts.Local.Expanded) != 0 {
+		t.Errorf("expanded = %v, want the deleted folder gone", opts.Local.Expanded)
+	}
+	saved, _ := meta.Load(opts.Vault.Root)
+	if !reflect.DeepEqual(saved.Pins, []string{"ideas.md"}) {
+		t.Errorf("saved pins = %v", saved.Pins)
+	}
+	if _, ok := m.ix.Get("Work/Standup notes.md"); ok {
+		t.Error("deleted note still indexed")
 	}
 }
 

@@ -19,6 +19,9 @@ import (
 // watchEventMsg is one debounced batch of paths changed outside the app.
 type watchEventMsg struct{ paths []string }
 
+// pathsGoneMsg lists changed paths that no longer exist on disk.
+type pathsGoneMsg struct{ paths []string }
+
 // watchErrMsg is a watcher error.
 type watchErrMsg struct{ err error }
 
@@ -62,8 +65,38 @@ func (m *Model) handleWatchEvent(msg watchEventMsg) tea.Cmd {
 		reindexCmd(m.opts.Vault, m.ix, msg.paths),
 		loadTreeCmd(m.opts.Vault),
 		m.reloadNoteIf(msg.paths...),
+		goneCmd(m.opts.Vault, msg.paths),
 		listenWatcherCmd(m.opts.Watcher),
 	)
+}
+
+// goneCmd reports which of paths were deleted (or renamed away).
+func goneCmd(v *vault.Vault, paths []string) tea.Cmd {
+	if v == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		var gone []string
+		for _, p := range paths {
+			if _, err := os.Lstat(v.Abs(p)); errors.Is(err, fs.ErrNotExist) {
+				gone = append(gone, p)
+			}
+		}
+		if len(gone) == 0 {
+			return nil
+		}
+		return pathsGoneMsg{paths: gone}
+	}
+}
+
+// handlePathsGone forgets deleted paths in the pins, the local state
+// (recents, expanded folders) and the open note.
+func (m *Model) handlePathsGone(msg pathsGoneMsg) tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(msg.paths))
+	for _, p := range msg.paths {
+		cmds = append(cmds, m.pathRemoved(p))
+	}
+	return tea.Batch(cmds...)
 }
 
 // handleWatchErr reports a watcher error. When the vault root itself is

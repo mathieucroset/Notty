@@ -317,6 +317,9 @@ func (m *Model) pathRemoved(p string) tea.Cmd {
 	m.opts.Pins.Remove(p)
 	m.sidebar.SetPins(m.opts.Pins.Pins)
 	m.opts.Local.Remove(p)
+	m.sidebar.SetExpanded(m.opts.Local.Expanded)
+	// TODO(editor pass): keep a dirty buffer open (and offer to save it)
+	// when its file is deleted outside the app.
 	if m.note.path != "" && isUnder(m.note.path, p) {
 		m.note = note{}
 		m.openSeq++ // drop any load still in flight

@@ -321,6 +321,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleWatchEvent(msg)
 	case watchErrMsg:
 		return m, m.handleWatchErr(msg)
+	case pathsGoneMsg:
+		return m, m.handlePathsGone(msg)
 	case savedMsg:
 		return m, m.handleSaved(msg)
 	case msgs.ToggleTaskMsg:
