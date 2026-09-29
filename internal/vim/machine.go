@@ -62,6 +62,12 @@ type Editor interface {
 	// replaces the text. Handing a different buffer to Handle or
 	// PasteClipboard resets implicitly.
 	Reset(b *buffer.Buffer)
+	// Resync applies an external change to b (a reload from disk, a task
+	// toggled from the preview, an inserted image link) without leaving the
+	// current mode: it closes any open undo group, runs change (so the change
+	// is its own undo step), clamps the cursor and, in insert mode, reopens
+	// the insert session's undo group so typing continues normally.
+	Resync(b *buffer.Buffer, change func())
 	// Selection returns the selection to highlight. End is exclusive; a
 	// selection that includes a line break ends at the start of the next
 	// line (which may be one past the last line for a linewise selection
@@ -483,6 +489,27 @@ func (m *Machine) Reset(b *buffer.Buffer) {
 	m.clampNormal(b)
 	m.lastPos = b.Cursor()
 	m.curswant = cursorCell(b)
+}
+
+// Resync applies an external change without leaving the current mode (see
+// Editor).
+func (m *Machine) Resync(b *buffer.Buffer, change func()) {
+	m.attach(b)
+	open := m.groupBuf == b
+	if open {
+		m.endChange(b)
+	}
+	if change != nil {
+		change()
+	}
+	b.SetCursor(b.Cursor())
+	if m.mode != Insert {
+		m.clampNormal(b)
+	}
+	m.anchor = b.Clamp(m.anchor)
+	if open && m.mode == Insert {
+		m.beginChange(b)
+	}
 }
 
 // SetReadOnly toggles read-only mode (conflicted notes). Only motions,
