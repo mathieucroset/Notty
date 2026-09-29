@@ -15,10 +15,13 @@ import (
 	"github.com/mathieucroset/notty/internal/imgrender"
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
+	"github.com/mathieucroset/notty/internal/ui/dialog"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/sidebar"
 	"github.com/mathieucroset/notty/internal/ui/statusbar"
+	"github.com/mathieucroset/notty/internal/ui/textutil"
 	"github.com/mathieucroset/notty/internal/ui/theme"
+	"github.com/mathieucroset/notty/internal/ui/toast"
 	"github.com/mathieucroset/notty/internal/vault"
 )
 
@@ -92,10 +95,14 @@ type Model struct {
 	focus          Focus
 	mainView       MainView
 	noteView       NoteView
-	overlayOpen    bool
 
 	sidebar sidebar.Model
 	status  statusbar.Model
+	toast   toast.Model
+	// stickyErrors counts the error toasts still shown (they never expire).
+	stickyErrors int
+	// overlay is the open overlay, or nil.
+	overlay *overlayState
 	note    note
 	openSeq int // number of the latest open request
 	sync    msgs.SyncStatusMsg
@@ -115,6 +122,7 @@ func New(opts Options) *Model {
 		focus:          FocusSidebar,
 		sidebar:        sidebar.New(opts.Styles),
 		status:         statusbar.New(opts.Styles),
+		toast:          toast.New(opts.Styles),
 	}
 	m.sidebar.SetExpanded(opts.Local.Expanded)
 	m.sidebar.SetPins(opts.Pins.Pins)
@@ -210,9 +218,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case msgs.SyncStatusMsg:
 		m.sync = msg
+	case msgs.ToastMsg:
+		return m, m.pushToast(msg.Level, msg.Text)
+	case dialog.ResultMsg:
+		return m, m.handleDialogResult(msg)
+	default:
+		// Toast expiry ticks.
+		var cmd tea.Cmd
+		m.toast, cmd = m.toast.Update(msg)
+		return m, cmd
 	}
-	// Other shared messages (dialogs, overlays, toasts, sidebar requests)
-	// are handled by later tasks.
 	return m, nil
 }
 
@@ -330,10 +345,11 @@ func (m *Model) render() string {
 	status.Path = m.note.path
 	status.Words = m.note.words
 	status.Sync = m.sync
-	if l.Main.H == 0 {
-		return status.View()
+	screen := status.View()
+	if l.Main.H > 0 {
+		screen = body + "\n" + screen
 	}
-	return body + "\n" + status.View()
+	return m.withToasts(m.withOverlay(screen))
 }
 
 // paneTitle is the main pane title: the note's folders and title, like
@@ -379,7 +395,7 @@ func (m *Model) renderMain(l Layout) string {
 	pad := strings.Repeat(" ", max(l.Content.X-l.Main.X-1, 0))
 	lines := fitBlock(content, l.Content.W, innerH)
 	for i := range lines {
-		lines[i] = padLine(pad+lines[i], innerW)
+		lines[i] = textutil.PadLine(pad+lines[i], innerW)
 	}
 	return renderPane(st, m.paneTitle(), strings.Join(right, " "), strings.Join(lines, "\n"),
 		l.Main.W, l.Main.H, m.focus == FocusMain)

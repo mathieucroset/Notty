@@ -12,6 +12,9 @@ func (m *Model) keyContext() keys.Context {
 	if m.opts.WizardNeeded {
 		return keys.Wizard
 	}
+	if m.overlayOpen() {
+		return keys.Overlay
+	}
 	if m.focus == FocusSidebar {
 		if m.sidebar.PickerOpen() {
 			// The inline tag picker behaves like an overlay: ctrl+k moves
@@ -37,13 +40,21 @@ func (m *Model) keyContext() keys.Context {
 
 // handleKey routes a key press through the layers in keys.Route.
 func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
-	if a, global := keys.Route(m.keyContext(), m.overlayOpen, k); global {
+	if a, global := keys.Route(m.keyContext(), m.overlayOpen(), k); global {
 		return m.handleAction(a)
 	}
 	if m.opts.WizardNeeded {
 		return nil // TODO(Task 33): route keys to the wizard.
 	}
+	if m.overlayOpen() {
+		return m.updateOverlay(k)
+	}
 	if m.focus == FocusSidebar {
+		// esc dismisses the newest sticky error before it reaches the
+		// sidebar (where it clears the tag filter).
+		if k.String() == "esc" && !m.sidebar.PickerOpen() && m.dismissToast() {
+			return nil
+		}
 		var cmd tea.Cmd
 		m.sidebar, cmd = m.sidebar.Update(k)
 		return tea.Batch(cmd, m.syncExpanded())
