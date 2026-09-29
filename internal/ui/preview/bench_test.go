@@ -166,7 +166,8 @@ func renderedDoc(tb testing.TB, content string) *doc {
 }
 
 // BenchmarkRenderBigTaskList renders a 3000-task list from scratch
-// (Glamour, layout and task mapping); the target is under 200ms.
+// (Glamour, layout and task mapping). The target, under 200ms, assumes at
+// least 4 cores: the list pieces are rendered in parallel.
 func BenchmarkRenderBigTaskList(b *testing.B) {
 	content := bigTaskList(3000)
 	for b.Loop() {
