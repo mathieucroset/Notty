@@ -477,3 +477,98 @@ func TestPurgeOlderThan(t *testing.T) {
 		t.Errorf("remaining = %v, want %s", got, want)
 	}
 }
+
+func TestTrashFolderMustBeRealDirectory(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, v *Vault) (target string)
+	}{
+		{"symlink to directory", func(t *testing.T, v *Vault) string {
+			target := t.TempDir()
+			mkfiles(t, target, "keep.txt", "item/Note.md")
+			writeFile(t, &Vault{Root: target}, "item/meta.json",
+				`{"original_path":"Note.md","deleted_at":"2000-01-01T00:00:00Z","host":"h","is_dir":false}`)
+			if err := os.Symlink(target, v.Abs(".trash")); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			return target
+		}},
+		{"regular file", func(t *testing.T, v *Vault) string {
+			mkfiles(t, v.Root, ".trash")
+			return ""
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := trashVault(t)
+			mkfiles(t, v.Root, "A.md")
+			target := tt.setup(t, v)
+
+			if _, err := v.Trash("A.md"); !errors.Is(err, ErrInvalidPath) {
+				t.Errorf("Trash err = %v, want ErrInvalidPath", err)
+			}
+			if !exists(v, "A.md") {
+				t.Error("Trash moved the note despite the error")
+			}
+			if _, err := v.TrashItems(); !errors.Is(err, ErrInvalidPath) {
+				t.Errorf("TrashItems err = %v, want ErrInvalidPath", err)
+			}
+			if err := v.EmptyTrash(); !errors.Is(err, ErrInvalidPath) {
+				t.Errorf("EmptyTrash err = %v, want ErrInvalidPath", err)
+			}
+			if err := v.DeleteForever(TrashItem{ID: "item"}); !errors.Is(err, ErrInvalidPath) {
+				t.Errorf("DeleteForever err = %v, want ErrInvalidPath", err)
+			}
+			if _, err := v.PurgeOlderThan(time.Hour, time.Now()); !errors.Is(err, ErrInvalidPath) {
+				t.Errorf("PurgeOlderThan err = %v, want ErrInvalidPath", err)
+			}
+			it := TrashItem{ID: "item", Name: "Note.md", OriginalPath: "Note.md"}
+			if _, err := v.Restore(it); !errors.Is(err, ErrInvalidPath) {
+				t.Errorf("Restore err = %v, want ErrInvalidPath", err)
+			}
+			if target != "" {
+				for _, p := range []string{"keep.txt", "item/meta.json", "item/Note.md"} {
+					if _, err := os.Lstat(filepath.Join(target, p)); err != nil {
+						t.Errorf("symlink target lost %s: %v", p, err)
+					}
+				}
+				if entries, _ := os.ReadDir(target); len(entries) != 2 {
+					t.Errorf("symlink target has %d entries, want 2 (nothing trashed into it)", len(entries))
+				}
+			}
+		})
+	}
+}
+
+func TestSymlinkedTrashItem(t *testing.T) {
+	v := trashVault(t)
+	target := t.TempDir()
+	mkfiles(t, target, "Note.md")
+	writeFile(t, &Vault{Root: target}, "meta.json",
+		`{"original_path":"Note.md","deleted_at":"2000-01-01T00:00:00Z","host":"h","is_dir":false}`)
+	mkfiles(t, v.Root, ".trash/")
+	if err := os.Symlink(target, v.Abs(".trash/evil")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if items, err := v.TrashItems(); err != nil || len(items) != 0 {
+		t.Errorf("TrashItems = %v, %v; want symlinked item skipped", items, err)
+	}
+	it := TrashItem{ID: "evil", Name: "Note.md", OriginalPath: "Note.md"}
+	if _, err := v.Restore(it); !errors.Is(err, ErrInvalidPath) {
+		t.Errorf("Restore err = %v, want ErrInvalidPath", err)
+	}
+	if exists(v, "Note.md") {
+		t.Error("Restore pulled a file in from outside the vault")
+	}
+	if err := v.DeleteForever(it); err != nil {
+		t.Fatalf("DeleteForever: %v", err)
+	}
+	if exists(v, ".trash/evil") {
+		t.Error("symlink not removed")
+	}
+	for _, p := range []string{"Note.md", "meta.json"} {
+		if _, err := os.Stat(filepath.Join(target, p)); err != nil {
+			t.Errorf("DeleteForever followed the symlink: %s: %v", p, err)
+		}
+	}
+}

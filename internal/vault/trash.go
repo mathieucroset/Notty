@@ -110,7 +110,7 @@ func (v *Vault) trashAt(rel string, now time.Time) (TrashItem, error) {
 		DeletedAt:    now.UTC().Truncate(time.Second), // what meta.json can hold
 		IsDir:        fi.IsDir(),
 	}
-	if err := os.MkdirAll(v.Abs(trashDir), 0o755); err != nil {
+	if err := v.trashRoot(true); err != nil {
 		return TrashItem{}, fmt.Errorf("vault: trash %q: %w", src, err)
 	}
 	for i := 1; ; i++ {
@@ -146,6 +146,28 @@ func (v *Vault) trashAt(rel string, now time.Time) (TrashItem, error) {
 	return it, nil
 }
 
+// trashRoot checks that .trash is a real directory, not a symlink or a
+// file, so trash operations can never create, move or delete anything
+// outside the vault. A missing .trash is created if create is set, and
+// otherwise reported as fs.ErrNotExist.
+func (v *Vault) trashRoot(create bool) error {
+	abs := v.Abs(trashDir)
+	fi, err := os.Lstat(abs)
+	if errors.Is(err, fs.ErrNotExist) && create {
+		if err := os.Mkdir(abs, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		fi, err = os.Lstat(abs)
+	}
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a folder: %w", trashDir, ErrInvalidPath)
+	}
+	return nil
+}
+
 // itemDir returns the vault-relative directory of the trash item id.
 func itemDir(id string) string { return trashDir + "/" + id }
 
@@ -159,10 +181,12 @@ func (v *Vault) TrashContentPath(it TrashItem) string {
 // Entries without a valid meta.json are skipped. A vault without a .trash
 // folder has an empty trash.
 func (v *Vault) TrashItems() ([]TrashItem, error) {
-	entries, err := os.ReadDir(v.Abs(trashDir))
-	if errors.Is(err, fs.ErrNotExist) {
+	if err := v.trashRoot(false); errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("vault: read trash: %w", err)
 	}
+	entries, err := os.ReadDir(v.Abs(trashDir))
 	if err != nil {
 		return nil, fmt.Errorf("vault: read trash: %w", err)
 	}
@@ -237,6 +261,14 @@ func (v *Vault) Restore(it TrashItem) (string, error) {
 	if !isSegment(it.ID) || !isSegment(it.Name) || !validOriginal(it.OriginalPath) {
 		return "", fmt.Errorf("vault: restore trash item %q: %w", it.ID, ErrInvalidPath)
 	}
+	if err := v.trashRoot(false); err != nil {
+		return "", fmt.Errorf("vault: restore trash item %q: %w", it.ID, err)
+	}
+	if di, err := os.Lstat(v.Abs(itemDir(it.ID))); err != nil {
+		return "", fmt.Errorf("vault: restore trash item %q: %w", it.ID, err)
+	} else if !di.IsDir() {
+		return "", fmt.Errorf("vault: restore trash item %q: not a folder: %w", it.ID, ErrInvalidPath)
+	}
 	src := v.TrashContentPath(it)
 	fi, err := os.Lstat(v.Abs(src))
 	if err != nil {
@@ -282,6 +314,13 @@ func (v *Vault) DeleteForever(it TrashItem) error {
 	if !isSegment(it.ID) {
 		return fmt.Errorf("vault: delete trash item %q: %w", it.ID, ErrInvalidPath)
 	}
+	if err := v.trashRoot(false); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("vault: delete trash item %q: %w", it.ID, err)
+	}
+	// RemoveAll does not follow a symlinked item directory: only the link
+	// itself is removed.
 	if err := os.RemoveAll(v.Abs(itemDir(it.ID))); err != nil {
 		return fmt.Errorf("vault: delete trash item %q: %w", it.ID, err)
 	}
@@ -291,10 +330,12 @@ func (v *Vault) DeleteForever(it TrashItem) error {
 // EmptyTrash permanently removes everything inside .trash, including
 // entries without valid metadata.
 func (v *Vault) EmptyTrash() error {
-	entries, err := os.ReadDir(v.Abs(trashDir))
-	if errors.Is(err, fs.ErrNotExist) {
+	if err := v.trashRoot(false); errors.Is(err, fs.ErrNotExist) {
 		return nil
+	} else if err != nil {
+		return fmt.Errorf("vault: empty trash: %w", err)
 	}
+	entries, err := os.ReadDir(v.Abs(trashDir))
 	if err != nil {
 		return fmt.Errorf("vault: empty trash: %w", err)
 	}
