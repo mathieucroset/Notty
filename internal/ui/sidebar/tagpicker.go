@@ -66,17 +66,17 @@ func (p *tagPicker) height() int {
 
 func (p *tagPicker) view(m Model) []string {
 	out := []string{
-		padLine(m.styles.SidebarSection.Render(" Filter by tag"), m.width),
-		padLine(" "+m.styles.Accent.Render("#")+m.styles.SidebarItem.Render(strings.TrimPrefix(p.query, "#"))+m.styles.Accent.Render("▏"), m.width),
+		padLine(m.styles.SidebarSection.Render("  Filter by tag"), m.width),
+		padLine("  "+m.styles.Accent.Render("#")+m.styles.SidebarItem.Render(strings.TrimPrefix(p.query, "#"))+m.styles.Accent.Render("▏"), m.width),
 	}
 	if len(p.matches) == 0 {
-		return append(out, padLine(m.styles.Muted.Render("   no matching tags"), m.width))
+		return append(out, padLine(m.styles.Muted.Render("    no matching tags"), m.width))
 	}
 	// Scroll the match list so the cursor stays visible.
 	start := max(p.cursor-pickerRows+1, 0)
 	end := min(start+pickerRows, len(p.matches))
 	for i := start; i < end; i++ {
-		text := "   " + chipText(p.matches[i])
+		text := "    " + chipText(p.matches[i])
 		if i == p.cursor {
 			out = append(out, m.selStyle().Render(padLine(text, m.width)))
 			continue

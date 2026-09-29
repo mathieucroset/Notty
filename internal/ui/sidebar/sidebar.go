@@ -7,6 +7,7 @@
 package sidebar
 
 import (
+	"maps"
 	"path"
 	"sort"
 	"strconv"
@@ -112,7 +113,8 @@ type Model struct {
 	tasks, conflicts, trash int
 	dirty                   string
 	filter                  map[string]bool
-	expanded                map[string]bool
+	expanded                map[string]bool // persisted expanded folders
+	filterOpen              map[string]bool // folders opened only to reveal filter matches
 	focused                 bool
 	width, height           int
 
@@ -170,11 +172,19 @@ func (m *Model) SetCounts(tasks, conflicts, trash int) {
 func (m *Model) SetDirty(path string) { m.dirty = path }
 
 // SetFilter limits the tree to the note paths in paths; folders containing
-// a match stay visible and are expanded to reveal it. nil clears the filter.
+// a match stay visible and are shown expanded to reveal it. That expansion
+// is display-only: Expanded does not report it and clearing the filter
+// (nil) restores the previous tree.
 func (m *Model) SetFilter(paths map[string]bool) {
 	m.filter = paths
-	for p := range paths {
-		m.expandAncestors(p)
+	m.filterOpen = nil
+	if paths != nil {
+		m.filterOpen = map[string]bool{}
+		for p := range paths {
+			for d := parentDir(p); d != ""; d = parentDir(d) {
+				m.filterOpen[d] = true
+			}
+		}
 	}
 	m.rebuild()
 }
@@ -199,8 +209,13 @@ func (m Model) Expanded() []string {
 }
 
 // Select moves the cursor to the tree row for path, expanding its ancestor
-// folders so it is visible. It falls back to a pin with that path.
+// folders so it is visible. It falls back to a pin with that path. When the
+// cursor is already on a pin or row for path, it stays there.
 func (m *Model) Select(p string) {
+	if it, ok := m.selected(); ok && (it.kind == kindPin || it.kind == kindNode) && it.path == p {
+		m.ensureVisible()
+		return
+	}
 	m.expandAncestors(p)
 	m.rebuild()
 	if !m.selectID("node:" + p) {
@@ -221,7 +236,22 @@ func (m *Model) SetSize(w, h int) {
 // the sidebar behaves like an overlay for key routing.
 func (m Model) PickerOpen() bool { return m.picker != nil }
 
+// cloneSet copies a set, never returning nil.
+func cloneSet(s map[string]bool) map[string]bool {
+	if s == nil {
+		return map[string]bool{}
+	}
+	return maps.Clone(s)
+}
+
+// isOpen reports whether folder p is shown expanded.
+func (m Model) isOpen(p string) bool { return m.expanded[p] || m.filterOpen[p] }
+
+// expandAncestors expands every folder above p. Like every write to the
+// expanded set it copies the map first, so earlier Model values (Update has
+// a value receiver) never see the change.
 func (m *Model) expandAncestors(p string) {
+	m.expanded = cloneSet(m.expanded)
 	for d := parentDir(p); d != ""; d = parentDir(d) {
 		m.expanded[d] = true
 	}
@@ -358,11 +388,14 @@ func (m *Model) walk(nodes []*vault.Node, depth int, visible map[*vault.Node]boo
 			continue
 		}
 		*items = append(*items, item{kind: kindNode, path: n.Path, node: n, depth: depth})
-		if n.IsDir && m.expanded[n.Path] {
+		if n.IsDir && m.isOpen(n.Path) {
 			m.walk(n.Children, depth+1, visible, items)
 		}
 	}
 }
+
+// chipIndent starts each line of tag chips.
+const chipIndent = "  "
 
 // chipText is a tag chip's text without padding.
 func chipText(t msgs.TagCount) string {
@@ -386,7 +419,7 @@ func (m *Model) layout() {
 				lineW += 1 + w
 				continue
 			}
-			lineW = 1 + w
+			lineW = len(chipIndent) + w
 		}
 		m.lines = append(m.lines, []int{i})
 		m.lineOf[i] = len(m.lines) - 1
@@ -451,8 +484,13 @@ func (m *Model) move(dir int) {
 }
 
 func (m *Model) toggle(p string) {
-	if m.expanded[p] {
+	m.expanded = cloneSet(m.expanded)
+	if m.isOpen(p) {
 		delete(m.expanded, p)
+		if m.filterOpen[p] {
+			m.filterOpen = cloneSet(m.filterOpen)
+			delete(m.filterOpen, p)
+		}
 	} else {
 		m.expanded[p] = true
 	}
@@ -531,13 +569,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if !ok || it.kind != kindNode {
 			break
 		}
-		if it.node.IsDir && m.expanded[it.path] {
+		if it.node.IsDir && m.isOpen(it.path) {
 			m.toggle(it.path)
 		} else if parent := parentDir(it.path); parent != "" {
 			m.selectID("node:" + parent)
 		}
 	case "l", "right":
-		if it, ok := m.selected(); ok && it.kind == kindNode && it.node.IsDir && !m.expanded[it.path] {
+		if it, ok := m.selected(); ok && it.kind == kindNode && it.node.IsDir && !m.isOpen(it.path) {
 			m.toggle(it.path)
 		}
 	case "enter":
@@ -630,13 +668,17 @@ func (m Model) updatePicker(k tea.KeyPressMsg) (Model, tea.Cmd) {
 	case "up", "ctrl+k", "ctrl+p":
 		p.move(-1)
 	case "backspace":
-		if r := []rune(p.query); len(r) > 0 {
-			p.query = string(r[:len(r)-1])
-			p.refilter(m.tags)
+		r := []rune(p.query)
+		if len(r) == 0 {
+			m.picker = nil // backspace on an empty query closes the picker
+			break
 		}
+		p.query = string(r[:len(r)-1])
+		p.refilter(m.tags)
 	default:
-		if k.Text != "" {
-			p.query += k.Text
+		// Tags never contain spaces, so they are ignored.
+		if text := strings.ReplaceAll(k.Text, " ", ""); text != "" {
+			p.query += text
 			p.refilter(m.tags)
 		}
 	}
@@ -673,11 +715,11 @@ func (m Model) selStyle() lipgloss.Style {
 func (m Model) row(it item, selected bool) string {
 	var glyph, label, suffix string
 	glyphStyle, labelStyle := m.styles.Muted, m.styles.SidebarItem
-	indent := " "
+	indent := "  "
 
 	switch it.kind {
 	case kindHeader:
-		s := m.styles.SidebarSection.Render(" " + it.text)
+		s := m.styles.SidebarSection.Render("  " + it.text)
 		if it.text == "NOTES" && m.filter != nil {
 			s += m.styles.Muted.Render(" · filtered")
 		}
@@ -685,7 +727,7 @@ func (m Model) row(it item, selected bool) string {
 	case kindBlank:
 		return strings.Repeat(" ", m.width)
 	case kindHint:
-		return padLine(m.styles.Muted.Render("  "+it.text), m.width)
+		return padLine(m.styles.Muted.Render("    "+it.text), m.width)
 	case kindPin:
 		glyph, label = m.glyphs.Pin, noteName(path.Base(it.path))
 		glyphStyle = m.styles.Accent
@@ -695,7 +737,7 @@ func (m Model) row(it item, selected bool) string {
 		switch {
 		case n.IsDir:
 			glyph = m.glyphs.FolderClosed
-			if m.expanded[n.Path] {
+			if m.isOpen(n.Path) {
 				glyph = m.glyphs.FolderOpen
 			}
 			glyphStyle, label = m.styles.Accent, n.Name
@@ -747,7 +789,7 @@ func (m Model) chipLine(idx []int) string {
 		}
 		parts = append(parts, st.Render(chipText(m.items[i].tag)))
 	}
-	return padLine(" "+strings.Join(parts, " "), m.width)
+	return padLine(chipIndent+strings.Join(parts, " "), m.width)
 }
 
 // View renders the sidebar content at exactly the configured size.

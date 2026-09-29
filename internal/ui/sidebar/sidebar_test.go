@@ -195,6 +195,59 @@ func TestSelectRevealsNote(t *testing.T) {
 	}
 }
 
+func TestSelectKeepsPinSelection(t *testing.T) {
+	m := newTest(t)
+	m.SetPins([]string{"Work/ideas.md"})
+	m.selectID("pin:Work/ideas.md")
+	m.Select("Work/ideas.md") // what the app does after opening the pin
+	if got := selectedID(m); got != "pin:Work/ideas.md" {
+		t.Errorf("selection = %q, want the pin to stay selected", got)
+	}
+	if got := m.Expanded(); len(got) != 0 {
+		t.Errorf("Expanded() = %v, want no folders expanded", got)
+	}
+}
+
+func TestFilterExpansionIsDisplayOnly(t *testing.T) {
+	m := newTest(t)
+	m.SetExpanded([]string{"Personal"})
+	m.SetFilter(map[string]bool{"Work/Sub/deep.md": true})
+	if got := nodePaths(m); !reflect.DeepEqual(got, []string{"Work", "Work/Sub", "Work/Sub/deep.md"}) {
+		t.Errorf("filtered rows = %v", got)
+	}
+	if got := m.Expanded(); !reflect.DeepEqual(got, []string{"Personal"}) {
+		t.Errorf("Expanded() during filter = %v, want [Personal]", got)
+	}
+	m.SetFilter(nil)
+	want := []string{"Personal", "Personal/journal.md", "Work", "diagram.png", "readme.md"}
+	if got := nodePaths(m); !reflect.DeepEqual(got, want) {
+		t.Errorf("rows after clearing = %v, want %v", got, want)
+	}
+}
+
+func TestFilterCollapseWorks(t *testing.T) {
+	m := newTest(t)
+	m.SetFilter(map[string]bool{"Work/Sub/deep.md": true})
+	m.Select("Work")
+	m, _ = send(m, "h")
+	if got := nodePaths(m); !reflect.DeepEqual(got, []string{"Work"}) {
+		t.Errorf("rows after collapsing a filter-expanded folder = %v", got)
+	}
+}
+
+func TestUpdateDoesNotShareExpandedState(t *testing.T) {
+	m := newTest(t)
+	m.Select("Work")
+	before := m
+	after, _ := send(m, "l")
+	if len(before.Expanded()) != 0 {
+		t.Errorf("earlier Model value changed: Expanded() = %v", before.Expanded())
+	}
+	if got := after.Expanded(); !reflect.DeepEqual(got, []string{"Work"}) {
+		t.Errorf("after l: Expanded() = %v", got)
+	}
+}
+
 func TestFilterVisibility(t *testing.T) {
 	m := newTest(t)
 	m.SetFilter(map[string]bool{"Work/Sub/deep.md": true, "readme.md": true})
@@ -203,7 +256,7 @@ func TestFilterVisibility(t *testing.T) {
 		t.Errorf("filtered rows = %v, want %v", got, want)
 	}
 	m.SetFilter(nil)
-	want = []string{"Personal", "Work", "Work/Sub", "Work/Sub/deep.md", "Work/Standup notes.md", "Work/ideas.md", "diagram.png", "readme.md"}
+	want = []string{"Personal", "Work", "diagram.png", "readme.md"}
 	if got := nodePaths(m); !reflect.DeepEqual(got, want) {
 		t.Errorf("unfiltered rows = %v, want %v", got, want)
 	}
@@ -374,6 +427,18 @@ func TestTagPicker(t *testing.T) {
 		t.Errorf("esc in the picker: open=%v msg=%#v", m.PickerOpen(), msg)
 	}
 
+	// Spaces are ignored (tags never contain them).
+	_, msg = send(newPicker(), "#", " ", "t", " ", "o", "enter")
+	if want := (msgs.FilterTagMsg{Tag: "todo"}); msg != want {
+		t.Errorf("picker with spaces = %#v, want %#v", msg, want)
+	}
+
+	// Backspace on an empty query closes the picker.
+	m, msg = send(newPicker(), "#", "backspace")
+	if msg != nil || m.PickerOpen() {
+		t.Errorf("backspace on empty query: open=%v msg=%#v", m.PickerOpen(), msg)
+	}
+
 	// No match: enter does nothing but close.
 	m, msg = send(newPicker(), "#", "z", "z", "enter")
 	if msg != nil || m.PickerOpen() {
@@ -449,25 +514,25 @@ func TestRenderSnapshot(t *testing.T) {
 	m.SetFocused(true)
 
 	want := strings.Join([]string{
-		" PINNED                     ",
-		" ★ Standup notes ●          ",
+		"  PINNED                    ",
+		"  ★ Standup notes ●         ",
 		"                            ",
-		" NOTES                      ",
-		" ▸ Personal                 ",
-		" ▾ Work                     ",
-		"   ▸ Sub                    ",
-		"   • Standup notes ●        ",
-		"   • ideas                  ",
-		" · diagram.png              ",
-		" • readme                   ",
+		"  NOTES                     ",
+		"  ▸ Personal                ",
+		"  ▾ Work                    ",
+		"    ▸ Sub                   ",
+		"    • Standup notes ●       ",
+		"    • ideas                 ",
+		"  · diagram.png             ",
+		"  • readme                  ",
 		"                            ",
-		" TAGS                       ",
-		"  #design 3   #todo 7       ",
-		"  #work/client 12           ",
+		"  TAGS                      ",
+		"   #design 3   #todo 7      ",
+		"   #work/client 12          ",
 		"                            ",
-		" ☐ Tasks (12)               ",
-		" ⚠ Conflicts (2)            ",
-		" ⌫ Trash (2)                ",
+		"  ☐ Tasks (12)              ",
+		"  ⚠ Conflicts (2)           ",
+		"  ⌫ Trash (2)               ",
 		"                            ",
 	}, "\n")
 	got := ansi.Strip(m.View())
