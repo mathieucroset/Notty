@@ -432,6 +432,102 @@ func TestPausedEventsDroppedAndResumeDelivers(t *testing.T) {
 	}
 }
 
+func TestChangesBeforePauseDelivered(t *testing.T) {
+	root := t.TempDir()
+	w := newTestWatcher(t, root)
+
+	// Pause right after the write: the kernel event may not have been read
+	// yet, and the barrier in Pause must make sure it is not dropped.
+	writeFile(t, root, "before.md", "user wrote this")
+	w.Pause()
+	defer w.Resume()
+
+	ev := nextEvent(t, w)
+	if !slices.Equal(ev.Paths, []string{"before.md"}) {
+		t.Fatalf("paths = %v, want [before.md]", ev.Paths)
+	}
+	expectNoEvent(t, w)
+}
+
+func TestChangesBeforeResumeDropped(t *testing.T) {
+	root := t.TempDir()
+	w := newTestWatcher(t, root)
+
+	w.Pause()
+	// Resume right after the write: the barrier in Resume must process the
+	// paused write's event before events flow again.
+	writeFile(t, root, "during.md", "git wrote this")
+	w.Resume()
+	writeFile(t, root, "after.md", "user wrote this")
+
+	ev := nextEvent(t, w)
+	if !slices.Equal(ev.Paths, []string{"after.md"}) {
+		t.Fatalf("paths = %v, want [after.md]", ev.Paths)
+	}
+	expectNoEvent(t, w)
+}
+
+func TestPauseNests(t *testing.T) {
+	root := t.TempDir()
+	w := newTestWatcher(t, root)
+
+	w.Pause()
+	w.Pause()
+	w.Resume() // still paused once
+	writeFile(t, root, "inner.md", "x")
+	expectNoEvent(t, w)
+
+	w.Resume()
+	w.Resume() // unbalanced: no-op
+	writeFile(t, root, "after.md", "y")
+	ev := nextEvent(t, w)
+	if !slices.Equal(ev.Paths, []string{"after.md"}) {
+		t.Fatalf("paths = %v, want [after.md]", ev.Paths)
+	}
+}
+
+func TestBarrierCompletesThroughSentinelEvent(t *testing.T) {
+	tests := []struct {
+		name     string
+		nottyDir bool
+	}{
+		{"with .notty", true},
+		{"creates .notty", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tc.nottyDir {
+				mkdir(t, root, ".notty")
+			}
+			w := newTestWatcher(t, root)
+
+			// Unlike Pause, no timeout: req is only closed once the
+			// sentinel's creation event has come back through the loop.
+			req := make(chan struct{})
+			w.ctl <- req
+			select {
+			case <-req:
+			case <-time.After(waitTimeout):
+				t.Fatal("barrier never completed")
+			}
+			expectNoEvent(t, w) // neither the sentinel nor .notty is reported
+		})
+	}
+}
+
+func TestPauseLeavesNoBarrierFileBehind(t *testing.T) {
+	root := t.TempDir()
+	w := newTestWatcher(t, root)
+
+	w.Pause()
+	w.Resume()
+	expectNoEvent(t, w)
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(barrierRel))); !os.IsNotExist(err) {
+		t.Fatalf("barrier file still present (stat err = %v)", err)
+	}
+}
+
 func TestFileInNewSubdirectoryDetected(t *testing.T) {
 	root := t.TempDir()
 	w := newTestWatcher(t, root)

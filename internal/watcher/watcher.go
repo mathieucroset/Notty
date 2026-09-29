@@ -30,6 +30,15 @@ const (
 	// Event: after it, the paths already quiet for debounce are delivered and
 	// the still-changing ones wait for their own quiet window.
 	maxDelay = time.Second
+	// barrierRel is the sentinel file Pause and Resume create to learn when
+	// the event loop has caught up with the kernel's event queue. Its name
+	// ends in .notty-tmp, so every other consumer ignores it.
+	barrierRel = ".notty/.watch-barrier.notty-tmp"
+	// barrierTimeout bounds how long Pause and Resume wait for the barrier.
+	barrierTimeout = 200 * time.Millisecond
+	// nottyDir is the app's metadata directory. Its own entry is never
+	// reported (Pause may create it); the files inside it are.
+	nottyDir = ".notty"
 	// selfWriteTTL is how long a NoteSelfWrite record stays valid.
 	selfWriteTTL = 5 * time.Second
 	// errBuffer is the capacity of the Errors channel; further errors are
@@ -79,11 +88,14 @@ type Watcher struct {
 	events chan Event
 	errors chan error
 	done   chan struct{}
+	ctl    chan chan struct{} // barrier requests to the run goroutine
 	wg     sync.WaitGroup
 	once   sync.Once
 
+	pauseMu sync.Mutex // serializes Pause and Resume
+
 	mu         sync.Mutex
-	paused     bool
+	pauses     int                  // Pause nesting depth; paused while > 0
 	selfWrites map[string]fileStamp // rel -> stamp recorded by NoteSelfWrite
 
 	// Owned by the run goroutine.
@@ -93,6 +105,7 @@ type Watcher struct {
 	urgent         []error              // errors delivered even when the Errors buffer is full
 	rootGone       bool                 // ErrRootGone already queued
 	overflowQueued bool                 // an overflow error is queued in urgent
+	barriers       []chan struct{}      // barrier requests awaiting the sentinel's event
 }
 
 // New starts watching root and every directory below it, except ignored ones.
@@ -131,11 +144,13 @@ func newWatcher(root string) (*Watcher, error) {
 		events:     make(chan Event),
 		errors:     make(chan error, errBuffer),
 		done:       make(chan struct{}),
+		ctl:        make(chan chan struct{}),
 		selfWrites: map[string]fileStamp{},
 		dirs:       map[string]bool{},
 		pending:    map[string]time.Time{},
 		ready:      map[string]bool{},
 	}
+	_ = os.Remove(w.abs(barrierRel)) // stale sentinel from a crash
 	errs, err := w.addTree(".", nil)
 	if err != nil {
 		_ = fsw.Close()
@@ -184,22 +199,61 @@ func (w *Watcher) NoteSelfWrite(rel string) {
 	w.selfWrites[rel] = stampOf(info, now)
 }
 
-// Pause drops every change seen until Resume. Use it only around git
-// operations that change the working tree; the caller re-indexes the files
-// those operations changed. Changes seen before Pause are still delivered.
-// New directories are still watched while paused.
+// Pause drops every change made from now until the matching Resume. Use it
+// only around git operations that change the working tree; the caller
+// re-indexes the files those operations changed. Pauses nest: the watcher is
+// paused until every Pause has been matched by a Resume.
+//
+// Before pausing, the outermost Pause waits (up to 200ms) until the event loop
+// has handled every change made before the call, by writing a sentinel file
+// under .notty/ (creating that directory if needed) and waiting for its event.
+// Changes made before Pause are therefore still delivered. New directories
+// keep being watched while paused.
 func (w *Watcher) Pause() {
+	w.pauseMu.Lock()
+	defer w.pauseMu.Unlock()
+	if w.pauseDepth() == 0 {
+		w.barrier()
+	}
 	w.mu.Lock()
-	w.paused = true
+	w.pauses++
 	w.mu.Unlock()
 }
 
-// Resume ends a Pause. Kernel events queued by writes made just before Resume
-// may still be delivered; consumers must tolerate redundant paths.
+// Resume ends one Pause; an unmatched Resume does nothing. The outermost
+// Resume first waits, like Pause, until every change made before the call has
+// been handled (and dropped), so writes made during the pause are not reported
+// after it.
 func (w *Watcher) Resume() {
+	w.pauseMu.Lock()
+	defer w.pauseMu.Unlock()
+	switch w.pauseDepth() {
+	case 0:
+		return
+	case 1:
+		w.barrier()
+	}
 	w.mu.Lock()
-	w.paused = false
+	w.pauses--
 	w.mu.Unlock()
+}
+
+// barrier returns once the run goroutine has handled every kernel event queued
+// before the call, or after barrierTimeout, or when the watcher closes.
+func (w *Watcher) barrier() {
+	req := make(chan struct{})
+	select {
+	case w.ctl <- req:
+	case <-w.done:
+		return
+	}
+	t := time.NewTimer(barrierTimeout)
+	defer t.Stop()
+	select {
+	case <-req:
+	case <-t.C:
+	case <-w.done:
+	}
 }
 
 // Close stops watching, waits for the internal goroutine to exit, and closes
@@ -221,6 +275,7 @@ func (w *Watcher) run() {
 	defer w.wg.Done()
 	defer close(w.errors)
 	defer close(w.events)
+	defer w.releaseBarriers()
 
 	timer := time.NewTimer(debounce)
 	timer.Stop()
@@ -282,6 +337,9 @@ func (w *Watcher) run() {
 			}
 			w.handleFSError(err)
 
+		case req := <-w.ctl:
+			w.startBarrier(req)
+
 		case <-timerC:
 			timerC = nil
 			now := time.Now()
@@ -304,6 +362,53 @@ func (w *Watcher) run() {
 			}
 		}
 	}
+}
+
+// startBarrier creates the sentinel file. req is closed when the sentinel's
+// creation event comes back through the loop, which proves every kernel event
+// queued before it has been handled. If the sentinel cannot be created, req is
+// closed at once.
+func (w *Watcher) startBarrier(req chan struct{}) {
+	if err := os.MkdirAll(w.abs(nottyDir), 0o755); err != nil {
+		close(req)
+		return
+	}
+	if !w.dirs[nottyDir] {
+		errs, _ := w.addTree(nottyDir, nil)
+		for _, e := range errs {
+			w.sendError(e)
+		}
+		if !w.dirs[nottyDir] {
+			close(req)
+			return
+		}
+	}
+	path := w.abs(barrierRel)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		// Left over from a barrier that timed out: recreate it so that a
+		// creation event is guaranteed.
+		_ = os.Remove(path)
+		f, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	}
+	if err != nil {
+		close(req)
+		return
+	}
+	_ = f.Close()
+	w.barriers = append(w.barriers, req)
+}
+
+// releaseBarriers completes every waiting barrier and removes the sentinel.
+func (w *Watcher) releaseBarriers() {
+	if len(w.barriers) == 0 {
+		return
+	}
+	_ = os.Remove(w.abs(barrierRel))
+	for _, req := range w.barriers {
+		close(req)
+	}
+	w.barriers = nil
 }
 
 // handleFSError forwards an fsnotify error. After a queue overflow, events
@@ -359,6 +464,12 @@ func (w *Watcher) handle(fe fsnotify.Event, now time.Time) bool {
 		}
 		return false
 	}
+	if rel == barrierRel {
+		if fe.Has(fsnotify.Create) {
+			w.releaseBarriers()
+		}
+		return false
+	}
 	if ignored(rel) {
 		return false
 	}
@@ -392,7 +503,7 @@ func (w *Watcher) handle(fe fsnotify.Event, now time.Time) bool {
 			}
 		}
 	}
-	if paused {
+	if paused || rel == nottyDir {
 		return recorded
 	}
 	w.pending[rel] = now
@@ -506,10 +617,12 @@ func (w *Watcher) sendError(err error) {
 	}
 }
 
-func (w *Watcher) isPaused() bool {
+func (w *Watcher) isPaused() bool { return w.pauseDepth() > 0 }
+
+func (w *Watcher) pauseDepth() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.paused
+	return w.pauses
 }
 
 func (w *Watcher) abs(rel string) string {
