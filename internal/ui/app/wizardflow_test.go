@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/mathieucroset/notty/internal/setup"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/palette"
+	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/ui/wizard"
 	"github.com/mathieucroset/notty/internal/vault"
 )
@@ -151,9 +153,41 @@ func TestWizardQuitAndCtrlQ(t *testing.T) {
 func TestWizardThemePreviewRethemes(t *testing.T) {
 	gittest.Isolate(t)
 	m := start(t, wizardOptions(t), 100, 30)
-	run(t, m, wizard.ThemePreviewMsg{Name: "nord"})
+	nord, _ := theme.Get("nord")
+	run(t, m, wizard.ThemePreviewMsg{Palette: nord})
 	if m.opts.Palette.Name != "nord" {
 		t.Errorf("palette = %q, want nord", m.opts.Palette.Name)
+	}
+}
+
+func TestWizardDoneSavesUserTheme(t *testing.T) {
+	gittest.Isolate(t)
+	setIdentity(t)
+	opts := wizardOptions(t)
+	withUserThemes(t, &opts, map[string]string{"mine": userThemeFile})
+	m := start(t, opts, 100, 30)
+	t.Cleanup(m.Shutdown)
+
+	run(t, m, keyMsg("enter")) // vault folder
+	run(t, m, keyMsg("j"))     // Existing URL → Local only
+	run(t, m, keyMsg("enter"))
+	waitFor(t, m, func() bool { return m.wizard != nil && m.wizard.Stage() == wizard.StageTheme })
+	names := opts.Catalog.Names()
+	for range slices.Index(names, "mine") - slices.Index(names, "catppuccin-mocha") {
+		run(t, m, downKey)
+	}
+	if m.opts.Palette.Name != "mine" {
+		t.Fatalf("previewed palette = %q, want mine", m.opts.Palette.Name)
+	}
+	run(t, m, keyMsg("enter")) // theme
+	finishWizard(t, m)
+
+	if m.opts.Palette.Name != "mine" || m.themeName != "mine" {
+		t.Errorf("palette / themeName = %q / %q, want mine", m.opts.Palette.Name, m.themeName)
+	}
+	b, err := os.ReadFile(opts.ConfigPath)
+	if err != nil || !strings.Contains(string(b), `theme = "mine"`) {
+		t.Errorf("config = %q (%v), want theme = \"mine\"", b, err)
 	}
 }
 

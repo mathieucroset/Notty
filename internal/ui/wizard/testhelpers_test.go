@@ -90,6 +90,12 @@ func (f *fakeEnv) env() Env {
 	}
 }
 
+// builtin returns the built-in palette name.
+func builtin(name string) theme.Palette {
+	p, _ := theme.Get(name)
+	return p
+}
+
 func testStyles() theme.Styles {
 	p, _ := theme.Get("catppuccin-mocha")
 	return theme.NewStyles(p)
@@ -198,7 +204,7 @@ func key(s string) tea.KeyPressMsg {
 // start builds a sized wizard and runs Init.
 func start(t *testing.T, mode Mode, f *fakeEnv) Model {
 	t.Helper()
-	m := New(mode, "~/Notes", "catppuccin-mocha", f.env(), testStyles()).SetSize(100, 40)
+	m := New(mode, "~/Notes", builtin("catppuccin-mocha"), theme.Catalog{}, f.env(), testStyles()).SetSize(100, 40)
 	m, _ = drive(t, m, m.Init())
 	return m
 }

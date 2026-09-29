@@ -71,7 +71,7 @@ func (m *Model) newFirstRunWizard() *wizard.Model {
 	if def == "" {
 		def = m.opts.Config.VaultPath()
 	}
-	w := wizard.New(wizard.FirstRun, homeRelative(def), m.opts.Palette.Name, m.wizardEnv(), m.opts.Styles)
+	w := wizard.New(wizard.FirstRun, homeRelative(def), m.opts.Palette, m.opts.Catalog, m.wizardEnv(), m.opts.Styles)
 	return &w
 }
 
@@ -86,7 +86,7 @@ func (m *Model) updateWizard(msg tea.Msg) tea.Cmd {
 func (m *Model) updateWizardMsg(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case wizard.ThemePreviewMsg:
-		_ = m.applyTheme(msg.Name)
+		m.applyPalette(msg.Palette)
 		if m.wizard != nil {
 			w := m.wizard.SetStyles(m.opts.Styles)
 			m.wizard = &w
@@ -119,8 +119,11 @@ func (m *Model) handleWizardDone(msg wizard.DoneMsg) tea.Cmd {
 	if abs, err := filepath.Abs(root); err == nil {
 		root = abs
 	}
-	if msg.Theme != "" {
-		_ = m.applyTheme(msg.Theme)
+	// The wizard resolved the theme (it never finishes on one that does
+	// not load): apply it, then save its name.
+	if msg.Palette.Name != "" {
+		m.applyPalette(msg.Palette)
+		m.themeName = msg.Palette.Name
 	}
 	wait := m.opts.LockWait
 	if wait <= 0 {
@@ -224,7 +227,7 @@ func (m *Model) setupSync() tea.Cmd {
 	}
 	env := m.wizardEnv()
 	env.Run = setupRunner(m.syncSvc.RunSetup, env.GH, m.repo.Dir)
-	w := wizard.New(wizard.SetupSync, m.repo.Dir, m.opts.Palette.Name, env, m.opts.Styles).SetSize(m.width, m.height)
+	w := wizard.New(wizard.SetupSync, m.repo.Dir, m.opts.Palette, m.opts.Catalog, env, m.opts.Styles).SetSize(m.width, m.height)
 	m.wizard = &w
 	return w.Init()
 }

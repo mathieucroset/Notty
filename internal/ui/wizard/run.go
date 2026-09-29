@@ -11,6 +11,7 @@ import (
 
 	"github.com/mathieucroset/notty/internal/gitsync"
 	"github.com/mathieucroset/notty/internal/setup"
+	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
 // runPhase is where the setup run is.
@@ -280,11 +281,11 @@ func (m Model) finishRun() (Model, tea.Cmd) {
 	if m.mode == FirstRun {
 		return m.enterTheme()
 	}
-	return m, emit(m.done(m.currentTheme))
+	return m, emit(m.done(m.current))
 }
 
-func (m Model) done(themeName string) DoneMsg {
-	return DoneMsg{Vault: m.vaultPath(), Theme: themeName, Conflicted: m.run.conflicted, Choice: m.choice}
+func (m Model) done(p theme.Palette) DoneMsg {
+	return DoneMsg{Vault: m.vaultPath(), Palette: p, Conflicted: m.run.conflicted, Choice: m.choice}
 }
 
 func (m Model) showIdentity(errText string) Model {

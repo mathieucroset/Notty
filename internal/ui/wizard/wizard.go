@@ -87,12 +87,14 @@ func DefaultEnv(host string) Env {
 }
 
 // DoneMsg reports a finished setup. Vault is the folder as the user typed it
-// (it may start with "~"; expand it with config.ExpandHome). The app persists
-// Vault and Theme, acquires the lock, opens the vault and starts the syncer,
-// which enters Conflict when Conflicted is set.
+// (it may start with "~"; expand it with config.ExpandHome). Palette is the
+// chosen theme, already resolved (the current one in SetupSync mode). The
+// app applies Palette, persists Vault and Palette.Name, acquires the lock,
+// opens the vault and starts the syncer, which enters Conflict when
+// Conflicted is set.
 type DoneMsg struct {
 	Vault      string
-	Theme      string
+	Palette    theme.Palette
 	Conflicted bool
 	Choice     setup.Choice
 }
@@ -103,8 +105,9 @@ type QuitMsg struct{}
 // CancelMsg reports esc on the first shown step in SetupSync mode.
 type CancelMsg struct{}
 
-// ThemePreviewMsg asks the app to re-theme while the user browses themes.
-type ThemePreviewMsg struct{ Name string }
+// ThemePreviewMsg asks the app to re-theme with Palette while the user
+// browses themes (or to go back to the current one on esc).
+type ThemePreviewMsg struct{ Palette theme.Palette }
 
 // Stage is the screen the wizard is showing.
 type Stage int
@@ -196,7 +199,11 @@ type Model struct {
 	stage  Stage
 
 	defaultVault string
-	currentTheme string
+	// current is the displayed palette when the wizard opened: marked in
+	// the theme list, restored on esc and chosen by default.
+	current theme.Palette
+	// cat lists and resolves the themes of the theme step.
+	cat theme.Catalog
 
 	// Vault step.
 	vaultInput  textinput.Model
@@ -233,8 +240,9 @@ type Model struct {
 }
 
 // New builds a wizard. defaultVault prefills the vault step (FirstRun) or is
-// the fixed vault (SetupSync); currentTheme is marked in the theme list.
-func New(mode Mode, defaultVault string, currentTheme string, env Env, styles theme.Styles) Model {
+// the fixed vault (SetupSync); current is the displayed palette, marked in
+// the theme list; cat lists and resolves the themes offered.
+func New(mode Mode, defaultVault string, current theme.Palette, cat theme.Catalog, env Env, styles theme.Styles) Model {
 	if env.CountNotes == nil {
 		env.CountNotes = countNotes
 	}
@@ -243,7 +251,8 @@ func New(mode Mode, defaultVault string, currentTheme string, env Env, styles th
 		env:          env,
 		styles:       styles,
 		defaultVault: defaultVault,
-		currentTheme: currentTheme,
+		current:      current,
+		cat:          cat,
 		choice:       setup.ExistingURL,
 		spinner:      spinner.New(),
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/mathieucroset/notty/internal/gitsync"
 	"github.com/mathieucroset/notty/internal/setup"
 	"github.com/mathieucroset/notty/internal/ui/keys"
+	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
 func doneMsg(t *testing.T, out []tea.Msg) DoneMsg {
@@ -30,7 +31,7 @@ func TestSetupSyncLocalOnlyRunsAndFinishes(t *testing.T) {
 	m := start(t, SetupSync, f)
 	m, out := press(t, m, "down", "down", "enter")
 	d := doneMsg(t, out)
-	want := DoneMsg{Vault: "~/Notes", Theme: "catppuccin-mocha", Choice: setup.LocalOnly}
+	want := DoneMsg{Vault: "~/Notes", Palette: builtin("catppuccin-mocha"), Choice: setup.LocalOnly}
 	if d != want {
 		t.Errorf("DoneMsg = %+v, want %+v", d, want)
 	}
@@ -297,7 +298,7 @@ func TestProgressMarkersFollowCallback(t *testing.T) {
 		}
 		return false, nil
 	}
-	m := New(SetupSync, "/v", "nord", f.env(), testStyles()).SetSize(100, 40)
+	m := New(SetupSync, "/v", builtin("nord"), theme.Catalog{}, f.env(), testStyles()).SetSize(100, 40)
 	m, _ = send(t, m, ghMsg{ok: false})
 	m, _ = press(t, m, "down")
 	m, cmd := m.Update(key("enter"))
@@ -330,7 +331,7 @@ func TestProgressMarkersFollowCallback(t *testing.T) {
 		m, cmd = stepOnce(t, m, cmd)
 	}
 	d := doneMsg(t, exec(cmd))
-	if d.Vault != "/v" || d.Theme != "nord" {
+	if d.Vault != "/v" || d.Palette.Name != "nord" {
 		t.Errorf("DoneMsg = %+v", d)
 	}
 }
@@ -342,11 +343,11 @@ func TestRunViewFitsSize(t *testing.T) {
 		return false, &setup.StepError{Index: 0, Step: steps[0], Err: fmt.Errorf("%s", strings.Repeat("a long git error message ", 20))}
 	}
 	for _, sz := range [][2]int{{120, 40}, {70, 24}, {40, 12}} {
-		m := New(SetupSync, "~/Notes", "nord", f.env(), testStyles()).SetSize(sz[0], sz[1])
+		m := New(SetupSync, "~/Notes", builtin("nord"), theme.Catalog{}, f.env(), testStyles()).SetSize(sz[0], sz[1])
 		m, _ = press(t, m, "down", "enter")
 		checkFits(t, m, sz[0], sz[1], 0)
 		f2 := &fakeEnv{identityErr: setup.ErrNoIdentity}
-		m2 := New(SetupSync, "~/Notes", "nord", f2.env(), testStyles()).SetSize(sz[0], sz[1])
+		m2 := New(SetupSync, "~/Notes", builtin("nord"), theme.Catalog{}, f2.env(), testStyles()).SetSize(sz[0], sz[1])
 		m2, _ = press(t, m2, "down", "enter")
 		checkFits(t, m2, sz[0], sz[1], 1)
 	}

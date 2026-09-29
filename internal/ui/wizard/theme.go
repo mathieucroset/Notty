@@ -2,7 +2,7 @@ package wizard
 
 import (
 	"image/color"
-
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,6 +17,12 @@ import (
 type themeState struct {
 	names []string
 	idx   int
+	// cur is the highlighted theme, resolved once when the cursor lands on
+	// it: the sample card and enter use it without reading its file again.
+	cur theme.Palette
+	// err is why the highlighted theme does not load; enter is refused
+	// while it is set, so a broken theme is never chosen.
+	err error
 	// base is the styles the wizard was opened with, restored when esc
 	// leaves the step.
 	base theme.Styles
@@ -26,15 +32,23 @@ type themeState struct {
 // the cursor on the current theme.
 func (m Model) enterTheme() (Model, tea.Cmd) {
 	m.stage = StageTheme
-	m.theme.names = theme.Names()
-	m.theme.idx = 0
-	for i, n := range m.theme.names {
-		if n == m.currentTheme {
-			m.theme.idx = i
-		}
+	m.theme.names = m.cat.Names()
+	m.theme.idx = max(slices.Index(m.theme.names, m.current.Name), 0)
+	m.theme.cur, m.theme.err = m.current, nil
+	if len(m.theme.names) > 0 && m.theme.names[m.theme.idx] != m.current.Name {
+		m.theme.cur, m.theme.err = m.resolve(m.theme.names[m.theme.idx])
 	}
 	m.focus()
 	return m, nil
+}
+
+// resolve returns the named palette: the current one from memory, any
+// other through the catalog (a user theme is read from its file).
+func (m Model) resolve(name string) (theme.Palette, error) {
+	if name == m.current.Name {
+		return m.current, nil
+	}
+	return m.cat.Resolve(name)
 }
 
 func (m Model) themeKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
@@ -50,29 +64,34 @@ func (m Model) themeKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			return m.preview(m.theme.names[m.theme.idx])
 		}
 	case "enter":
-		if len(m.theme.names) == 0 {
-			return m, emit(m.done(m.currentTheme))
+		if m.theme.err != nil {
+			return m, nil
 		}
-		return m, emit(m.done(m.theme.names[m.theme.idx]))
+		return m, emit(m.done(m.theme.cur))
 	case "esc":
 		m.styles = m.theme.base
 		m.applyStyles()
+		m.theme.err = nil
 		m.stage = StageSync
 		m.sub = subList
 		m.focus()
-		return m, emit(ThemePreviewMsg{Name: m.currentTheme})
+		return m, emit(ThemePreviewMsg{Palette: m.current})
 	}
 	return m, nil
 }
 
-// preview re-styles the wizard in the named theme and asks the app to do
-// the same.
+// preview resolves the named theme, re-styles the wizard in it and asks
+// the app to do the same. A theme that does not load keeps the colors and
+// shows its error in the step instead.
 func (m Model) preview(name string) (Model, tea.Cmd) {
-	if p, ok := theme.Get(name); ok {
-		m.styles = theme.NewStyles(p).WithIcons(m.styles.Icons)
-		m.applyStyles()
+	p, err := m.resolve(name)
+	m.theme.cur, m.theme.err = p, err
+	if err != nil {
+		return m, nil
 	}
-	return m, emit(ThemePreviewMsg{Name: name})
+	m.styles = theme.NewStyles(p).WithIcons(m.styles.Icons)
+	m.applyStyles()
+	return m, emit(ThemePreviewMsg{Palette: p})
 }
 
 const (
@@ -90,22 +109,15 @@ func (m Model) themeView(w int) string {
 	head = append(head, m.styles.StatusText.Render("Pick a theme"), "")
 
 	list := m.themeList()
-	name := m.currentTheme
-	if len(m.theme.names) > 0 {
-		name = m.theme.names[m.theme.idx]
+	if m.theme.err != nil {
+		return strings.Join(head, "\n") + "\n" + list + "\n\n" + m.note(m.styles.Error, "Could not load "+m.theme.err.Error(), w)
 	}
-	card := ""
-	if p, ok := theme.Get(name); ok {
-		card = sampleCard(p, m.styles.Icons)
-	}
+	card := sampleCard(m.theme.cur, m.styles.Icons)
 	listW := lipgloss.Width(list)
 	var body string
-	switch {
-	case card == "":
-		body = list
-	case listW+themeGap+lipgloss.Width(card) <= w:
+	if listW+themeGap+lipgloss.Width(card) <= w {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, list, strings.Repeat(" ", themeGap), card)
-	default:
+	} else {
 		body = list + "\n\n" + card
 	}
 	return strings.Join(head, "\n") + "\n" + body
@@ -120,7 +132,7 @@ func (m Model) themeList() string {
 		} else {
 			line = "  " + m.styles.StatusText.Render(n)
 		}
-		if n == m.currentTheme {
+		if n == m.current.Name {
 			line += m.styles.Muted.Render(" · current")
 		}
 		lines[i] = line

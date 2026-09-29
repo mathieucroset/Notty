@@ -2,6 +2,10 @@ package wizard
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -10,11 +14,21 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
+func previewPalettes(out []tea.Msg) []theme.Palette {
+	var ps []theme.Palette
+	for _, msg := range out {
+		if p, ok := msg.(ThemePreviewMsg); ok {
+			ps = append(ps, p.Palette)
+		}
+	}
+	return ps
+}
+
 func previews(out []tea.Msg) []string {
 	var names []string
 	for _, msg := range out {
 		if p, ok := msg.(ThemePreviewMsg); ok {
-			names = append(names, p.Name)
+			names = append(names, p.Palette.Name)
 		}
 	}
 	return names
@@ -57,23 +71,163 @@ func TestFirstRunHappyPath(t *testing.T) {
 	m, _ = press(t, m, "j", "j")
 	_, out = press(t, m, "enter")
 	d := doneMsg(t, out)
-	want := DoneMsg{Vault: "~/journal", Theme: names[2], Choice: setup.LocalOnly}
+	want := DoneMsg{Vault: "~/journal", Palette: builtin(names[2]), Choice: setup.LocalOnly}
 	if d != want {
 		t.Errorf("DoneMsg = %+v, want %+v", d, want)
 	}
 }
 
 func TestThemeStepStartsOnCurrentTheme(t *testing.T) {
+	tests := []struct {
+		name    string
+		current string // a built-in, or "good" (a user theme)
+	}{
+		{"built-in", "nord"},
+		// The current user theme is not read again: deleting its file
+		// before enter changes nothing.
+		{"user theme, file deleted meanwhile", "good"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cat, dir := userCatalog(t)
+			cur, err := cat.Resolve(tt.current)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := &fakeEnv{vaultState: setup.Empty}
+			m := New(FirstRun, "~/Notes", cur, cat, f.env(), testStyles()).SetSize(100, 40)
+			m, _ = drive(t, m, m.Init())
+			m, _ = press(t, m, "enter", "down", "enter")
+			if m.Stage() != StageTheme {
+				t.Fatalf("stage = %v", m.Stage())
+			}
+			mustContain(t, m, tt.current+" · current")
+			if err := os.Remove(filepath.Join(dir, "good.toml")); err != nil {
+				t.Fatal(err)
+			}
+			_, out := press(t, m, "enter")
+			if d := doneMsg(t, out); d.Palette.Key() != cur.Key() {
+				t.Errorf("theme = %q, want %q (the current one)", d.Palette.Key(), cur.Key())
+			}
+		})
+	}
+}
+
+// goodTheme is a valid user theme file.
+const goodTheme = `base = "#141318"
+surface = "#201f24"
+overlay = "#36343a"
+text = "#e6e1e9"
+subtext = "#cac4cf"
+muted = "#948f99"
+accent = "#cfbcff"
+accent2 = "#f2b7c2"
+error = "#ffb4ab"
+`
+
+// userCatalog is a catalog with two user themes: good, and bad (which
+// does not load).
+func userCatalog(t *testing.T) (theme.Catalog, string) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range map[string]string{"good": goodTheme, "bad": "x"} {
+		if err := os.WriteFile(filepath.Join(dir, name+theme.ThemeExt), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return theme.Catalog{Dir: dir}, dir
+}
+
+// themeStep opens the theme step of a first-run wizard on cat, current
+// theme catppuccin-mocha, with the cursor moved to the theme target.
+func themeStep(t *testing.T, cat theme.Catalog, target string) (Model, []tea.Msg) {
+	t.Helper()
 	f := &fakeEnv{vaultState: setup.Empty}
-	m := New(FirstRun, "~/Notes", "nord", f.env(), testStyles()).SetSize(100, 40)
+	m := New(FirstRun, "~/Notes", builtin("catppuccin-mocha"), cat, f.env(), testStyles()).SetSize(120, 40)
 	m, _ = drive(t, m, m.Init())
 	m, _ = press(t, m, "enter", "down", "enter")
 	if m.Stage() != StageTheme {
 		t.Fatalf("stage = %v", m.Stage())
 	}
-	_, out := press(t, m, "enter")
-	if d := doneMsg(t, out); d.Theme != "nord" {
-		t.Errorf("theme = %q, want nord (the current one)", d.Theme)
+	names := cat.Names()
+	i := slices.Index(names, target)
+	if i < 0 {
+		t.Fatalf("%q not in %v", target, names)
+	}
+	var out []tea.Msg
+	for range i - slices.Index(names, "catppuccin-mocha") {
+		var o []tea.Msg
+		m, o = press(t, m, "down")
+		out = o
+	}
+	return m, out // the messages of the last move
+}
+
+func TestThemeStepUserThemes(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		ok     bool
+	}{
+		{"working user theme", "good", true},
+		{"broken user theme", "bad", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cat, _ := userCatalog(t)
+			m, out := themeStep(t, cat, tt.target)
+			mustContain(t, m, "bad", "good")
+			got := previews(out)
+			if !tt.ok {
+				if len(got) != 0 {
+					t.Errorf("previews = %v, want none for a broken theme", got)
+				}
+				mustContain(t, m, "bad.toml")
+				m2, out := press(t, m, "enter")
+				if len(out) != 0 || m2.Stage() != StageTheme {
+					t.Errorf("enter on a broken theme: stage %v, messages %v", m2.Stage(), out)
+				}
+				// Esc still goes back, on the current theme.
+				_, out = press(t, m, "esc")
+				if p := previewPalettes(out); len(p) != 1 || p[0].Key() != "catppuccin-mocha" {
+					t.Errorf("esc previews %v, want catppuccin-mocha", p)
+				}
+				return
+			}
+			want, err := cat.Resolve("good")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p := previewPalettes(out); len(p) != 1 || p[0].Name != "good" || p[0].Key() != want.Key() {
+				t.Errorf("previews = %v, want the good palette", got)
+			}
+			if strings.Contains(plain(m), "bad.toml") {
+				t.Errorf("error shown on a working theme:\n%s", plain(m))
+			}
+			_, out = press(t, m, "enter")
+			if d := doneMsg(t, out); d.Palette.Name != "good" || d.Palette.Key() != want.Key() {
+				t.Errorf("DoneMsg palette = %q, want %q", d.Palette.Key(), want.Key())
+			}
+		})
+	}
+}
+
+// TestThemeStepErrorClearsOnMove: moving from a broken theme to a working
+// one clears the error and allows enter again.
+func TestThemeStepErrorClearsOnMove(t *testing.T) {
+	cat, _ := userCatalog(t)
+	m, _ := themeStep(t, cat, "bad")
+	mustContain(t, m, "bad.toml")
+	m, out := press(t, m, "down") // good
+	if p := previewPalettes(out); len(p) != 1 || p[0].Name != "good" {
+		t.Errorf("previews = %v, want good", p)
+	}
+	if strings.Contains(plain(m), "bad.toml") {
+		t.Errorf("error still shown:\n%s", plain(m))
+	}
+	_, out = press(t, m, "enter")
+	if d := doneMsg(t, out); d.Palette.Name != "good" {
+		t.Errorf("DoneMsg theme = %q, want good", d.Palette.Name)
 	}
 }
 
@@ -130,7 +284,7 @@ func TestThemeStepConflictNote(t *testing.T) {
 func TestThemeViewFitsSize(t *testing.T) {
 	for _, sz := range [][2]int{{120, 40}, {70, 24}, {50, 16}, {30, 10}} {
 		f := &fakeEnv{vaultState: setup.Empty}
-		m := New(FirstRun, "~/Notes", "rose-pine-dawn", f.env(), testStyles()).SetSize(sz[0], sz[1])
+		m := New(FirstRun, "~/Notes", builtin("rose-pine-dawn"), theme.Catalog{}, f.env(), testStyles()).SetSize(sz[0], sz[1])
 		m, _ = press(t, m, "enter", "down", "enter")
 		if m.Stage() != StageTheme {
 			t.Fatalf("stage = %v", m.Stage())

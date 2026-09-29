@@ -9,6 +9,7 @@ import (
 	"github.com/mathieucroset/notty/internal/gitsync"
 	"github.com/mathieucroset/notty/internal/setup"
 	"github.com/mathieucroset/notty/internal/ui/keys"
+	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
 func TestVaultStepPrefillAndHint(t *testing.T) {
@@ -289,7 +290,7 @@ func TestViewFitsSize(t *testing.T) {
 	sizes := [][2]int{{120, 40}, {70, 24}, {40, 12}, {20, 6}}
 	f := &fakeEnv{vaultState: setup.FilesNoRepo, notes: 3, gh: false}
 	for _, sz := range sizes {
-		m := New(FirstRun, "~/a/very/long/path/that/goes/on/and/on/and/on/Notes", "nord", f.env(), testStyles()).SetSize(sz[0], sz[1])
+		m := New(FirstRun, "~/a/very/long/path/that/goes/on/and/on/and/on/Notes", builtin("nord"), theme.Catalog{}, f.env(), testStyles()).SetSize(sz[0], sz[1])
 		m, _ = drive(t, m, m.Init())
 		screens := []Model{m}
 		m2, _ := press(t, m, "enter")
@@ -304,7 +305,7 @@ func TestViewFitsSize(t *testing.T) {
 
 func TestLateGHResultKeepsMovedCursor(t *testing.T) {
 	f := &fakeEnv{vaultState: setup.Empty}
-	m := New(FirstRun, "~/Notes", "nord", f.env(), testStyles()).SetSize(100, 40)
+	m := New(FirstRun, "~/Notes", builtin("nord"), theme.Catalog{}, f.env(), testStyles()).SetSize(100, 40)
 	m, _ = press(t, m, "enter")
 	mustContain(t, m, "checking for gh")
 	m, _ = press(t, m, "down")
@@ -312,7 +313,7 @@ func TestLateGHResultKeepsMovedCursor(t *testing.T) {
 	if m.Choice() != setup.LocalOnly {
 		t.Errorf("choice = %v, want LocalOnly kept", m.Choice())
 	}
-	m2 := New(FirstRun, "~/Notes", "nord", f.env(), testStyles()).SetSize(100, 40)
+	m2 := New(FirstRun, "~/Notes", builtin("nord"), theme.Catalog{}, f.env(), testStyles()).SetSize(100, 40)
 	m2, _ = send(t, m2, ghMsg{ok: true})
 	if m2.Choice() != setup.CreateGitHub {
 		t.Errorf("choice = %v, want CreateGitHub once gh is found", m2.Choice())

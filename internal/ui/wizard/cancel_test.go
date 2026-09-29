@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/mathieucroset/notty/internal/setup"
+	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
 // waitDone fails the test unless ch is closed within a second.
@@ -33,7 +34,7 @@ func TestCancelStopsRunningSetup(t *testing.T) {
 		runErr = ctx.Err()
 		return false, &setup.StepError{Index: 0, Step: steps[0], Err: ctx.Err()}
 	}
-	m := New(SetupSync, "/v", "nord", f.env(), testStyles()).SetSize(100, 40)
+	m := New(SetupSync, "/v", builtin("nord"), theme.Catalog{}, f.env(), testStyles()).SetSize(100, 40)
 	m, _ = send(t, m, ghMsg{ok: false})
 	m, _ = press(t, m, "down")
 	m, cmd := m.Update(key("enter"))
@@ -72,7 +73,7 @@ func TestCancelStopsRemoteCheckAndIdentityCheck(t *testing.T) {
 		<-ctx.Done()
 		return setup.RemoteState{}, ctx.Err()
 	}
-	m := New(SetupSync, "/v", "nord", env, testStyles()).SetSize(100, 40)
+	m := New(SetupSync, "/v", builtin("nord"), theme.Catalog{}, env, testStyles()).SetSize(100, 40)
 	m, _ = press(t, m, "enter") // gh unknown: cursor on URL
 	m = typeText(t, m, "/srv/n.git")
 	m, cmd := m.Update(key("enter"))
@@ -86,7 +87,7 @@ func TestCancelStopsRemoteCheckAndIdentityCheck(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	m2 := New(SetupSync, "/v", "nord", env, testStyles()).SetSize(100, 40)
+	m2 := New(SetupSync, "/v", builtin("nord"), theme.Catalog{}, env, testStyles()).SetSize(100, 40)
 	m2, _ = press(t, m2, "down")
 	m2, cmd = m2.Update(key("enter"))
 	go exec(cmd)

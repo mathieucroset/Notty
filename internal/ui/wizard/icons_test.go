@@ -6,6 +6,7 @@ import (
 
 	"github.com/mathieucroset/notty/internal/setup"
 	"github.com/mathieucroset/notty/internal/ui/icons"
+	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
 // TestWizardDrawsTheConfiguredIcons walks the first run with each icon
@@ -17,7 +18,7 @@ func TestWizardDrawsTheConfiguredIcons(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			set, _ := icons.Get(name)
 			f := &fakeEnv{vaultState: setup.Missing}
-			m := New(FirstRun, "~/Notes", "catppuccin-mocha", f.env(), testStyles().WithIcons(set)).SetSize(100, 40)
+			m := New(FirstRun, "~/Notes", builtin("catppuccin-mocha"), theme.Catalog{}, f.env(), testStyles().WithIcons(set)).SetSize(100, 40)
 			m, _ = drive(t, m, m.Init())
 			if got := strings.Join(m.spinner.Spinner.Frames, ""); got != strings.Join(set.Spinner(), "") {
 				t.Errorf("spinner frames %q, want the %s set's", got, name)
@@ -54,7 +55,7 @@ func TestRunStepMarkers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			set, _ := icons.Get(name)
 			f := &fakeEnv{vaultState: setup.Missing}
-			m := New(SetupSync, "/v", "nord", f.env(), testStyles().WithIcons(set)).SetSize(100, 40)
+			m := New(SetupSync, "/v", builtin("nord"), theme.Catalog{}, f.env(), testStyles().WithIcons(set)).SetSize(100, 40)
 			m, _ = send(t, m, ghMsg{ok: false})
 			m, _ = press(t, m, "down")
 			m, cmd := m.Update(key("enter"))
