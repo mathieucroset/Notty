@@ -59,8 +59,8 @@ func (e ErrLocked) Error() string {
 // returns ErrLocked (wait 0 means a single attempt).
 //
 // A lock is stale, and taken over, when it names this host and a process
-// that is no longer running, or when it has been unparsable for more than a
-// couple of seconds. Takeover re-checks the file just before removing it;
+// that is no longer running, when it has been unparsable for more than a
+// couple of seconds, or when it is a dangling symlink. Takeover re-checks the file just before removing it;
 // two processes taking over the same stale lock at the same instant could
 // still both succeed.
 func AcquireLock(root string, wait time.Duration) (*Lock, error) {
@@ -74,7 +74,6 @@ func AcquireLock(root string, wait time.Duration) (*Lock, error) {
 		content: fmt.Sprintf("%d %s\n", os.Getpid(), host),
 	}
 	deadline := time.Now().Add(wait)
-	vanished := false
 	for {
 		err := createLock(l.path, l.content)
 		if err == nil {
@@ -85,13 +84,15 @@ func AcquireLock(root string, wait time.Duration) (*Lock, error) {
 		}
 		held, seen, err := readLockFile(l.path)
 		switch {
-		case errors.Is(err, fs.ErrNotExist) && !vanished:
-			// Released between our attempt and the read: retry at once,
-			// but only once so a dangling symlink cannot spin forever.
-			vanished = true
-			continue
 		case errors.Is(err, fs.ErrNotExist):
-			held = ErrLocked{}
+			// Either released since our attempt (retry at once), or a
+			// dangling symlink, which is stale: remove the link itself.
+			if _, lerr := os.Lstat(l.path); lerr == nil {
+				if err := os.Remove(l.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return nil, fmt.Errorf("vault: lock: remove dangling lock: %w", err)
+				}
+			}
+			continue
 		case err != nil:
 			return nil, fmt.Errorf("vault: lock: %w", err)
 		case isStale(l.path, held, host):
@@ -100,7 +101,6 @@ func AcquireLock(root string, wait time.Duration) (*Lock, error) {
 			}
 			continue
 		}
-		vanished = false
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			return nil, held
@@ -128,22 +128,21 @@ func createLock(path, content string) error {
 	return err
 }
 
-// readLockFile returns the holder named by the lock file and its raw
-// content. An unparsable file yields a zero ErrLocked and no error.
+// readLockFile returns the holder named by the lock file ("<pid> <host>",
+// the host being the rest of the line) and its raw content. An unparsable
+// file yields a zero ErrLocked and no error.
 func readLockFile(path string) (ErrLocked, []byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return ErrLocked{}, nil, err
 	}
-	fields := strings.Fields(string(b))
-	if len(fields) != 2 {
+	pidText, host, ok := strings.Cut(strings.TrimSpace(string(b)), " ")
+	host = strings.TrimSpace(host)
+	pid, err := strconv.Atoi(pidText)
+	if !ok || host == "" || err != nil || pid <= 0 {
 		return ErrLocked{}, b, nil
 	}
-	pid, err := strconv.Atoi(fields[0])
-	if err != nil || pid <= 0 {
-		return ErrLocked{}, b, nil
-	}
-	return ErrLocked{Pid: pid, Host: fields[1]}, b, nil
+	return ErrLocked{Pid: pid, Host: host}, b, nil
 }
 
 // isStale reports whether the lock held by holder can be taken over.

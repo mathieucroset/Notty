@@ -86,6 +86,7 @@ func TestAcquireLockHeld(t *testing.T) {
 		{"second holder in this process", "", os.Getpid(), host},
 		{"live process on this host", fmt.Sprintf("%d %s\n", os.Getppid(), host), os.Getppid(), host},
 		{"dead pid on another host", "999999 otherhost\n", 999999, "otherhost"},
+		{"host is rest of line", "  999999 my other laptop \n", 999999, "my other laptop"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -146,6 +147,42 @@ func TestAcquireLockStale(t *testing.T) {
 				t.Errorf("lock content = %q, want %q", got, ours())
 			}
 		})
+	}
+}
+
+func TestAcquireLockDanglingSymlinkIsStale(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".notty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "nowhere"), lockPath(root)); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	done := make(chan struct{})
+	var l *Lock
+	var err error
+	go func() {
+		defer close(done)
+		l, err = AcquireLock(root, time.Second)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("AcquireLock spun on a dangling symlink")
+	}
+	if err != nil {
+		t.Fatalf("AcquireLock over dangling symlink: %v", err)
+	}
+	defer l.Release()
+	fi, err := os.Lstat(lockPath(root))
+	if err != nil || !fi.Mode().IsRegular() {
+		t.Fatalf("lock is not a regular file: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "nowhere")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("lock was written through the symlink: %v", err)
+	}
+	if got := readLock(t, root); got != ours() {
+		t.Errorf("lock content = %q", got)
 	}
 }
 
