@@ -12,7 +12,12 @@ func TestVisualOps(t *testing.T) {
 		{"vx", "a|bcd", "vlx", "a|d", "bc", Normal},
 		{"v backwards", "abc|d", "vhhd", "|a", "bcd", Normal},
 		{"v across lines", "a|bc\nde", "vjd", "|a", "bc\nde", Normal},
-		{"v$d", "a|bc\nd", "v$d", "|a\nd", "bc", Normal},
+		{"v$d takes the line break", "a|bc\nd", "v$d", "a|d", "bc\n", Normal},
+		{"v$d two lines", "|ab\ncd", "v$d", "|cd", "ab\n", Normal},
+		{"v$d last line", "ab\n|cd", "v$d", "ab\n|", "cd", Normal},
+		{"v$j keeps the line break", "|ab\ncd\nef", "v$jd", "|ef", "ab\ncd\n", Normal},
+		{"v$h drops the line break", "|abc\nd", "v$hd", "|c\nd", "ab", Normal},
+		{"v$d dot repeat", "|ab\ncd\nef", "v$d.", "|ef", "cd\n", Normal},
 		{"v on empty line takes newline", "a\n|\nb", "vd", "a\n|b", "\n", Normal},
 		{"vy", "a|bcd", "vly", "a|bcd", "bc", Normal},
 		{"vy backwards moves to start", "abc|d", "vhy", "ab|cd", "cd", Normal},
@@ -85,6 +90,7 @@ func TestSelection(t *testing.T) {
 		{"linewise", "a|b\ncd\nef", "Vj", R(0, 0, 2, 0), true},
 		{"linewise last line", "ab\n|cd", "V", R(1, 0, 2, 0), true},
 		{"empty line", "|\nab", "v", R(0, 0, 1, 0), true},
+		{"after $", "|ab\ncd", "v$", R(0, 0, 1, 0), true},
 		{"after esc", "a|bc", "vl<esc>", buffer.Range{}, false},
 	}
 	for _, tt := range tests {

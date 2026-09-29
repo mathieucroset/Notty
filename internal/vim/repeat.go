@@ -11,7 +11,8 @@ type lastChange struct {
 
 	visual        bool
 	vmode         Mode
-	vlines, vcols int // selection height (lines below the start) and end column
+	vlines, vcols int  // selection height (lines below the start) and end column
+	veol          bool // the selection included the line break ($)
 }
 
 // recordChange remembers a normal-mode change for ".".
@@ -32,7 +33,8 @@ func (m *Machine) recordVisual(b *buffer.Buffer, c cmd) {
 	if e.Less(s) {
 		s, e = e, s
 	}
-	lc := &lastChange{c: c, visual: true, vmode: m.mode, vlines: e.Line - s.Line, vcols: e.Col}
+	lc := &lastChange{c: c, visual: true, vmode: m.mode, vlines: e.Line - s.Line, vcols: e.Col,
+		veol: e == b.Cursor() && m.curswant == wantEOL}
 	if lc.vlines == 0 {
 		lc.vcols = e.Col - s.Col
 	}
@@ -71,6 +73,9 @@ func (m *Machine) repeat(b *buffer.Buffer, c cmd) {
 		m.anchor = s
 		b.SetCursor(e)
 		m.clampNormal(b)
+		if lc.veol {
+			m.curswant = wantEOL
+		}
 		m.execVisual(b, lc.c)
 	} else {
 		m.exec(b, lc.c)

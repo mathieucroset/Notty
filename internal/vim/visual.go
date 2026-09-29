@@ -31,10 +31,13 @@ func (m *Machine) visualRange(b *buffer.Buffer) (buffer.Range, bool) {
 		return lines(b, s.Line, e.Line), true
 	}
 	end := e
-	if e.Col < b.LineLen(e.Line) {
+	eol := e == b.Cursor() && m.curswant == wantEOL // after $: include the line break
+	if e.Col < b.LineLen(e.Line) && !eol {
 		end.Col++
 	} else if e.Line < b.LineCount()-1 {
 		end = pos(e.Line+1, 0)
+	} else {
+		end = lineEnd(b, e.Line)
 	}
 	return buffer.Range{Start: s, End: end}, false
 }
