@@ -179,7 +179,7 @@ func (c *Clipboard) readImageDarwin() ([]byte, error) {
 	}
 
 	tmpPath := c.tempPNGPath()
-	script := `write (the clipboard as «class PNGf») to (open for access POSIX file "` + tmpPath + `" with write permission)`
+	script := `write (the clipboard as «class PNGf») to (open for access POSIX file "` + escapeAppleScriptString(tmpPath) + `" with write permission)`
 	if _, err := c.Run("osascript", "-e", script); err != nil {
 		// osascript fails with "Can't make ... into type PNGf" (or any
 		// other non-zero exit) when the clipboard holds no image.
@@ -205,7 +205,7 @@ func (c *Clipboard) readImageWindows() ([]byte, error) {
 	tmpPath := c.tempPNGPath()
 	script := `Add-Type -AssemblyName System.Windows.Forms, System.Drawing; ` +
 		`$i=[Windows.Forms.Clipboard]::GetImage(); ` +
-		`if($i){$i.Save('` + tmpPath + `',[System.Drawing.Imaging.ImageFormat]::Png)}`
+		`if($i){$i.Save('` + escapePowerShellString(tmpPath) + `',[System.Drawing.Imaging.ImageFormat]::Png)}`
 	// Ignore the exit status: the file's presence is the source of truth
 	// for whether the clipboard held an image.
 	_, _ = c.Run("powershell", "-NoProfile", "-Command", script)
@@ -248,4 +248,21 @@ func hasMIMEType(out []byte, want string) bool {
 // isPNG reports whether b starts with the PNG file signature.
 func isPNG(b []byte) bool {
 	return bytes.HasPrefix(b, pngSignature)
+}
+
+// escapeAppleScriptString escapes s for embedding inside an AppleScript
+// double-quoted string literal. Backslashes must be escaped before quotes,
+// since escaping quotes introduces new backslashes that must not themselves
+// be re-escaped.
+func escapeAppleScriptString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
+// escapePowerShellString escapes s for embedding inside a PowerShell
+// single-quoted string literal, where the only special character is the
+// single quote itself, escaped by doubling it.
+func escapePowerShellString(s string) string {
+	return strings.ReplaceAll(s, `'`, `''`)
 }

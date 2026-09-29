@@ -324,6 +324,36 @@ func TestReadImage_Darwin_NonPNGBytes(t *testing.T) {
 	}
 }
 
+// TestReadImage_Darwin_EscapesTempPathForAppleScript guards against a temp
+// dir containing a double quote or backslash breaking out of the
+// AppleScript double-quoted POSIX file literal.
+func TestReadImage_Darwin_EscapesTempPathForAppleScript(t *testing.T) {
+	var calls []runCall
+	c := fakeClipboard(&calls)
+	c.GOOS = "darwin"
+	c.TempDir = func() string { return `/tmp/weird"quote\slash` }
+	c.Run = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, runCall{name: name, args: args})
+		return nil, nil
+	}
+	c.ReadFile = func(string) ([]byte, error) { return validPNG, nil }
+
+	if _, err := c.ReadImage(); err != nil {
+		t.Fatalf("ReadImage() error = %v, want nil", err)
+	}
+
+	rawPath := `/tmp/weird"quote\slash/` + tempPNGName
+	wantEscapedPath := `/tmp/weird\"quote\\slash/` + tempPNGName
+	script := calls[0].args[1]
+	wantScript := `write (the clipboard as «class PNGf») to (open for access POSIX file "` + wantEscapedPath + `" with write permission)`
+	if script != wantScript {
+		t.Fatalf("osascript script = %q, want %q", script, wantScript)
+	}
+	if strings.Contains(script, rawPath) {
+		t.Fatalf("osascript script = %q, contains unescaped raw path", script)
+	}
+}
+
 func TestReadImage_Windows_Success(t *testing.T) {
 	var calls []runCall
 	c := fakeClipboard(&calls)
@@ -365,6 +395,31 @@ func TestReadImage_Windows_Success(t *testing.T) {
 	// System.Windows.Forms alone does not guarantee is loaded.
 	if !strings.Contains(script, "Add-Type -AssemblyName System.Windows.Forms, System.Drawing") {
 		t.Fatalf("powershell script = %q, want it to load System.Drawing", script)
+	}
+}
+
+// TestReadImage_Windows_EscapesTempPathForPowerShell guards against a temp
+// dir containing an apostrophe breaking out of the PowerShell
+// single-quoted path literal.
+func TestReadImage_Windows_EscapesTempPathForPowerShell(t *testing.T) {
+	var calls []runCall
+	c := fakeClipboard(&calls)
+	c.GOOS = "windows"
+	c.TempDir = func() string { return `/fake'tmp` }
+	c.Run = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, runCall{name: name, args: args})
+		return nil, nil
+	}
+	c.ReadFile = func(string) ([]byte, error) { return validPNG, nil }
+
+	if _, err := c.ReadImage(); err != nil {
+		t.Fatalf("ReadImage() error = %v, want nil", err)
+	}
+
+	wantEscapedPath := `/fake''tmp\` + tempPNGName
+	script := calls[0].args[2]
+	if !strings.Contains(script, `'`+wantEscapedPath+`'`) {
+		t.Fatalf("powershell script = %q, want it to contain escaped path %q", script, wantEscapedPath)
 	}
 }
 
