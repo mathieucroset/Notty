@@ -155,7 +155,7 @@ func TestViewShowsShell(t *testing.T) {
 		t.Error("View().AltScreen = false")
 	}
 	s := screen(m)
-	for _, want := range []string{"◆ Notty", "NOTES", "Work", "ideas", "Select a note or press n to create one", "NORMAL", "F1 help"} {
+	for _, want := range []string{"◆ Notty", "NOTES", "Work", "ideas", "No note open · tab to browse notes", "NORMAL", "F1 help"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("screen missing %q:\n%s", want, s)
 		}
@@ -168,6 +168,41 @@ func TestViewShowsShell(t *testing.T) {
 		if w := ansi.StringWidth(l); w != 120 {
 			t.Errorf("line %d has width %d, want 120", i, w)
 		}
+	}
+}
+
+func TestEmptyMainPane(t *testing.T) {
+	tests := []struct {
+		name string
+		w, h int
+		hint string
+	}{
+		{"sidebar shown", 120, 20, "No note open · tab to browse notes"},
+		{"sidebar can be shown", 60, 12, "ctrl+b to show notes"},
+		{"too narrow for the sidebar", 36, 12, "No note open"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := testOptions(t)
+			m := start(t, opts, tt.w, tt.h)
+			s := screen(m)
+			// The hint may wrap: compare with whitespace collapsed.
+			flat := strings.Join(strings.Fields(strings.ReplaceAll(s, "│", " ")), " ")
+			if !strings.Contains(flat, tt.hint) {
+				t.Errorf("hint %q missing:\n%s", tt.hint, s)
+			}
+			if tt.w < 48 && strings.Contains(flat, "ctrl+b") {
+				t.Errorf("hint offers ctrl+b although the sidebar cannot fit:\n%s", s)
+			}
+			for i, l := range strings.Split(s, "\n") {
+				if w := ansi.StringWidth(l); w != tt.w {
+					t.Errorf("line %d width %d, want %d", i, w, tt.w)
+				}
+			}
+			if title := filepath.Base(opts.Vault.Root); !strings.Contains(s, "─ "+title+" ─") {
+				t.Errorf("main pane title %q missing:\n%s", title, s)
+			}
+		})
 	}
 }
 
@@ -470,7 +505,7 @@ func TestZenLayoutCentersPlaceholder(t *testing.T) {
 		t.Fatal("sidebar still visible")
 	}
 	s := screen(m)
-	if !strings.Contains(s, "Select a note") {
+	if !strings.Contains(s, "No note open · ctrl+b to show notes") {
 		t.Fatalf("placeholder missing:\n%s", s)
 	}
 }

@@ -4,6 +4,7 @@ package app
 
 import (
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -341,7 +342,10 @@ func (m *Model) paneTitle() string {
 		return "Trash"
 	}
 	if m.note.path == "" {
-		return ""
+		if m.opts.Vault == nil {
+			return ""
+		}
+		return filepath.Base(m.opts.Vault.Root)
 	}
 	parts := []string{}
 	if d := path.Dir(m.note.path); d != "." {
@@ -377,12 +381,25 @@ func (m *Model) renderMain(l Layout) string {
 		l.Main.W, l.Main.H, m.focus == FocusMain)
 }
 
+// emptyHint is the main pane text when no note is open. It only suggests
+// keys that work at the current size.
+func (m *Model) emptyHint() string {
+	switch {
+	case m.sidebarShown():
+		return "No note open · tab to browse notes"
+	case ComputeLayout(m.width, m.height, true).SidebarVisible:
+		return "No note open · ctrl+b to show notes"
+	}
+	return "No note open"
+}
+
 // mainContent renders the placeholder main-pane content at w×h.
 // TODO(Task 18): replace with the editor, preview, Tasks and Trash views.
 func (m *Model) mainContent(w, h int) string {
 	st := m.opts.Styles
 	centered := func(s string) string {
-		return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, st.Muted.Render(s))
+		wrapped := st.Muted.Width(w).Align(lipgloss.Center).Render(s)
+		return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, wrapped)
 	}
 	switch m.mainView {
 	case ViewTasks:
@@ -391,7 +408,7 @@ func (m *Model) mainContent(w, h int) string {
 		return centered("Trash view coming soon")
 	}
 	if m.note.path == "" {
-		return centered("Select a note or press n to create one")
+		return centered(m.emptyHint())
 	}
 	text := strings.NewReplacer("\r", "", "\t", "    ").Replace(strings.TrimRight(m.note.content, "\n"))
 	return " " + strings.ReplaceAll(text, "\n", "\n ")
