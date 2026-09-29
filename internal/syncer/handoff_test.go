@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -51,6 +52,58 @@ func TestExternalEditingDefersCycles(t *testing.T) {
 	h.s.waitIdle()
 	if got := h.repo.fetches.Load(); got != fetches+1 {
 		t.Fatalf("ExternalEditDone ran a cycle with nothing deferred")
+	}
+}
+
+// editOnFetch opens $EDITOR during the fetch, i.e. between the unlocked
+// fetch and the locked merge section.
+type editOnFetch struct {
+	*spyRepo
+	h *fakeHost
+}
+
+func (r *editOnFetch) Fetch(ctx context.Context) error {
+	err := r.spyRepo.Fetch(ctx)
+	r.h.editing.Store(true)
+	return err
+}
+
+func TestEditorOpenedDuringFetchDefersMerge(t *testing.T) {
+	env := gittest.New(t)
+	shareBase(t, env, func(r *gitsync.Repo) { gittest.Write(t, r, "note.md", "line\n") })
+	h := newHarness(t, env.Laptop)
+	h.start()
+	deskPush(t, env, func(r *gitsync.Repo) { gittest.Write(t, r, "note.md", "desktop\n") })
+	h.s.repo = &editOnFetch{spyRepo: h.repo, h: h.host}
+	h.host.reset()
+	h.rec.reset()
+	h.s.SyncNow()
+	h.s.waitIdle()
+
+	if got := h.repo.merges.Load(); got != 0 {
+		t.Fatalf("merged %d times while $EDITOR was open", got)
+	}
+	if got := gittest.Read(t, env.Laptop, "note.md"); got != "line\n" {
+		t.Fatalf("note.md = %q, changed under the open editor", got)
+	}
+	if h.repo.pushes.Load() != 0 || slices.Contains(h.rec.states(), Synced) {
+		t.Fatalf("pushed or reported Synced after deferring: states %v", h.rec.states())
+	}
+	want := []string{"Flush", "Fetch", "Lock", "Pause", "Resume", "Unlock"}
+	if got := h.host.calls(); !slices.Equal(got, want) {
+		t.Fatalf("calls = %v, want %v", got, want)
+	}
+	if h.host.lockDepth != 0 {
+		t.Fatalf("mutations left locked")
+	}
+
+	h.s.repo = h.repo
+	h.host.editing.Store(false)
+	h.s.ExternalEditDone()
+	h.s.waitIdle()
+	h.wantState(Synced)
+	if got := gittest.Read(t, env.Laptop, "note.md"); got != "desktop\n" {
+		t.Fatalf("deferred cycle did not merge: note.md = %q", got)
 	}
 }
 
