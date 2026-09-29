@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -177,6 +178,19 @@ func TestParseEmptyData(t *testing.T) {
 	}
 	if len(s.Pins) != 0 {
 		t.Fatalf("Pins = %v, want empty", s.Pins)
+	}
+}
+
+func TestParseInvalidJSON(t *testing.T) {
+	s, err := Parse([]byte("not json"))
+	if err == nil {
+		t.Fatalf("Parse(\"not json\") error = nil, want a wrapped error")
+	}
+	if errors.Unwrap(err) == nil {
+		t.Fatalf("Parse(\"not json\") error = %v, want a wrapped error (Unwrap returned nil)", err)
+	}
+	if s != nil {
+		t.Fatalf("Parse(\"not json\") state = %v, want nil", s)
 	}
 }
 
