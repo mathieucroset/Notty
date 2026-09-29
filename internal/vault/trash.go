@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math/rand/v2"
 	"os"
@@ -19,6 +20,9 @@ const trashDir = ".trash"
 
 // metaFile is the metadata file inside each trash item's directory.
 const metaFile = "meta.json"
+
+// maxMetaSize is the largest meta.json TrashItems accepts.
+const maxMetaSize = 64 << 10
 
 // maxIDAttempts bounds the search for an unused trash ID.
 const maxIDAttempts = 100
@@ -96,7 +100,9 @@ func (v *Vault) Trash(rel string) (TrashItem, error) {
 // trashAt is Trash with an explicit deletion time.
 func (v *Vault) trashAt(rel string, now time.Time) (TrashItem, error) {
 	src := clean(rel)
-	if src == "" || inReserved(src) {
+	// A path TrashItems would reject is refused up front, so a trashed item
+	// can never become invisible.
+	if !validOriginal(src) {
 		return TrashItem{}, fmt.Errorf("vault: trash %q: %w", src, ErrInvalidPath)
 	}
 	fi, err := os.Lstat(v.Abs(src))
@@ -215,7 +221,7 @@ func (v *Vault) readItem(id string) (TrashItem, bool) {
 	if !isSegment(id) {
 		return TrashItem{}, false
 	}
-	b, err := os.ReadFile(v.Abs(path.Join(itemDir(id), metaFile)))
+	b, err := readMeta(v.Abs(path.Join(itemDir(id), metaFile)))
 	if err != nil {
 		return TrashItem{}, false
 	}
@@ -237,6 +243,32 @@ func (v *Vault) readItem(id string) (TrashItem, bool) {
 	}, true
 }
 
+// readMeta reads a meta.json file, refusing anything but a regular file of
+// at most maxMetaSize bytes (a symlink could point anywhere, and a huge file
+// would be read into memory on every trash listing).
+func readMeta(abs string) ([]byte, error) {
+	fi, err := os.Lstat(abs)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file: %w", metaFile, ErrInvalidPath)
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxMetaSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxMetaSize {
+		return nil, fmt.Errorf("%s is too large: %w", metaFile, ErrInvalidPath)
+	}
+	return b, nil
+}
+
 // isSegment reports whether s is a single path segment, usable as a trash
 // ID or an item name without escaping its directory.
 func isSegment(s string) bool {
@@ -244,10 +276,45 @@ func isSegment(s string) bool {
 }
 
 // validOriginal reports whether p is a clean, non-root path outside hidden
-// locations, so restoring to it cannot escape the vault or write into
-// .git, .notty or .trash.
+// locations whose every segment is already a sanitized name (spec §3), so
+// restoring to it cannot escape the vault, write into .git, .notty or
+// .trash, or use names that are illegal on Windows (including alternate
+// data streams such as "a:b").
 func validOriginal(p string) bool {
-	return p != "" && clean(p) == p && !inReserved(p)
+	if p == "" || clean(p) != p || inReserved(p) {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if sanitizeName(seg) != seg {
+			return false
+		}
+	}
+	return true
+}
+
+// checkAncestors fails with ErrInvalidPath if an existing ancestor folder
+// of the clean path rel is a symlink or not a directory, so a restore can
+// neither be redirected outside the vault nor fail halfway.
+func (v *Vault) checkAncestors(rel string) error {
+	dir := parentOf(rel)
+	if dir == "" {
+		return nil
+	}
+	cur := ""
+	for _, seg := range strings.Split(dir, "/") {
+		cur = path.Join(cur, seg)
+		fi, err := os.Lstat(v.Abs(cur))
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil // the rest is created by the move
+		}
+		if err != nil {
+			return err
+		}
+		if !fi.IsDir() {
+			return fmt.Errorf("%q is not a folder: %w", cur, ErrInvalidPath)
+		}
+	}
+	return nil
 }
 
 // Restore moves a trashed item back to its original path and removes its
@@ -273,6 +340,9 @@ func (v *Vault) Restore(it TrashItem) (string, error) {
 	fi, err := os.Lstat(v.Abs(src))
 	if err != nil {
 		return "", fmt.Errorf("vault: restore trash item %q: %w", it.ID, err)
+	}
+	if err := v.checkAncestors(it.OriginalPath); err != nil {
+		return "", fmt.Errorf("vault: restore %q: %w", it.OriginalPath, err)
 	}
 	dir, name := parentOf(it.OriginalPath), path.Base(it.OriginalPath)
 	ext := ""

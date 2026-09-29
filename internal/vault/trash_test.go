@@ -204,6 +204,21 @@ func TestTrashItems(t *testing.T) {
 	writeFile(t, v, ".trash/no-path/meta.json", `{"original_path":"","deleted_at":"2026-09-01T00:00:00Z"}`)
 	writeFile(t, v, ".trash/escape/meta.json", `{"original_path":"../x.md","deleted_at":"2026-09-01T00:00:00Z"}`)
 	writeFile(t, v, ".trash/reserved/meta.json", `{"original_path":".git/config","deleted_at":"2026-09-01T00:00:00Z"}`)
+	for i, orig := range []string{"a:b.md", "Work/x?.md", "Work /a.md", "Note.md ", `a\b.md`} {
+		meta, _ := json.Marshal(map[string]any{"original_path": orig, "deleted_at": "2026-09-01T00:00:00Z"})
+		writeFile(t, v, ".trash/unsanitized"+string(rune('a'+i))+"/meta.json", string(meta))
+	}
+	valid := `{"original_path":"Valid.md","deleted_at":"2026-09-01T00:00:00Z","host":"h"}`
+	writeFile(t, v, ".trash/big/meta.json", valid+strings.Repeat(" ", 64<<10))
+	mkfiles(t, v.Root, ".trash/meta-dir/meta.json/")
+	outside := filepath.Join(t.TempDir(), "meta.json")
+	if err := os.WriteFile(outside, []byte(valid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mkfiles(t, v.Root, ".trash/meta-link/")
+	if err := os.Symlink(outside, v.Abs(".trash/meta-link/meta.json")); err != nil {
+		t.Logf("symlinks unavailable: %v", err)
+	}
 
 	items, err := v.TrashItems()
 	if err != nil {
@@ -333,6 +348,77 @@ func TestRestore(t *testing.T) {
 	}
 }
 
+func TestRestoreUnsafeAncestor(t *testing.T) {
+	tests := []struct {
+		name  string
+		orig  string
+		setup func(t *testing.T, v *Vault, outside string) // runs after trashing
+	}{
+		{"parent is a symlink", "Work/Note.md", func(t *testing.T, v *Vault, outside string) {
+			if err := os.Symlink(outside, v.Abs("Work")); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+		}},
+		{"grandparent is a symlink", "A/B/Note.md", func(t *testing.T, v *Vault, outside string) {
+			if err := os.Symlink(outside, v.Abs("A")); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+		}},
+		{"parent is a file", "Work/Note.md", func(t *testing.T, v *Vault, _ string) {
+			mkfiles(t, v.Root, "Work")
+		}},
+		{"grandparent is a file", "A/B/Note.md", func(t *testing.T, v *Vault, _ string) {
+			mkfiles(t, v.Root, "A")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := trashVault(t)
+			outside := t.TempDir()
+			mkfiles(t, v.Root, tt.orig)
+			it, err := v.Trash(tt.orig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(v.Abs(strings.Split(tt.orig, "/")[0])); err != nil {
+				t.Fatal(err)
+			}
+			tt.setup(t, v, outside)
+			if _, err := v.Restore(it); !errors.Is(err, ErrInvalidPath) {
+				t.Errorf("Restore err = %v, want ErrInvalidPath", err)
+			}
+			if !exists(v, v.TrashContentPath(it)) {
+				t.Error("trashed content lost")
+			}
+			if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+				t.Errorf("Restore wrote %d entries outside the vault", len(entries))
+			}
+		})
+	}
+}
+
+func TestTrashRefusesUnsanitizedNames(t *testing.T) {
+	for _, rel := range []string{"a:b.md", "Work/x?.md", "Bad|dir/n.md"} {
+		t.Run(rel, func(t *testing.T) {
+			v := trashVault(t)
+			abs := v.Abs(rel)
+			if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+				t.Skipf("cannot create %q here: %v", rel, err)
+			}
+			if err := os.WriteFile(abs, []byte("x"), 0o644); err != nil {
+				t.Skipf("cannot create %q here: %v", rel, err)
+			}
+			// It would be trashed but never listed (invalid metadata).
+			if _, err := v.Trash(rel); !errors.Is(err, ErrInvalidPath) {
+				t.Errorf("Trash(%q) err = %v, want ErrInvalidPath", rel, err)
+			}
+			if !exists(v, rel) {
+				t.Error("file moved despite the error")
+			}
+		})
+	}
+}
+
 func TestRestoreKeepsContent(t *testing.T) {
 	v := trashVault(t)
 	writeFile(t, v, "Note.md", "# Note\n\nbody\n")
@@ -358,6 +444,10 @@ func TestRestoreErrors(t *testing.T) {
 		{"id with slash", func(it TrashItem) TrashItem { it.ID = "a/b"; return it }, ErrInvalidPath},
 		{"dotdot id", func(it TrashItem) TrashItem { it.ID = ".."; return it }, ErrInvalidPath},
 		{"reserved original", func(it TrashItem) TrashItem { it.OriginalPath = ".git/x.md"; return it }, ErrInvalidPath},
+		{"unsanitized original", func(it TrashItem) TrashItem { it.OriginalPath = "a:b.md"; return it }, ErrInvalidPath},
+		{"dotdot name", func(it TrashItem) TrashItem { it.Name = ".."; return it }, ErrInvalidPath},
+		{"name with slash", func(it TrashItem) TrashItem { it.Name = "a/b"; return it }, ErrInvalidPath},
+		{"empty name", func(it TrashItem) TrashItem { it.Name = ""; return it }, ErrInvalidPath},
 		{"empty original", func(it TrashItem) TrashItem { it.OriginalPath = ""; return it }, ErrInvalidPath},
 		{"unknown id", func(it TrashItem) TrashItem { it.ID = "nope"; return it }, os.ErrNotExist},
 	}
