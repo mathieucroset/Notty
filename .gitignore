@@ -1,0 +1,4 @@
+/notty
+/dist/
+*.test
+coverage.out
