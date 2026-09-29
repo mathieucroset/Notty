@@ -1,32 +1,56 @@
 package keys
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 )
 
+var namedKeys = map[string]rune{
+	"enter": tea.KeyEnter, "tab": tea.KeyTab, "esc": tea.KeyEscape,
+	"up": tea.KeyUp, "down": tea.KeyDown, "left": tea.KeyLeft, "right": tea.KeyRight,
+	"space": tea.KeySpace, "backspace": tea.KeyBackspace, "home": tea.KeyHome,
+	"end": tea.KeyEnd, "f1": tea.KeyF1,
+}
+
+// parseKey builds the KeyPressMsg for a single key press such as "q",
+// "ctrl+k", "shift+tab" or "f1". ok is false for multi-key sequences
+// ("gg", "]t", "ctrl+w h", ":w").
+func parseKey(s string) (tea.KeyPressMsg, bool) {
+	var mod tea.KeyMod
+	rest := s
+	for {
+		switch {
+		case strings.HasPrefix(rest, "ctrl+") && len(rest) > 5:
+			mod |= tea.ModCtrl
+			rest = rest[5:]
+			continue
+		case strings.HasPrefix(rest, "shift+") && len(rest) > 6:
+			mod |= tea.ModShift
+			rest = rest[6:]
+			continue
+		}
+		break
+	}
+	if code, ok := namedKeys[rest]; ok {
+		return tea.KeyPressMsg{Code: code, Mod: mod}, true
+	}
+	if r := []rune(rest); len(r) == 1 {
+		if mod != 0 {
+			return tea.KeyPressMsg{Code: r[0], Mod: mod}, true
+		}
+		return tea.KeyPressMsg{Code: r[0], Text: rest}, true
+	}
+	return tea.KeyPressMsg{}, false
+}
+
 // press builds a KeyPressMsg whose String() is the given key name.
 func press(t *testing.T, s string) tea.KeyPressMsg {
 	t.Helper()
-	var k tea.KeyPressMsg
-	switch s {
-	case "f1":
-		k = tea.KeyPressMsg{Code: tea.KeyF1}
-	case "tab":
-		k = tea.KeyPressMsg{Code: tea.KeyTab}
-	case "shift+tab":
-		k = tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
-	case "esc":
-		k = tea.KeyPressMsg{Code: tea.KeyEscape}
-	case "enter":
-		k = tea.KeyPressMsg{Code: tea.KeyEnter}
-	default:
-		if len(s) > 5 && s[:5] == "ctrl+" {
-			k = tea.KeyPressMsg{Code: rune(s[5]), Mod: tea.ModCtrl}
-		} else {
-			k = tea.KeyPressMsg{Code: rune(s[0]), Text: s}
-		}
+	k, ok := parseKey(s)
+	if !ok {
+		t.Fatalf("press(%q): not a single key", s)
 	}
 	if got := k.String(); got != s {
 		t.Fatalf("press(%q) builds a key whose String() is %q", s, got)
@@ -150,39 +174,91 @@ func TestRouteLayering(t *testing.T) {
 	}
 }
 
-// TestRouteMatrix checks every context against representative keys. g marks
-// a global action; "-" means the key goes to the context.
+// TestRouteMatrix checks all 9 global keys in all 18 contexts, with and
+// without an overlay open. The expectations are spelled out per context
+// rather than derived from the implementation's rules.
 func TestRouteMatrix(t *testing.T) {
-	keysUnderTest := []string{"ctrl+q", "f1", "ctrl+g", "ctrl+s", "ctrl+k", "ctrl+b", "q", "?", "tab", "esc"}
-	// Columns follow keysUnderTest.
-	matrix := map[Context][]string{
-		Global:         {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		Sidebar:        {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		EditorNormal:   {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		EditorInsert:   {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		EditorVisual:   {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		EditorCommand:  {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		EditorPlain:    {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		EditorReadOnly: {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		Preview:        {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		TasksView:      {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		TrashView:      {"g", "g", "g", "g", "g", "g", "-", "-", "-", "-"},
-		Resolver:       {"g", "g", "-", "-", "-", "-", "-", "-", "-", "-"},
-		ResolverEdit:   {"g", "g", "-", "-", "-", "-", "-", "-", "-", "-"},
-		History:        {"g", "g", "-", "-", "-", "-", "-", "-", "-", "-"},
-		ImageViewer:    {"g", "g", "-", "-", "-", "-", "-", "-", "-", "-"},
-		Wizard:         {"g", "-", "-", "-", "-", "-", "-", "-", "-", "-"},
-		WizardInput:    {"g", "-", "-", "-", "-", "-", "-", "-", "-", "-"},
-		Overlay:        {"g", "g", "-", "-", "-", "-", "-", "-", "-", "-"},
+	globals := []struct {
+		key    string
+		action Action
+	}{
+		{"ctrl+p", Finder}, {"ctrl+f", Search}, {"ctrl+k", Palette},
+		{"ctrl+b", ToggleSidebar}, {"ctrl+g", CycleView}, {"ctrl+s", Save},
+		{"ctrl+e", ExternalEditor}, {"ctrl+q", Quit}, {"f1", Help},
 	}
-	if len(matrix) != len(allContexts) {
-		t.Fatalf("matrix covers %d contexts, want %d", len(matrix), len(allContexts))
+	all := map[Action]bool{Finder: true, Search: true, Palette: true, ToggleSidebar: true,
+		CycleView: true, Save: true, ExternalEditor: true, Quit: true, Help: true}
+	quitHelp := map[Action]bool{Quit: true, Help: true}
+	quitOnly := map[Action]bool{Quit: true}
+
+	// passes[ctx][overlayOpen] is the set of actions that route globally.
+	passes := map[Context][2]map[Action]bool{
+		Global:         {all, quitHelp},
+		Sidebar:        {all, quitHelp},
+		EditorNormal:   {all, quitHelp},
+		EditorInsert:   {all, quitHelp},
+		EditorVisual:   {all, quitHelp},
+		EditorCommand:  {all, quitHelp},
+		EditorPlain:    {all, quitHelp},
+		EditorReadOnly: {all, quitHelp},
+		Preview:        {all, quitHelp},
+		TasksView:      {all, quitHelp},
+		TrashView:      {all, quitHelp},
+		Resolver:       {quitHelp, quitHelp},
+		ResolverEdit:   {quitHelp, quitHelp}, // ctrl+s accepts the edit; F1 passes
+		History:        {quitHelp, quitHelp},
+		ImageViewer:    {quitHelp, quitHelp},
+		Wizard:         {quitOnly, quitOnly},
+		WizardInput:    {quitOnly, quitOnly},
+		Overlay:        {quitHelp, quitHelp},
 	}
-	for ctx, row := range matrix {
-		for i, k := range keysUnderTest {
-			_, global := Route(ctx, false, press(t, k))
-			if want := row[i] == "g"; global != want {
-				t.Errorf("Route(%v, false, %s): global = %v, want %v", ctx, k, global, want)
+	if len(passes) != len(allContexts) {
+		t.Fatalf("matrix covers %d contexts, want %d", len(passes), len(allContexts))
+	}
+	for ctx, byOverlay := range passes {
+		for i, overlay := range []bool{false, true} {
+			for _, g := range globals {
+				a, global := Route(ctx, overlay, press(t, g.key))
+				wantGlobal := byOverlay[i][g.action]
+				wantAction := None
+				if wantGlobal {
+					wantAction = g.action
+				}
+				if global != wantGlobal || a != wantAction {
+					t.Errorf("Route(%v, overlay=%v, %s) = (%v, %v), want (%v, %v)",
+						ctx, overlay, g.key, a, global, wantAction, wantGlobal)
+				}
+			}
+		}
+	}
+}
+
+// TestBindingsReachable walks every single-key binding of every context and
+// checks the routing layer does not swallow it: context keys reach the
+// context, and the global table's keys route globally in Global.
+func TestBindingsReachable(t *testing.T) {
+	for _, ctx := range allContexts {
+		for _, b := range Bindings(ctx) {
+			for _, ks := range b.Keys() {
+				k, ok := parseKey(ks)
+				if !ok {
+					continue // multi-key sequence, handled by the context itself
+				}
+				if got := k.String(); got != ks {
+					t.Errorf("%v binding %q parses to key %q", ctx, ks, got)
+					continue
+				}
+				a, global := Route(ctx, false, k)
+				switch {
+				case ctx == Global:
+					if !global {
+						t.Errorf("global binding %q does not route globally", ks)
+					}
+				case global && a != Quit:
+					// Only ctrl+q (listed in the wizard tables) may be both a
+					// context binding and a global action.
+					t.Errorf("%v binding %q is swallowed by global action %v", ctx, ks, a)
+				}
 			}
 		}
 	}

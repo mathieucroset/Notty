@@ -5,8 +5,10 @@
 // Routing layers, highest first:
 //  1. An open overlay or a full-screen view gets every key, except ctrl+q
 //     and F1, which pass through as global actions. In the resolver's edit
-//     sub-context ctrl+s stays in the context (it accepts the edit). The
-//     wizard lets only ctrl+q through.
+//     sub-context ctrl+s stays in the context (it accepts the edit), while
+//     ctrl+q and F1 still pass through: the spec names only ctrl+q there,
+//     and F1 follows the general full-screen rule. The wizard lets only
+//     ctrl+q through.
 //  2. Otherwise the global keys (all control or function keys) win in every
 //     pane context, including insert mode.
 //  3. Everything else goes to the focused context.
