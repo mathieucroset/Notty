@@ -3,8 +3,10 @@ package theme
 import (
 	"crypto/sha256"
 	hexenc "encoding/hex" // palettes.go already declares func hex
+	"errors"
 	"fmt"
 	"image/color"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,19 +36,44 @@ var (
 	lightSuccess, lightWarning = hex("#40a02b"), hex("#df8e1d")
 )
 
+// ErrInvalidName is wrapped by LoadUser's error for a theme name that is not
+// a plain file name (see validName).
+var ErrInvalidName = errors.New("not a plain file name")
+
+// maxThemeSize bounds a theme file, so an endless file cannot exhaust the UI
+// goroutine that loads it.
+const maxThemeSize = 64 << 10
+
+// validName reports whether name is a plain file name usable as a theme
+// name: not empty, no leading ".", no "/" or "\" (on every OS), and local.
+// Names can come from the vault's synced settings, so anything that could
+// reach outside the themes directory is refused.
+func validName(name string) bool {
+	return name != "" &&
+		!strings.HasPrefix(name, ".") &&
+		!strings.ContainsAny(name, `/\`) &&
+		filepath.IsLocal(name)
+}
+
 // LoadUser reads dir/<name>.toml, validates it, fills the optional tokens
 // and registers its chroma style. The palette's ID is name@<first 8 hex
 // chars of the file's sha256>, so it changes whenever the file's bytes do.
-// A missing file's error wraps fs.ErrNotExist.
+//
+// name must be a plain file name (validName), else the error wraps
+// ErrInvalidName and nothing is read. The file must be a regular file
+// (symlinks followed) of at most 64 KiB. A missing file's error wraps
+// fs.ErrNotExist. Every other error is prefixed "theme <name>.toml: ".
 //
 // It takes the chroma registry's write lock: never call it while holding
 // RLockChroma.
 func LoadUser(dir, name string) (Palette, error) {
-	path := filepath.Join(dir, name+ThemeExt)
-	file := filepath.Base(path)
-	b, err := os.ReadFile(path)
+	if !validName(name) {
+		return Palette{}, fmt.Errorf("theme %q: %w", name, ErrInvalidName)
+	}
+	file := name + ThemeExt
+	b, err := readTheme(filepath.Join(dir, file))
 	if err != nil {
-		return Palette{}, fmt.Errorf("theme %s: %w", name, err)
+		return Palette{}, fmt.Errorf("theme %s: %w", file, err)
 	}
 	p, err := parseUser(name, b)
 	if err != nil {
@@ -54,6 +81,39 @@ func LoadUser(dir, name string) (Palette, error) {
 	}
 	registerChromaStyle(ChromaStyleName(p), p)
 	return p, nil
+}
+
+// readTheme reads the regular file at path, of at most maxThemeSize bytes.
+func readTheme(path string) ([]byte, error) {
+	// Stat before opening: opening a FIFO for reading blocks until a writer
+	// shows up.
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file (%s)", info.Mode().Type())
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	// Stat the opened file too, in case the path was swapped meanwhile.
+	if info, err = f.Stat(); err != nil {
+		return nil, fmt.Errorf("stat: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file (%s)", info.Mode().Type())
+	}
+	b, err := io.ReadAll(io.LimitReader(f, maxThemeSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("read: %w", err)
+	}
+	if len(b) > maxThemeSize {
+		return nil, fmt.Errorf("larger than %d KiB", maxThemeSize>>10)
+	}
+	return b, nil
 }
 
 // parseUser builds the palette named name from a theme file's bytes.
@@ -86,7 +146,7 @@ func parseUser(name string, b []byte) (Palette, error) {
 	}
 	for _, r := range required {
 		if r.val == "" {
-			return Palette{}, fmt.Errorf("missing %q", r.key)
+			return Palette{}, fmt.Errorf("%q: missing or empty", r.key)
 		}
 		c, err := parseHex(r.key, r.val)
 		if err != nil {

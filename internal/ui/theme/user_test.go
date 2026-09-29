@@ -81,8 +81,9 @@ func TestLoadUser(t *testing.T) {
 			// level i >= 3 falls back to [accent, accent2][i%2]
 			checkHeadings(t, p, []string{"#111111", "#222222", "#333333", "#f2b7c2", "#cfbcff", "#f2b7c2"})
 		}},
-		{name: "missing required", body: strings.Replace(fullTheme, "accent2 = \"#f2b7c2\"\n", "", 1), wantErr: `"accent2"`},
-		{name: "missing base", body: strings.Replace(fullTheme, "base = \"#141318\"\n", "", 1), wantErr: `"base"`},
+		{name: "missing required", body: strings.Replace(fullTheme, "accent2 = \"#f2b7c2\"\n", "", 1), wantErr: `"accent2": missing or empty`},
+		{name: "missing base", body: strings.Replace(fullTheme, "base = \"#141318\"\n", "", 1), wantErr: `"base": missing or empty`},
+		{name: "empty base", body: strings.Replace(fullTheme, `base = "#141318"`, `base = ""`, 1), wantErr: `"base": missing or empty`},
 		{name: "bad hex", body: strings.Replace(fullTheme, `"#cfbcff"`, `"cfbcff"`, 1), wantErr: `"accent"`},
 		{name: "short hex", body: strings.Replace(fullTheme, `"#cfbcff"`, `"#fff"`, 1), wantErr: `"accent"`},
 		{name: "bad optional", body: fullTheme + "warning = \"yellow\"\n", wantErr: `"warning"`},
@@ -99,6 +100,9 @@ func TestLoadUser(t *testing.T) {
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+				}
+				if !strings.HasPrefix(err.Error(), "theme t.toml: ") {
+					t.Errorf("err = %v, want prefix %q", err, "theme t.toml: ")
 				}
 				return
 			}
@@ -152,5 +156,76 @@ func TestLoadUserMissingFile(t *testing.T) {
 	_, err := LoadUser(t.TempDir(), "nope")
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("err = %v", err)
+	}
+	if !strings.HasPrefix(err.Error(), "theme nope.toml: ") {
+		t.Errorf("err = %v, want prefix %q", err, "theme nope.toml: ")
+	}
+}
+
+// TestLoadUserInvalidName checks that a name that is not a plain file name
+// is rejected before any I/O, even when the file it points at exists.
+func TestLoadUserInvalidName(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "themes")
+	if err := os.MkdirAll(filepath.Join(dir, "a"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTheme(t, root, "x", fullTheme)                    // reachable as "../x"
+	writeTheme(t, filepath.Join(dir, "a"), "b", fullTheme) // reachable as "a/b"
+	writeTheme(t, dir, ".hidden", fullTheme)
+	tests := []string{"../x", "a/b", `a\b`, ".hidden", "", "..", ".", "/abs", `..\x`}
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadUser(dir, name)
+			if !errors.Is(err, ErrInvalidName) {
+				t.Fatalf("LoadUser(%q) err = %v, want ErrInvalidName", name, err)
+			}
+		})
+	}
+}
+
+func TestLoadUserFileKind(t *testing.T) {
+	const limit = 64 << 10
+	padded := func(n int) string { // a valid theme of exactly n bytes
+		body := fullTheme + "#"
+		return body + strings.Repeat("x", n-len(body))
+	}
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, dir string)
+		wantErr string // "" = success
+	}{
+		{"directory", func(t *testing.T, dir string) {
+			if err := os.Mkdir(filepath.Join(dir, "x.toml"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, "not a regular file"},
+		{"oversized", func(t *testing.T, dir string) { writeTheme(t, dir, "x", padded(limit+1)) }, "larger than"},
+		{"at the limit", func(t *testing.T, dir string) { writeTheme(t, dir, "x", padded(limit)) }, ""},
+		{"symlink to a regular file", func(t *testing.T, dir string) {
+			target := filepath.Join(t.TempDir(), "elsewhere.toml")
+			if err := os.WriteFile(target, []byte(fullTheme), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(dir, "x.toml")); err != nil {
+				t.Skip("no symlinks:", err)
+			}
+		}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.setup(t, dir)
+			_, err := LoadUser(dir, "x")
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) || !strings.HasPrefix(err.Error(), "theme x.toml: ") {
+				t.Fatalf("err = %v, want \"theme x.toml: ...%s...\"", err, tt.wantErr)
+			}
+		})
 	}
 }

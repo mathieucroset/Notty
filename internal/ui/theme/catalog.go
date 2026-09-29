@@ -15,7 +15,8 @@ type Catalog struct{ Dir string }
 // Names returns the built-in names in their fixed order, then the user theme
 // names sorted. User names come from file names alone (files are not
 // parsed): a regular *.toml file, after following symlinks, whose name is
-// not a built-in's.
+// a plain file name (validName) and not a built-in's, so every listed name
+// resolves to a file in Dir.
 func (c Catalog) Names() []string {
 	out := Names()
 	if c.Dir == "" {
@@ -28,7 +29,7 @@ func (c Catalog) Names() []string {
 	var user []string
 	for _, e := range entries {
 		n, ok := strings.CutSuffix(e.Name(), ThemeExt)
-		if !ok || n == "" {
+		if !ok || !validName(n) {
 			continue
 		}
 		if _, builtin := palettes[n]; builtin {
