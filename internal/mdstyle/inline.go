@@ -1,6 +1,7 @@
 package mdstyle
 
 import (
+	"sort"
 	"unicode"
 	"unicode/utf8"
 
@@ -95,14 +96,19 @@ func (p *inline) parse(lo, hi int, fill Kind) []Span {
 	return out
 }
 
+// tagAt returns the end of the tag starting at i, or i when none does.
 func (p *inline) tagAt(i int) int {
-	for _, r := range p.tags {
-		if r[0] == i {
-			return r[1]
-		}
+	k := sort.Search(len(p.tags), func(k int) bool { return p.tags[k][0] >= i })
+	if k < len(p.tags) && p.tags[k][0] == i {
+		return p.tags[k][1]
 	}
 	return i
 }
+
+// scanLimit bounds a forward search for a closing delimiter that starts at
+// from (see tags.MaxScan): constructs longer than that stay literal, which
+// keeps tokenizing a line linear.
+func scanLimit(from, hi int) int { return min(hi, from+tags.MaxScan) }
 
 // link parses "[text](url)" with the '[' at open. It returns the offset of
 // the closing ']', the url bounds and the end offset (after ')').
@@ -110,7 +116,8 @@ func (p *inline) link(open, hi int) (textEnd, urlStart, urlEnd, end int, ok bool
 	line := p.line
 	depth := 0
 	j := open
-	for ; j < hi; j++ {
+	lim := scanLimit(open, hi)
+	for ; j < lim; j++ {
 		switch line[j] {
 		case '\\':
 			j++
@@ -132,12 +139,12 @@ func (p *inline) link(open, hi int) (textEnd, urlStart, urlEnd, end int, ok bool
 			break
 		}
 	}
-	if j+1 >= hi || line[j] != ']' || line[j+1] != '(' {
+	if j >= lim || j+1 >= hi || line[j] != ']' || line[j+1] != '(' {
 		return 0, 0, 0, 0, false
 	}
 	textEnd, urlStart = j, j+2
 	depth = 1
-	for k := urlStart; k < hi; k++ {
+	for k, lim := urlStart, scanLimit(urlStart, hi); k < lim; k++ {
 		switch line[k] {
 		case '\\':
 			k++
@@ -192,7 +199,7 @@ func (p *inline) emphasisN(i, n, hi int) ([]Span, int, bool) {
 		return nil, 0, false
 	}
 	closeAt, fallback, fallbackLen := -1, -1, 0
-	for j := i + n; j < hi && closeAt < 0; {
+	for j, lim := i+n, scanLimit(i+n, hi); j < lim && closeAt < 0; {
 		switch line[j] {
 		case '\\':
 			j += 2
@@ -295,9 +302,9 @@ func runLenTo(s string, i, hi int, c byte) int {
 }
 
 // findRun returns the start of the next run of exactly n c bytes in
-// s[from:hi], or -1.
+// s[from:hi], or -1. The search is bounded by scanLimit.
 func findRun(s string, from, hi int, c byte, n int) int {
-	for j := from; j < hi; {
+	for j, lim := from, scanLimit(from, hi); j < lim; {
 		if s[j] != c {
 			j++
 			continue

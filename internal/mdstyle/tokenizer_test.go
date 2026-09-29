@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/alecthomas/chroma/v2"
+
+	"github.com/mathieucroset/notty/internal/tags"
 )
 
 // sp is a compact span description used in expectations: text covered and kind.
@@ -465,6 +467,44 @@ func TestSpansRandomLines(t *testing.T) {
 		var spans []Span
 		spans, st = TokenizeLine(line, st)
 		checkSpans(t, line, spans)
+	}
+}
+
+func TestInlineScanIsBounded(t *testing.T) {
+	far := strings.Repeat("a", tags.MaxScan+10)
+	near := strings.Repeat("a", 100)
+	tests := []struct {
+		name string
+		line string
+		kind Kind // kind expected on the content when within bounds
+	}{
+		{"bold", "**%s**", Bold},
+		{"code", "`%s`", Code},
+		{"link", "[%s](u)", Link},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line := fmt.Sprintf(tt.line, near)
+			spans, _ := TokenizeLine(line, State{})
+			if len(spans) < 2 || spans[1].Kind != tt.kind {
+				t.Errorf("near: spans = %+v, want content kind %s", spans, tt.kind)
+			}
+			line = fmt.Sprintf(tt.line, far)
+			if spans, _ := TokenizeLine(line, State{}); spans != nil {
+				t.Errorf("far: spans = %+v, want nil (closer beyond scan bound)", spans)
+			}
+		})
+	}
+}
+
+func BenchmarkTokenizePathologicalLine(b *testing.B) {
+	for _, unit := range []string{"*a ", "_a ", "[a ", "`a ``", "**a ", "~~a "} {
+		line := strings.Repeat(unit, 100_000/len(unit))
+		b.Run(strings.TrimSpace(unit), func(b *testing.B) {
+			for b.Loop() {
+				TokenizeLine(line, State{})
+			}
+		})
 	}
 }
 
