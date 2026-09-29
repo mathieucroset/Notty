@@ -355,3 +355,50 @@ func TestColorProfileFor(t *testing.T) {
 		}
 	}
 }
+
+func TestRunLogsToTheStateDir(t *testing.T) {
+	tests := []struct {
+		name   string
+		tuiErr error
+		want   []string
+	}{
+		{"clean run", nil, []string{"msg=\"notty starting\"", "version=" + version}},
+		{"tui error", errors.New("boom"), []string{"msg=\"notty starting\"", "level=ERROR", "boom"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.makeRepo(t)
+			f.writeConfig(t, "")
+			f.tuiErr = tt.tuiErr
+			run([]string{"--vault", f.vaultDir}, f.env())
+			b, err := os.ReadFile(filepath.Join(f.dir, "state", "notty.log"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(string(b), want) {
+					t.Errorf("log %q lacks %q", b, want)
+				}
+			}
+		})
+	}
+}
+
+func TestUnusableStateDirStillRuns(t *testing.T) {
+	f := newFixture(t)
+	f.makeRepo(t)
+	f.writeConfig(t, "")
+	e := f.env()
+	blocker := filepath.Join(f.dir, "file")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.stateDir = filepath.Join(blocker, "state")
+	if code := run([]string{"--vault", f.vaultDir}, e); code != 0 {
+		t.Fatalf("exit code %d, stderr %q", code, f.stderr.String())
+	}
+	if !strings.Contains(f.stderr.String(), "not logging") {
+		t.Errorf("stderr = %q, want a not-logging warning", f.stderr.String())
+	}
+}

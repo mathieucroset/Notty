@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -150,25 +151,29 @@ func run(args []string, e env) int {
 		}
 		return 2
 	}
-	if flags.NArg() > 0 {
-		return runSubcommand(flags.Args(), *vaultFlag, e)
-	}
-	if *showVersion {
+	if *showVersion && flags.NArg() == 0 {
 		_, _ = fmt.Fprintln(e.stdout, "notty "+version)
 		return 0
+	}
+	defer setupLogging(e)()
+	if flags.NArg() > 0 {
+		return runSubcommand(flags.Args(), *vaultFlag, e)
 	}
 
 	opts, release, err := prepare(*vaultFlag, e)
 	if err != nil {
+		slog.Error("startup failed", "err", err)
 		_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
 		return 1
 	}
 	defer release()
 
 	if err := e.runTUI(opts); err != nil {
+		slog.Error("notty stopped on an error", "err", err)
 		_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
 		return 1
 	}
+	slog.Info("notty stopped")
 	return 0
 }
 
@@ -198,6 +203,7 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 		}
 	}
 	cfg.Vault = root
+	slog.Info("notty starting", "version", version, "vault", root, "wizard", wizard)
 
 	// 2. Image capabilities, while the terminal is still ours to query.
 	caps := e.detectCaps(cfg.Images.Protocol)
