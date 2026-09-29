@@ -1,6 +1,7 @@
 package app
 
 import (
+	"log/slog"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -171,8 +172,17 @@ func (m *Model) handleDialogResult(res dialog.ResultMsg) tea.Cmd {
 	return m.runPending(o.pending, res)
 }
 
-// pushToast shows a toast and logs it.
+// pushToast shows a toast, and logs it to the error log and notty.log
+// (spec §9: problems always, info toasts at debug level).
 func (m *Model) pushToast(level msgs.ToastLevel, text string) tea.Cmd {
+	switch level {
+	case msgs.ToastError:
+		slog.Error(text)
+	case msgs.ToastWarn:
+		slog.Warn(text)
+	default:
+		slog.Debug(text)
+	}
 	var cmd tea.Cmd
 	m.toast, cmd = m.toast.Push(level, text)
 	if level == msgs.ToastError {

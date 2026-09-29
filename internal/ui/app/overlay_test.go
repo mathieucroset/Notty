@@ -1,6 +1,9 @@
 package app
 
 import (
+	"bytes"
+	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -17,6 +20,8 @@ func TestMain(m *testing.M) {
 	// Info and warning toasts expire through a 4s tick, which would stall
 	// the synchronous command loop in run.
 	toastTimer = func(tea.Cmd) tea.Cmd { return nil }
+	// Toasts are logged: keep them out of the test output.
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	os.Exit(m.Run())
 }
 
@@ -166,5 +171,29 @@ func TestStaleDialogResultDropped(t *testing.T) {
 	run(t, m, dialog.ResultMsg{ID: "other", OK: true})
 	if !m.overlayOpen() {
 		t.Error("a result from another dialog closed the open one")
+	}
+}
+
+// Toasts are logged too (spec §9): problems always, info at debug level.
+func TestToastsAreLogged(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	m := start(t, testOptions(t), 120, 30)
+	tests := []struct {
+		level msgs.ToastLevel
+		text  string
+		want  string
+	}{
+		{msgs.ToastError, "Could not save x.md", `level=ERROR msg="Could not save x.md"`},
+		{msgs.ToastWarn, "Not watching", `level=WARN msg="Not watching"`},
+		{msgs.ToastInfo, "Moved to trash", `level=DEBUG msg="Moved to trash"`},
+	}
+	for _, tt := range tests {
+		run(t, m, msgs.ToastMsg{Level: tt.level, Text: tt.text})
+		if !strings.Contains(buf.String(), tt.want) {
+			t.Errorf("log %q lacks %q", buf.String(), tt.want)
+		}
 	}
 }
