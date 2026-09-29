@@ -19,10 +19,12 @@ func TestParseQuery(t *testing.T) {
 	}{
 		{"", Query{}},
 		{"   ", Query{}},
-		{"Foo", Query{Terms: []string{"foo"}}},
+		{"Foo", Query{Terms: []string{"Foo"}}},
+		{"İstanbul", Query{Terms: []string{"İstanbul"}}},
+		{`"İstanbul Trip" #İzmir`, Query{Phrases: []string{"İstanbul Trip"}, Tags: []string{strings.ToLower("İzmir")}}},
 		{`foo "bar baz" #t in:Work`, Query{Terms: []string{"foo"}, Phrases: []string{"bar baz"}, Tags: []string{"t"}, In: "Work"}},
-		{`in:"My Folder" Hello  WORLD`, Query{Terms: []string{"hello", "world"}, In: "My Folder"}},
-		{`"Exact Phrase"`, Query{Phrases: []string{"exact phrase"}}},
+		{`in:"My Folder" Hello  WORLD`, Query{Terms: []string{"Hello", "WORLD"}, In: "My Folder"}},
+		{`"Exact Phrase"`, Query{Phrases: []string{"Exact Phrase"}}},
 		{`foo "unterminated phrase`, Query{Terms: []string{"foo"}, Phrases: []string{"unterminated phrase"}}},
 		{`foo "`, Query{Terms: []string{"foo"}}},
 		{`""`, Query{}},
@@ -237,6 +239,20 @@ func TestFullTextUnicodeByteRanges(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFullTextIstanbul(t *testing.T) {
+	// Lowercasing "İstanbul" yields "i̇stanbul" (i + combining dot), which
+	// would no longer match the text; the query must be kept as typed.
+	ns := []*index.Note{note("t.md", "Trip to İstanbul\nİSTANBUL again\nistanbul lower\n")}
+	got := project(FullText(context.Background(), ParseQuery("İstanbul"), ns, 0))
+	want := []hit{
+		{"t.md", 0, "Trip to İstanbul", "İSTANBUL again", [][2]int{{8, 17}}},
+		{"t.md", 1, "İSTANBUL again", "istanbul lower", [][2]int{{0, 9}}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got\n%v\nwant\n%v", got, want)
 	}
 }
 

@@ -13,8 +13,10 @@ import (
 // ctxCheckLines is how often (in lines) a long note re-checks cancellation.
 const ctxCheckLines = 256
 
-// Query is a parsed full-text query. Terms, Phrases and Tags are
-// lowercased; In is a folder path prefix without surrounding slashes.
+// Query is a parsed full-text query. Terms and Phrases are kept as typed
+// (matching folds case, and lowercasing can change characters such as "İ");
+// Tags are lowercased; In is a folder path prefix without surrounding
+// slashes.
 type Query struct {
 	Terms, Phrases, Tags []string
 	In                   string
@@ -49,7 +51,7 @@ func ParseQuery(s string) Query {
 			var phrase string
 			phrase, i = quoted(s, i+1)
 			if strings.TrimSpace(phrase) != "" {
-				q.Phrases = append(q.Phrases, strings.ToLower(phrase))
+				q.Phrases = append(q.Phrases, phrase)
 			}
 			continue
 		}
@@ -70,7 +72,7 @@ func ParseQuery(s string) Query {
 				q.Tags = append(q.Tags, strings.ToLower(tag))
 			}
 		default:
-			q.Terms = append(q.Terms, strings.ToLower(tok))
+			q.Terms = append(q.Terms, tok)
 		}
 	}
 	return q
