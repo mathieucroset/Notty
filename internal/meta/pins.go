@@ -79,7 +79,7 @@ func (s *State) Save(vaultRoot string) error {
 		return fmt.Errorf("meta: create .notty dir: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(dir, "state-*.json.tmp")
+	tmp, err := os.CreateTemp(dir, "state.json.*.notty-tmp")
 	if err != nil {
 		return fmt.Errorf("meta: create temp state file: %w", err)
 	}
