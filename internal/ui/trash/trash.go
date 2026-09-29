@@ -236,7 +236,7 @@ func (m Model) refreshPreview() Model {
 		return m
 	}
 	previewW = previewTextWidth(previewW)
-	key := previewCacheKey{id: m.previewID, width: previewW, palette: m.palette.Name}
+	key := previewCacheKey{id: m.previewID, width: previewW, palette: m.palette.Key()}
 	if m.previewCacheValid && m.previewCacheKey == key {
 		return m
 	}
@@ -401,6 +401,8 @@ func renderMarkdown(content string, p theme.Palette, set icons.Set, w int) (stri
 	if w < 1 {
 		w = 1
 	}
+	unlock := theme.RLockChroma() // Glamour reads chroma's style registry
+	defer unlock()
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(theme.GlamourStyle(p, set)),
 		glamour.WithWordWrap(w),

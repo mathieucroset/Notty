@@ -179,9 +179,17 @@ func TestSegmentCacheReuse(t *testing.T) {
 	// And the theme is part of the key.
 	p, _ := theme.Get("catppuccin-latte")
 	m, cmd = m.SetTheme(theme.NewStyles(p), p)
-	_, _, _ = run(m, cmd)
+	m, _, _ = run(m, cmd)
 	if got := m.sh.glamourCalls.Load(); got != 10 {
 		t.Fatalf("after theme change: %d glamour calls, want 10", got)
+	}
+	// The key is the palette's identity, not its name: a rewritten user
+	// theme keeps its name but gets a new ID.
+	p.ID = p.Name + "@rewritten"
+	m, cmd = m.SetTheme(theme.NewStyles(p), p)
+	_, _, _ = run(m, cmd)
+	if got := m.sh.glamourCalls.Load(); got != 13 {
+		t.Fatalf("after same-name palette change: %d glamour calls, want 13", got)
 	}
 }
 

@@ -65,7 +65,9 @@ type styler struct {
 func newStyler(s theme.Styles, p theme.Palette) *styler {
 	var cs *chroma.Style
 	if p.Name != "" {
+		unlock := theme.RLockChroma()
 		cs = styles.Get(theme.ChromaStyleName(p))
+		unlock()
 	}
 	return &styler{p: p, s: s, chroma: cs, cache: map[sty]lipgloss.Style{}}
 }

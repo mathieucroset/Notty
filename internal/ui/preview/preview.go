@@ -288,7 +288,7 @@ func (m Model) startRender() tea.Cmd {
 			imgs = segs[i+1].Images
 		}
 		md := prepareText(s, imgs, m.notePath, defs, m.styles.Icons.Image)
-		key := textKey{hash: hashString(md), width: cw, palette: m.palette.Name, icons: m.styles.Icons.Name}
+		key := textKey{hash: hashString(md), width: cw, palette: m.palette.Key(), icons: m.styles.Icons.Name}
 		lines, ok := m.sh.textCache[key]
 		job.texts = append(job.texts, textJob{key: key, markdown: md, lines: lines, cached: ok})
 	}

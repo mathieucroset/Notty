@@ -262,8 +262,7 @@ func TestChromaStyleNameStableAndUnique(t *testing.T) {
 		if got != want {
 			t.Errorf("ChromaStyleName(%q) = %q, want %q", name, got, want)
 		}
-		// Calling it again must return the same name and must not panic
-		// (re-registration must be a safe no-op).
+		// Calling it again must return the same name.
 		if again := ChromaStyleName(p); again != got {
 			t.Errorf("ChromaStyleName(%q) not stable across calls: %q then %q", name, got, again)
 		}
@@ -288,5 +287,44 @@ func TestGlamourStyleRenders(t *testing.T) {
 		if strings.TrimSpace(out) == "" {
 			t.Errorf("palette %q: Render produced empty output", name)
 		}
+	}
+}
+
+func TestPaletteKey(t *testing.T) {
+	tests := []struct {
+		name string
+		p    Palette
+		want string
+	}{
+		{"id wins", Palette{Name: "matugen", ID: "matugen@0011aabb"}, "matugen@0011aabb"},
+		{"name when no id", Palette{Name: "hand"}, "hand"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.p.Key(); got != tt.want {
+				t.Errorf("Key() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuiltinsHaveIDEqualName(t *testing.T) {
+	for _, n := range Names() {
+		p, _ := Get(n)
+		if p.ID != p.Name {
+			t.Errorf("%s: ID %q", n, p.ID)
+		}
+	}
+}
+
+func TestChromaStyleNameIsPure(t *testing.T) {
+	p := Palette{Name: "never-registered", ID: "never-registered@1"}
+	if got := ChromaStyleName(p); got != "notty-never-registered@1" {
+		t.Fatalf("got %q", got)
+	}
+	unlock := RLockChroma()
+	defer unlock()
+	if _, ok := chromastyles.Registry["notty-never-registered@1"]; ok {
+		t.Fatal("ChromaStyleName registered a style")
 	}
 }

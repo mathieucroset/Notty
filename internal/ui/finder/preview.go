@@ -124,6 +124,8 @@ func previewExcerpt(content string, paneHeight, hitLine int) (excerpt string, wi
 // p, split into individually width-padded lines. Render errors fall back to
 // a single placeholder line rather than failing the whole overlay.
 func renderMarkdown(content string, width int, p theme.Palette, set icons.Set) []string {
+	unlock := theme.RLockChroma() // Glamour reads chroma's style registry
+	defer unlock()
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(theme.GlamourStyle(p, set)),
 		glamour.WithWordWrap(width),

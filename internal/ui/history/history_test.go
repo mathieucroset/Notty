@@ -259,6 +259,14 @@ func TestRightContentRecomputesOnCacheKeyChange(t *testing.T) {
 	if count != 3 {
 		t.Errorf("SetSize with an unchanged size re-rendered: total = %d, want 3", count)
 	}
+
+	// The palette's identity is part of the key, not just its name: a
+	// rewritten user theme keeps its name but gets a new ID.
+	m.palette.ID = m.palette.Name + "@rewritten"
+	m = m.refreshContent()
+	if count != 4 {
+		t.Errorf("same-name palette with a new ID total renders = %d, want 4", count)
+	}
 }
 
 func TestNoOpKeysReturnNil(t *testing.T) {

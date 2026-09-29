@@ -15,6 +15,9 @@ import (
 // style themselves from these tokens only.
 type Palette struct {
 	Name string
+	// ID is unique per palette content: a built-in's Name, or a user
+	// theme's Name@<hash of its file> (see LoadUser).
+	ID   string
 	Dark bool
 
 	Base    color.Color // main background
@@ -30,6 +33,15 @@ type Palette struct {
 	Error   color.Color
 
 	Headings [6]color.Color // H1..H6
+}
+
+// Key identifies p's colors: caches and the chroma style are keyed by it.
+// It is ID, or Name for palettes built by hand without one.
+func (p Palette) Key() string {
+	if p.ID != "" {
+		return p.ID
+	}
+	return p.Name
 }
 
 // hex is a small convenience wrapper around lipgloss.Color for readability
@@ -57,6 +69,7 @@ var palettes = legiblePalettes(map[string]Palette{
 	// Catppuccin Mocha — https://catppuccin.com/palette (Mocha)
 	"catppuccin-mocha": {
 		Name:    "catppuccin-mocha",
+		ID:      "catppuccin-mocha",
 		Dark:    true,
 		Base:    hex("#1e1e2e"), // base
 		Surface: hex("#313244"), // surface0
@@ -82,6 +95,7 @@ var palettes = legiblePalettes(map[string]Palette{
 	// Catppuccin Latte — https://catppuccin.com/palette (Latte)
 	"catppuccin-latte": {
 		Name:    "catppuccin-latte",
+		ID:      "catppuccin-latte",
 		Dark:    false,
 		Base:    hex("#eff1f5"), // base
 		Surface: hex("#ccd0da"), // surface0
@@ -107,6 +121,7 @@ var palettes = legiblePalettes(map[string]Palette{
 	// Tokyo Night — https://github.com/folke/tokyonight.nvim (Night)
 	"tokyo-night": {
 		Name:    "tokyo-night",
+		ID:      "tokyo-night",
 		Dark:    true,
 		Base:    hex("#1a1b26"), // bg (Night)
 		Surface: hex("#24283b"), // bg (Storm), used here as a raised panel
@@ -132,6 +147,7 @@ var palettes = legiblePalettes(map[string]Palette{
 	// Tokyo Night Day — https://github.com/folke/tokyonight.nvim (Day)
 	"tokyo-night-day": {
 		Name:    "tokyo-night-day",
+		ID:      "tokyo-night-day",
 		Dark:    false,
 		Base:    hex("#e1e2e7"), // bg
 		Surface: hex("#d0d5e3"), // bg_dark
@@ -157,6 +173,7 @@ var palettes = legiblePalettes(map[string]Palette{
 	// Rosé Pine — https://rosepinetheme.com/palette (Main)
 	"rose-pine": {
 		Name:    "rose-pine",
+		ID:      "rose-pine",
 		Dark:    true,
 		Base:    hex("#191724"), // base
 		Surface: hex("#1f1d2e"), // surface
@@ -182,6 +199,7 @@ var palettes = legiblePalettes(map[string]Palette{
 	// Rosé Pine Dawn — https://rosepinetheme.com/palette (Dawn)
 	"rose-pine-dawn": {
 		Name:    "rose-pine-dawn",
+		ID:      "rose-pine-dawn",
 		Dark:    false,
 		Base:    hex("#faf4ed"), // base
 		Surface: hex("#fffaf3"), // surface
@@ -207,6 +225,7 @@ var palettes = legiblePalettes(map[string]Palette{
 	// Nord — https://www.nordtheme.com/docs/colors-and-palettes
 	"nord": {
 		Name:    "nord",
+		ID:      "nord",
 		Dark:    true,
 		Base:    hex("#2e3440"), // nord0
 		Surface: hex("#3b4252"), // nord1

@@ -430,7 +430,7 @@ func (m Model) rightContent() string {
 // tab key; View, scrolling, and moving the selection never call it, so
 // neither Glamour nor the differ runs on every frame or keystroke.
 func (m Model) refreshContent() Model {
-	key := contentCacheKey{rev: m.loadedRev, mode: m.mode, width: m.contentWidth(), palette: m.palette.Name}
+	key := contentCacheKey{rev: m.loadedRev, mode: m.mode, width: m.contentWidth(), palette: m.palette.Key()}
 	if m.contentCacheValid && m.contentCacheKey == key {
 		return m
 	}
@@ -498,6 +498,8 @@ func renderMarkdown(content string, p theme.Palette, set icons.Set, w int) (stri
 	if w < 1 {
 		w = 1
 	}
+	unlock := theme.RLockChroma() // Glamour reads chroma's style registry
+	defer unlock()
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(theme.GlamourStyle(p, set)),
 		glamour.WithWordWrap(w),

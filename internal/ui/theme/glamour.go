@@ -29,24 +29,34 @@ func strPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool    { return &b }
 func uintPtr(u uint) *uint    { return &u }
 
-// chromaMu guards registration of chroma (syntax-highlighting) styles into
-// the process-global chroma/v2/styles registry.
-var chromaMu sync.Mutex
+// chromaMu guards chroma's process-global style registry
+// (chroma/v2/styles), a plain map chroma reads without a lock. Readers (a
+// Glamour render, styles.Get) hold the read lock via RLockChroma;
+// registration takes the write lock.
+var chromaMu sync.RWMutex
+
+// RLockChroma read-locks chroma's global style registry. Every reader of the
+// registry (a Glamour render, styles.Get) holds it while reading; user theme
+// registration takes the write lock. Never nest it: a goroutine holding it
+// must not wait on another goroutine that takes it.
+func RLockChroma() (unlock func()) {
+	chromaMu.RLock()
+	return chromaMu.RUnlock
+}
 
 // ChromaStyleName returns the name of the chroma syntax-highlighting style
-// for p, registering it in the global chroma style registry on first use.
-// Both the glamour preview (via GlamourStyle) and the editor's live code
-// highlighting call this so code-block colors always come from the same,
-// theme-specific chroma style rather than glamour's fixed "charm" style
-// name, which would otherwise freeze to whichever palette rendered first.
+// for p: "notty-" + p.Key(). Both the glamour preview (via GlamourStyle) and
+// the editor's live code highlighting use it, so code-block colors always
+// come from the same, palette-specific chroma style rather than glamour's
+// fixed "charm" style name, which would otherwise freeze to whichever
+// palette rendered first.
 //
-// Every built-in palette's style is registered at package init (see
-// RegisterChromaStyles), so for them this never writes to the registry
-// and is safe while other goroutines render with chroma.
+// It is a pure name function and registers nothing, so it is safe to call
+// while holding RLockChroma. Styles are registered at package init for the
+// built-ins (RegisterChromaStyles) and by LoadUser for user themes; a
+// palette never registered gets chroma's fallback style.
 func ChromaStyleName(p Palette) string {
-	name := "notty-" + p.Name
-	registerChromaStyle(name, p)
-	return name
+	return "notty-" + p.Key()
 }
 
 func init() { RegisterChromaStyles() }
@@ -54,14 +64,13 @@ func init() { RegisterChromaStyles() }
 var chromaOnce sync.Once
 
 // RegisterChromaStyles registers the chroma style of every built-in
-// palette, once. The package calls it at init: chroma's registry is a
-// plain map that renderers read without a lock, so it must not be written
-// once rendering (the preview renders on several goroutines) has started.
+// palette, once. The package calls it at init, so built-in palettes never
+// need to write the registry while rendering has started.
 func RegisterChromaStyles() {
 	chromaOnce.Do(func() {
 		for _, n := range names {
 			if p, ok := palettes[n]; ok {
-				registerChromaStyle("notty-"+p.Name, p)
+				registerChromaStyle(ChromaStyleName(p), p)
 			}
 		}
 	})
@@ -88,7 +97,9 @@ func chromaEntry(fg, bg color.Color, bold, italic bool) string {
 
 // registerChromaStyle registers name in the global chroma styles registry,
 // built from p's tokens, unless a style with that name is already
-// registered. Safe to call repeatedly and concurrently.
+// registered. It takes chromaMu's write lock, so it waits for in-flight
+// readers; it must never be called while holding RLockChroma. Safe to call
+// repeatedly and concurrently.
 func registerChromaStyle(name string, p Palette) {
 	chromaMu.Lock()
 	defer chromaMu.Unlock()
@@ -190,7 +201,7 @@ func GlamourStyle(p Palette, set icons.Set) ansi.StyleConfig {
 	s.CodeBlock.Color = hexString(p.Text)
 	s.CodeBlock.BackgroundColor = hexString(p.Surface)
 	s.CodeBlock.Margin = uintPtr(2)
-	// Register (or reuse) a theme-specific chroma style and reference it by
+	// Reference the palette's chroma style (registered at load time) by
 	// name, rather than setting CodeBlock.Chroma: glamour's renderer always
 	// registers an inline Chroma config under the single fixed style name
 	// "charm", so the first palette rendered in a process would otherwise

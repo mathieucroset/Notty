@@ -190,12 +190,17 @@ func (j renderJob) renderTexts() {
 		}
 	}
 	if len(todo) > 0 {
-		style := theme.GlamourStyle(j.palette, j.icons) // registers the chroma style once
+		style := theme.GlamourStyle(j.palette, j.icons) // style only; chroma styles are registered at load time
 		workers := min(len(todo), runtime.GOMAXPROCS(0))
 		var next atomic.Int64
 		var wg sync.WaitGroup
 		for range workers {
 			wg.Go(func() {
+				// Each worker read-locks the chroma registry for its renders.
+				// The parent must not hold it while it waits on the workers:
+				// they would queue behind a waiting writer and deadlock.
+				unlock := theme.RLockChroma()
+				defer unlock()
 				tr, err := glamour.NewTermRenderer(glamour.WithStyles(style), glamour.WithWordWrap(contentWidth(j.width)))
 				if err != nil {
 					tr = nil

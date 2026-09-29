@@ -280,6 +280,15 @@ func TestPreviewRecomputesOnCacheKeyChange(t *testing.T) {
 	if count != 2 {
 		t.Errorf("SetPreview for a different item total renders = %d, want 2", count)
 	}
+
+	// The palette's identity is part of the key, not just its name: a
+	// rewritten user theme keeps its name but gets a new ID.
+	p := m.palette
+	p.ID = p.Name + "@rewritten"
+	m = m.SetTheme(m.styles, p)
+	if count != 3 {
+		t.Errorf("SetTheme with a same-name palette total renders = %d, want 3", count)
+	}
 }
 
 func TestNoOpKeysReturnNil(t *testing.T) {
