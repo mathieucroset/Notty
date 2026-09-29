@@ -13,38 +13,67 @@ import (
 )
 
 func TestClassify(t *testing.T) {
+	const net, local = true, false
 	tests := []struct {
-		name   string
-		args   []string
-		stdout string
-		stderr string
-		want   error
+		name    string
+		args    []string
+		network bool
+		stdout  string
+		stderr  string
+		want    error
 	}{
-		{"resolve host", []string{"fetch"}, "", "fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com", ErrNetwork},
-		{"connection refused", []string{"fetch"}, "", "ssh: connect to host github.com port 22: Connection refused\nfatal: Could not read from remote repository.", ErrNetwork},
-		{"unreachable", []string{"push"}, "", "ssh: connect to host github.com port 22: Network is unreachable", ErrNetwork},
-		{"timed out", []string{"fetch"}, "", "ssh: connect to host github.com port 22: Operation timed out", ErrNetwork},
-		{"could not read without auth", []string{"fetch"}, "", "fatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.", ErrNetwork},
-		{"missing local remote", []string{"fetch", "origin"}, "", "fatal: '/tmp/x/remote.git' does not appear to be a git repository\nfatal: Could not read from remote repository.", ErrNetwork},
-		{"missing local clone source", []string{"clone"}, "", "fatal: repository '/tmp/x/remote.git' does not exist", ErrNetwork},
-		{"unable to access", []string{"fetch"}, "", "fatal: unable to access 'https://example.com/': Failed to connect", ErrNetwork},
-		{"publickey", []string{"fetch"}, "", "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.", ErrAuth},
-		{"auth failed", []string{"push"}, "", "remote: Invalid username or password.\nfatal: Authentication failed for 'https://github.com/x/y.git/'", ErrAuth},
-		{"403", []string{"push"}, "", "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 403", ErrAuth},
-		{"terminal prompt", []string{"fetch"}, "", "fatal: could not read Username for 'https://github.com': terminal prompts disabled", ErrAuth},
-		{"merge conflict", []string{"merge", "--no-edit", "origin/main"}, "Auto-merging a.md\nCONFLICT (content): Merge conflict in a.md\nAutomatic merge failed; fix conflicts and then commit the result.", "", ErrConflict},
-		{"conflict word outside merge", []string{"add", "CONFLICT (x).md"}, "", "fatal: pathspec 'CONFLICT (x).md' did not match any files", nil},
-		{"local changes", []string{"merge", "origin/main"}, "", "error: Your local changes to the following files would be overwritten by merge:\n\ta.md\nPlease commit your changes or stash them before you merge.\nAborting", ErrLocalChanges},
-		{"sha containing 403 is not auth", []string{"push"}, "", "error: failed to push some refs; object a403b1c missing", nil},
-		{"unclassified", []string{"commit"}, "", "fatal: something else", nil},
+		{"resolve host", []string{"fetch"}, net, "", "fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com", ErrNetwork},
+		{"connection refused", []string{"fetch"}, net, "", "ssh: connect to host github.com port 22: Connection refused\nfatal: Could not read from remote repository.", ErrNetwork},
+		{"unreachable", []string{"push"}, net, "", "ssh: connect to host github.com port 22: Network is unreachable", ErrNetwork},
+		{"timed out", []string{"fetch"}, net, "", "ssh: connect to host github.com port 22: Operation timed out", ErrNetwork},
+		{"could not read without auth", []string{"fetch"}, net, "", "fatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.", ErrNetwork},
+		{"missing local remote", []string{"fetch", "origin"}, net, "", "fatal: '/tmp/x/remote.git' does not appear to be a git repository\nfatal: Could not read from remote repository.", ErrNetwork},
+		{"missing local clone source", []string{"clone"}, net, "", "fatal: repository '/tmp/x/remote.git' does not exist", ErrNetwork},
+		{"unable to access", []string{"fetch"}, net, "", "fatal: unable to access 'https://example.com/': Failed to connect", ErrNetwork},
+		{"publickey", []string{"fetch"}, net, "", "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.", ErrAuth},
+		{"auth failed", []string{"push"}, net, "", "remote: Invalid username or password.\nfatal: Authentication failed for 'https://github.com/x/y.git/'", ErrAuth},
+		{"403", []string{"push"}, net, "", "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 403", ErrAuth},
+		{"401", []string{"fetch"}, net, "", "fatal: unable to access 'https://example.com/x.git/': The requested URL returned error: 401", ErrAuth},
+		{"terminal prompt", []string{"fetch"}, net, "", "fatal: could not read Username for 'https://github.com': terminal prompts disabled", ErrAuth},
+		{"host key", []string{"fetch"}, net, "", "Host key verification failed.\nfatal: Could not read from remote repository.", ErrAuth},
+		{"ssh repository not found", []string{"fetch"}, net, "", "ERROR: Repository not found.\nfatal: Could not read from remote repository.", ErrAuth},
+		{"https repository not found", []string{"clone"}, net, "", "remote: Repository not found.\nfatal: repository 'https://github.com/x/private.git/' not found", ErrAuth},
+		{"quoted repository not found", []string{"ls-remote"}, net, "", "fatal: repository 'https://example.com/x.git/' not found", ErrAuth},
+		{"permission to denied", []string{"push"}, net, "", "remote: Permission to owner/repo.git denied to someone.\nfatal: unable to access 'https://github.com/owner/repo.git/': The requested URL returned error: 403", ErrAuth},
+		{"access denied", []string{"fetch"}, net, "", "remote: Access denied\nfatal: unable to access 'https://gitlab.example.com/x.git/'", ErrAuth},
+		{"merge conflict", []string{"merge", "--no-edit", "origin/main"}, local, "Auto-merging a.md\nCONFLICT (content): Merge conflict in a.md\nAutomatic merge failed; fix conflicts and then commit the result.", "", ErrConflict},
+		{"merge conflict with -c options", []string{"-c", "core.hooksPath=/dev/null", "merge", "origin/main"}, local, "CONFLICT (content): Merge conflict in a.md", "", ErrConflict},
+		{"conflict word outside merge", []string{"add", "CONFLICT (x).md"}, local, "", "fatal: pathspec 'CONFLICT (x).md' did not match any files", nil},
+		{"local changes", []string{"merge", "origin/main"}, local, "", "error: Your local changes to the following files would be overwritten by merge:\n\ta.md\nPlease commit your changes or stash them before you merge.\nAborting", ErrLocalChanges},
+		{"sha containing 403 is not auth", []string{"push"}, net, "", "error: failed to push some refs; object a403b1c missing", nil},
+		{"local command never auth", []string{"add", "Access denied.md"}, local, "", "fatal: pathspec 'Access denied.md' did not match any files", nil},
+		{"local command never network", []string{"show", ":2:x"}, local, "", "fatal: path 'timed out.md' does not exist", nil},
+		{"local permission denied is not auth", []string{"commit"}, local, "", "error: open(\".git/index.lock\"): Permission denied (publickey)", nil},
+		{"unclassified", []string{"commit"}, local, "", "fatal: something else", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := classify(tt.args, tt.stdout, tt.stderr)
+			got := classify(tt.args, tt.network, tt.stdout, tt.stderr)
 			if got != tt.want {
 				t.Fatalf("classify() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSubcommand(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"merge", "x"}, "merge"},
+		{[]string{"-c", "a=b", "-c", "c=d", "commit", "-m", "x"}, "commit"},
+		{nil, ""},
+	}
+	for _, tt := range tests {
+		if got := subcommand(tt.args); got != tt.want {
+			t.Errorf("subcommand(%q) = %q, want %q", tt.args, got, tt.want)
+		}
 	}
 }
 

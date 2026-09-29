@@ -59,9 +59,9 @@ type GitError struct {
 func (e *GitError) Error() string {
 	var b strings.Builder
 	b.WriteString("git")
-	if len(e.Args) > 0 {
+	if sub := subcommand(e.Args); sub != "" {
 		b.WriteString(" ")
-		b.WriteString(e.Args[0])
+		b.WriteString(sub)
 	}
 	if e.Kind != nil {
 		b.WriteString(": ")
@@ -214,7 +214,7 @@ func wrapRunError(args []string, network bool, ctx context.Context, res result, 
 		}
 		return ge
 	}
-	ge.Kind = classify(args, string(res.Stdout), stderr)
+	ge.Kind = classify(args, network, string(res.Stdout), stderr)
 	return ge
 }
 
@@ -225,8 +225,15 @@ var (
 		"could not read username",
 		"could not read password",
 		"invalid username or password",
+		"host key verification failed",
+		"repository not found",
+		"access denied",
 	}
-	re403 = regexp.MustCompile(`\b403\b`)
+	reAuth = []*regexp.Regexp{
+		regexp.MustCompile(`\b40[13]\b`),
+		regexp.MustCompile(`permission to .* denied`),
+		regexp.MustCompile(`repository '[^']*' not found`),
+	}
 	// A local-path remote that was moved or deleted, as reported by clone.
 	reMissingLocalRepo = regexp.MustCompile(`repository '[^']*' does not exist`)
 	networkPatterns    = []string{
@@ -240,12 +247,15 @@ var (
 	}
 )
 
-// classify maps git output to a sentinel error, or nil if unrecognized. Auth
-// is checked before network because an auth failure over ssh also prints
+// classify maps git output to a sentinel error, or nil if unrecognized.
+// Merge outcomes (ErrConflict, ErrLocalChanges) apply to merge commands only;
+// ErrAuth and ErrNetwork apply to network commands only, so a file name in a
+// local command's error can never look like a network failure. Auth is
+// checked before network because an auth failure over ssh also prints
 // "Could not read from remote repository".
-func classify(args []string, stdout, stderr string) error {
+func classify(args []string, network bool, stdout, stderr string) error {
 	lower := strings.ToLower(stderr)
-	if len(args) > 0 && args[0] == "merge" {
+	if subcommand(args) == "merge" {
 		if strings.Contains(lower, "would be overwritten by merge") {
 			return ErrLocalChanges
 		}
@@ -253,13 +263,18 @@ func classify(args []string, stdout, stderr string) error {
 			return ErrConflict
 		}
 	}
+	if !network {
+		return nil
+	}
 	for _, p := range authPatterns {
 		if strings.Contains(lower, p) {
 			return ErrAuth
 		}
 	}
-	if re403.MatchString(lower) {
-		return ErrAuth
+	for _, re := range reAuth {
+		if re.MatchString(lower) {
+			return ErrAuth
+		}
 	}
 	if reMissingLocalRepo.MatchString(lower) {
 		return ErrNetwork
@@ -270,6 +285,19 @@ func classify(args []string, stdout, stderr string) error {
 		}
 	}
 	return nil
+}
+
+// subcommand returns the git subcommand in args, skipping leading "-c k=v"
+// options.
+func subcommand(args []string) string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-c" {
+			i++
+			continue
+		}
+		return args[i]
+	}
+	return ""
 }
 
 func hasConflictLine(s string) bool {
