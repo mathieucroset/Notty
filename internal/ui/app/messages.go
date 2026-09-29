@@ -118,7 +118,9 @@ func (m *Model) askExternalChange(p string) tea.Cmd {
 	d := dialog.NewChoice(dlgExternalChange, "Changed on disk",
 		"'"+displayName(p)+"' changed on disk, and you have unsaved edits.",
 		[]string{"Keep mine", "Reload from disk"}, m.opts.Styles)
-	m.openDialog(d, pendingOp{kind: opExternalChange, path: p})
+	// Stacked on top: whatever was open (a rename dialog, the finder)
+	// comes back once this is answered.
+	m.pushOverlay(&overlayState{kind: overlayDialog, dialog: d, pending: pendingOp{kind: opExternalChange, path: p}})
 	return nil
 }
 

@@ -17,7 +17,7 @@ import (
 )
 
 // newEditor builds the note editor from the configuration.
-func newEditor(opts Options) editor.Model {
+func newEditor(opts Options, mapMsg func(tea.Msg) tea.Msg) editor.Model {
 	clip := opts.Clipboard
 	if clip == nil {
 		clip = clipboard.Default()
@@ -30,7 +30,43 @@ func newEditor(opts Options) editor.Model {
 		Palette:     opts.Palette,
 		Clipboard:   clip,
 		VaultRoot:   vaultRoot(opts),
+		MapMsg:      mapMsg,
 	})
+}
+
+// mapEditorMsg intercepts the editor's focus requests, which it makes
+// synchronously inside Update, so they apply before the next key is
+// routed. Every other message passes through untouched (timer messages
+// are mapped on other goroutines, so this must not touch the model for
+// them).
+func (m *Model) mapEditorMsg(msg tea.Msg) tea.Msg {
+	var f Focus
+	switch msg.(type) {
+	case msgs.FocusSidebarMsg:
+		f = FocusSidebar
+	case msgs.FocusMainMsg:
+		f = FocusMain
+	default:
+		return msg
+	}
+	m.focusReq = &f
+	return nil
+}
+
+// updateEditor feeds msg to the editor, then applies any focus change it
+// asked for.
+func (m *Model) updateEditor(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	m.editor, cmd = m.editor.Update(msg)
+	if f := m.focusReq; f != nil {
+		m.focusReq = nil
+		if *f == FocusSidebar {
+			m.focusSidebar()
+		} else {
+			m.setFocus(FocusMain)
+		}
+	}
+	return cmd
 }
 
 // openNote opens the note at msg.Path. The note already open only moves
@@ -218,8 +254,7 @@ func (m *Model) handleEditorKey(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	m.editorStatus = ""
-	var cmd tea.Cmd
-	m.editor, cmd = m.editor.Update(k)
+	cmd := m.updateEditor(k)
 	m.followCursor()
 	return cmd
 }
@@ -229,14 +264,15 @@ func (m *Model) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	if m.overlayOpen() || m.history != nil || m.opts.WizardNeeded || !m.editorFocused() {
 		return nil
 	}
-	var cmd tea.Cmd
-	m.editor, cmd = m.editor.Update(msg)
-	return cmd
+	return m.updateEditor(msg)
 }
 
 // modeLabel is the status bar's mode pill.
 func (m *Model) modeLabel() string {
 	if m.note.path != "" && m.mainView == ViewNote {
+		if m.noteView == ViewPreview {
+			return "PREVIEW"
+		}
 		return m.editor.ModeName()
 	}
 	if m.opts.Config.Vim {

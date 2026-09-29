@@ -102,6 +102,9 @@ func (m *Model) restoreVersion(msg history.RestoreVersionMsg) tea.Cmd {
 	content, version := msg.Content, uint64(0)
 	if msg.Path == m.editor.Path() {
 		m.editor, edit = m.editor.ReplaceAll(msg.Content)
+		if m.editor.Content() != msg.Content {
+			return m.pushToast(msgs.ToastWarn, "Could not restore "+displayName(msg.Path)+": the note cannot be edited right now")
+		}
 		_, content, version = m.editor.Snapshot()
 	}
 	save := m.saveNoteCmd(msg.Path, content, version)

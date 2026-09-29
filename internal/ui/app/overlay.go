@@ -85,6 +85,10 @@ func (m *Model) leaveOverlay(s *overlayState) {
 	if s.kind == overlayPalette && m.opts.Palette.Name != s.paletteTheme {
 		m.applyTheme(s.paletteTheme)
 	}
+	if s.kind == overlayDialog && s.pending.kind == opExternalChange {
+		// An unanswered "changed on disk" dialog keeps the edits.
+		m.later(m.resolveExternalChange(s.pending.path, choiceKeepMine))
+	}
 }
 
 // openDialog shows d as the active overlay; its result is handled by op.

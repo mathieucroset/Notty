@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 	"github.com/mathieucroset/notty/internal/config"
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
+	"github.com/mathieucroset/notty/internal/ui/editor"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/vault"
@@ -167,8 +169,13 @@ func TestViewDoesNotMutate(t *testing.T) {
 	run(t, m, msgs.OpenNoteMsg{Path: "ideas.md", Line: -1})
 	run(t, m, msgs.SyncStatusMsg{State: msgs.SyncSynced})
 	before := *m
+	edBefore := fmt.Sprintf("%+v", m.editor)
 	_ = m.View()
-	if !reflect.DeepEqual(before, *m) {
+	after := *m
+	// The editor holds a func (its MapMsg hook), which DeepEqual never
+	// treats as equal: compare it shallowly.
+	before.editor, after.editor = editor.Model{}, editor.Model{}
+	if !reflect.DeepEqual(before, after) || fmt.Sprintf("%+v", m.editor) != edBefore {
 		t.Error("View() changed the model")
 	}
 }

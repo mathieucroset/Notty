@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -159,6 +160,10 @@ type Model struct {
 	// kittyGen numbers the ready ticks: every tea.Exec starts a new
 	// generation, dropping ticks armed before it.
 	kittyGen int
+	// focusReq is a focus change the editor asked for during its Update
+	// (tab, ctrl+w h/l, esc with vim off), applied as soon as Update
+	// returns so the next key already goes to the new pane.
+	focusReq *Focus
 	// editorStatus is the editor's last message (unknown command, search
 	// wrapped), shown in the status row until the next key.
 	editorStatus string
@@ -173,6 +178,11 @@ type Model struct {
 	// leaves without saving. Any buffer change or successful save clears
 	// it.
 	discardOnQuit bool
+
+	// noteSavers order the saves of each note (UI goroutine only).
+	noteSavers map[string]*orderedSaver
+	// inflight counts the note saves still running; quit waits for them.
+	inflight *sync.WaitGroup
 
 	// deferred are commands produced by helpers that cannot return one
 	// (a resize, a theme change); Update batches them with its result.
@@ -195,12 +205,13 @@ func New(opts Options) *Model {
 		status:         statusbar.New(opts.Styles),
 		toast:          toast.New(opts.Styles),
 		pinsSaver:      &orderedSaver{},
+		inflight:       &sync.WaitGroup{},
 		localSaver:     &orderedSaver{},
 		tasks:          tasksview.New(opts.Styles, opts.Config.Tasks.DueSoonDays, opts.Config.Tasks.ShowDone),
 		trash:          trash.New(opts.Styles, opts.Palette),
-		editor:         newEditor(opts),
 		preview:        preview.New(opts.Styles, opts.Palette, opts.Caps, vaultRoot(opts)),
 	}
+	m.editor = newEditor(opts, m.mapEditorMsg)
 	m.sidebar.SetExpanded(opts.Local.Expanded)
 	m.sidebar.SetPins(opts.Pins.Pins)
 	m.sidebar.SetFocused(true)
@@ -323,9 +334,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editor.ChangedMsg:
 		return m, m.handleEditorChanged(msg)
 	case editor.AutosaveTickMsg:
-		var cmd tea.Cmd
-		m.editor, cmd = m.editor.Update(msg)
-		return m, cmd
+		return m, m.updateEditor(msg)
 	case editor.StatusMsg:
 		m.editorStatus = msg.Text
 	case readyTickMsg:
@@ -340,11 +349,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case msgs.FocusMainMsg:
 		m.setFocus(FocusMain)
 	case msgs.FocusSidebarMsg:
-		if !m.sidebarShown() {
-			m.sidebarVisible, m.sidebarToggled = true, true
-			m.relayout()
-		}
-		m.setFocus(FocusSidebar)
+		m.focusSidebar()
 	case msgs.ToggleSidebarMsg:
 		m.toggleSidebar()
 	case msgs.CycleNoteViewMsg:
@@ -436,8 +441,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Everything else may belong to a component's own pipeline: the
 		// editor's timers and clipboard reads, toast expiry ticks.
-		var edCmd, toastCmd tea.Cmd
-		m.editor, edCmd = m.editor.Update(msg)
+		edCmd := m.updateEditor(msg)
+		var toastCmd tea.Cmd
 		m.toast, toastCmd = m.toast.Update(msg)
 		return m, tea.Batch(edCmd, m.updatePreview(msg), m.updateFinders(msg), toastCmd)
 	}
@@ -479,6 +484,7 @@ func (m *Model) handleQuitSaved(msg quitSavedMsg) tea.Cmd {
 // after tea.Quit.
 // TODO(syncer pass, plan amendment A7): flush the syncer before quitting.
 func (m *Model) finishQuit() tea.Cmd {
+	m.waitSaves()
 	m.closeWatcher()
 	if m.opts.LocalPath != "" && !m.opts.WizardNeeded {
 		m.rememberCursor()
@@ -525,6 +531,15 @@ func (m *Model) showNote(p, content string, line int) tea.Cmd {
 // toggled on and the terminal is wide enough for it.
 func (m *Model) sidebarShown() bool {
 	return ComputeLayout(m.width, m.height, m.sidebarVisible).SidebarVisible
+}
+
+// focusSidebar moves focus to the sidebar, showing it if it was hidden.
+func (m *Model) focusSidebar() {
+	if !m.sidebarShown() {
+		m.sidebarVisible, m.sidebarToggled = true, true
+		m.relayout()
+	}
+	m.setFocus(FocusSidebar)
 }
 
 // setFocus moves focus, never onto a sidebar that is not drawn.

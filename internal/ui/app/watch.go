@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -36,6 +37,9 @@ type savedMsg struct {
 	// restoredFrom is the short revision when the save restores a
 	// history version, so the toast waits for the save to succeed.
 	restoredFrom string
+	// stale reports a snapshot skipped because a newer one of the same
+	// note was already written.
+	stale bool
 }
 
 // listenWatcherCmd waits for the next watcher event or error. It returns
@@ -131,14 +135,38 @@ func (m *Model) closeWatcher() {
 
 // saveNoteCmd saves content to the note at p atomically, tells the watcher
 // the write is ours, and indexes the new content.
+//
+// Snapshots of one note land in the order they were taken: an older one
+// that runs after a newer one was written is skipped (stale). Quit waits
+// for the saves still running (waitSaves).
 func (m *Model) saveNoteCmd(p, content string, version uint64) tea.Cmd {
 	v, w, ix := m.opts.Vault, m.opts.Watcher, m.ix
 	if v == nil {
 		return nil
 	}
+	if m.noteSavers == nil {
+		m.noteSavers = map[string]*orderedSaver{}
+	}
+	saver := m.noteSavers[p]
+	if saver == nil {
+		saver = &orderedSaver{}
+		m.noteSavers[p] = saver
+	}
+	seq := saver.ticket()
+	inflight := m.inflight
+	inflight.Add(1)
 	return func() tea.Msg {
+		defer inflight.Done()
 		defer lockFile(v.Abs(p))()
-		if err := v.Save(p, content); err != nil {
+		written := false
+		err := saver.save(seq, func() error {
+			written = true
+			return v.Save(p, content)
+		})
+		if !written {
+			return savedMsg{path: p, version: version, stale: true}
+		}
+		if err != nil {
 			return savedMsg{path: p, version: version, err: err}
 		}
 		if w != nil {
@@ -153,6 +181,9 @@ func (m *Model) saveNoteCmd(p, content string, version uint64) tea.Cmd {
 
 // handleSaved follows a finished save.
 func (m *Model) handleSaved(msg savedMsg) tea.Cmd {
+	if msg.stale {
+		return nil // a newer snapshot was written
+	}
 	if msg.err != nil {
 		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s: %v", msg.path, msg.err))
 	}
@@ -168,6 +199,22 @@ func (m *Model) handleSaved(msg savedMsg) tea.Cmd {
 		return m.pushToast(msgs.ToastInfo, fmt.Sprintf("Restored %s from %s", displayName(msg.path), msg.restoredFrom))
 	}
 	return nil
+}
+
+// saveWaitLimit bounds how long quitting waits for saves still running.
+const saveWaitLimit = 2 * time.Second
+
+// waitSaves waits, up to saveWaitLimit, for the saves still running.
+func (m *Model) waitSaves() {
+	done := make(chan struct{})
+	go func() {
+		m.inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(saveWaitLimit):
+	}
 }
 
 // reindexCmd re-reads paths into the index off the UI goroutine. A path
