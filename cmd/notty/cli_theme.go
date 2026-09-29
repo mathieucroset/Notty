@@ -23,19 +23,15 @@ func runTheme(args []string, e env) int {
 	dir := filepath.Dir(e.configPath)
 	tpl := filepath.Join(dir, "matugen-template.toml")
 	out := filepath.Join(dir, "themes", "matugen.toml")
-	switch _, err := os.Stat(tpl); {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
+		return 1
+	}
+	switch err := writeNew(tpl, theme.MatugenTemplate()); {
 	case err == nil:
-		_, _ = fmt.Fprintf(e.stdout, "%s already exists, left unchanged.\n\n", tildePath(tpl))
-	case errors.Is(err, fs.ErrNotExist):
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
-			return 1
-		}
-		if err := os.WriteFile(tpl, []byte(theme.MatugenTemplate()), 0o600); err != nil {
-			_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
-			return 1
-		}
 		_, _ = fmt.Fprintf(e.stdout, "Wrote %s.\n\n", tildePath(tpl))
+	case errors.Is(err, fs.ErrExist):
+		_, _ = fmt.Fprintf(e.stdout, "%s already exists, left unchanged.\n\n", tildePath(tpl))
 	default:
 		_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
 		return 1
@@ -45,6 +41,25 @@ func runTheme(args []string, e env) int {
 		"Then set in %s:\n\ntheme = \"matugen\"\n",
 		tildePath(tpl), tildePath(out), tildePath(e.configPath))
 	return 0
+}
+
+// writeNew creates the file at path holding content. It never overwrites:
+// an existing file (even one created concurrently) gives an error wrapping
+// fs.ErrExist. A partly written file is removed.
+func writeNew(path, content string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("create template: %w", err)
+	}
+	_, err = f.WriteString(content)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("write template: %w", err)
+	}
+	return nil
 }
 
 // tildePath abbreviates the home directory at the start of p to ~.

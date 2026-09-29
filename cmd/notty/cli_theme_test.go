@@ -17,6 +17,7 @@ func TestThemeCommand(t *testing.T) {
 		setup      func(t *testing.T, f *fixture) string
 		wantCode   int
 		wantTpl    string // expected template content, "" = not checked
+		wantNoTpl  bool   // the template must not exist afterwards
 		wantStdout []string
 		wantStderr []string
 	}{
@@ -77,6 +78,27 @@ func TestThemeCommand(t *testing.T) {
 			wantCode:   1,
 			wantStderr: []string{"notty:"},
 		},
+		{
+			name: "read-only config dir",
+			args: []string{"theme", "matugen"},
+			setup: func(t *testing.T, f *fixture) string {
+				if os.Geteuid() == 0 {
+					t.Skip("root ignores directory permissions")
+				}
+				dir := filepath.Dir(f.configPath)
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(dir, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+				return f.configPath
+			},
+			wantCode:   1,
+			wantNoTpl:  true,
+			wantStderr: []string{"notty:"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -113,9 +135,9 @@ func TestThemeCommand(t *testing.T) {
 					t.Errorf("stderr %q lacks %q", f.stderr.String(), want)
 				}
 			}
-			if tt.wantCode == 2 {
+			if tt.wantCode == 2 || tt.wantNoTpl {
 				if _, err := os.Stat(filepath.Join(dir, "matugen-template.toml")); !os.IsNotExist(err) {
-					t.Errorf("usage error wrote the template (stat err %v)", err)
+					t.Errorf("template written (stat err %v)", err)
 				}
 			}
 		})
@@ -132,6 +154,7 @@ func TestTildePath(t *testing.T) {
 		{"home itself", home, "~"},
 		{"outside home", "/etc/notty.toml", "/etc/notty.toml"},
 		{"sibling with home as prefix", home + "x/a.toml", home + "x/a.toml"},
+		{"dot-dot dir under home", filepath.Join(home, "..foo", "a.toml"), "~/..foo/a.toml"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
