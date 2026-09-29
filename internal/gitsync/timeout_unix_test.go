@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -16,6 +17,22 @@ import (
 	"github.com/mathieucroset/notty/internal/gitsync"
 	"github.com/mathieucroset/notty/internal/gitsync/gittest"
 )
+
+// KillGroupOnCancel kills grandchildren too, so a canceled helper whose
+// child holds the output pipe still returns promptly.
+func TestKillGroupOnCancel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", "-c", "sleep 30 & wait")
+	gitsync.KillGroupOnCancel(cmd)
+	start := time.Now()
+	if _, err := cmd.Output(); err == nil {
+		t.Fatal("canceled command succeeded")
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("canceled command took %v", d)
+	}
+}
 
 // On timeout the whole process group is killed: the ssh helper git spawned
 // must not outlive the call.

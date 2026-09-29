@@ -50,6 +50,11 @@ func TestClassify(t *testing.T) {
 		{"local command never network", []string{"show", ":2:x"}, local, "", "fatal: path 'timed out.md' does not exist", nil},
 		{"local permission denied is not auth", []string{"commit"}, local, "", "error: open(\".git/index.lock\"): Permission denied (publickey)", nil},
 		{"unclassified", []string{"commit"}, local, "", "fatal: something else", nil},
+		{"commit without identity", []string{"-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "x"}, local, "", "Author identity unknown\n\n*** Please tell me who you are.\n\nfatal: unable to auto-detect email address (got 'me@box.(none)')", ErrNoIdentity},
+		{"merge without identity", []string{"merge", "origin/main"}, local, "", "Committer identity unknown\n\n*** Please tell me who you are.", ErrNoIdentity},
+		{"var with useConfigOnly", []string{"var", "GIT_AUTHOR_IDENT"}, local, "", "fatal: no email was given and auto-detection is disabled", ErrNoIdentity},
+		{"empty ident name", []string{"commit"}, local, "", "fatal: empty ident name (for <me@example.com>) not allowed", ErrNoIdentity},
+		{"identity words outside commit", []string{"add", "Please tell me who you are.md"}, local, "", "fatal: pathspec 'Please tell me who you are.md' did not match any files", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
