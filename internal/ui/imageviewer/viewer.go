@@ -218,7 +218,10 @@ func (s *session) handle(batch []Key) bool {
 			s.status = ""
 		case Open:
 			s.status = ""
-			if err := s.open(s.v.Paths[s.index]); err != nil {
+			path := s.v.Paths[s.index]
+			if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+				s.status = "file not found"
+			} else if err := s.open(path); err != nil {
 				s.status = "open failed: " + err.Error()
 			}
 		case Unknown:
@@ -280,6 +283,16 @@ func (s *session) load() {
 	}
 	path := s.v.Paths[s.index]
 	s.loaded = s.index + 1
+	if s.v.Caps.Viewer == imgrender.ProtoOff {
+		// Nothing to draw: read the size for the footer only.
+		var err error
+		s.img, s.imgErr = nil, nil
+		s.imgW, s.imgH, err = imgrender.Dimensions(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			s.imgErr = err
+		}
+		return
+	}
 	s.img, s.imgErr = imgrender.Decode(path)
 	if s.imgErr == nil {
 		b := s.img.Bounds()
@@ -304,15 +317,22 @@ func (s *session) draw() {
 	var b strings.Builder
 	b.WriteString(seqClear)
 	area := max(rows-1, 1) // the last row is the footer
-	if s.imgErr != nil {
-		msg := ansi.Truncate(errorMessage(s.imgErr), cols, "…")
-		w := ansi.StringWidth(msg)
-		b.WriteString(cup(area/2+1, (cols-w)/2+1) + msg)
-	} else {
+	switch {
+	case s.imgErr != nil:
+		centered(&b, errorMessage(s.imgErr), cols, area)
+	case s.v.Caps.Viewer == imgrender.ProtoOff:
+		centered(&b, "images are disabled", cols, area)
+	default:
 		s.image(&b, cols, area)
 	}
 	s.footer(&b)
 	s.write(b.String())
+}
+
+// centered writes msg, truncated to cols, in the middle of cols x area.
+func centered(b *strings.Builder, msg string, cols, area int) {
+	msg = ansi.Truncate(msg, cols, "…")
+	b.WriteString(cup(area/2+1, (cols-ansi.StringWidth(msg))/2+1) + msg)
 }
 
 // image draws the current image centered in cols x area cells.

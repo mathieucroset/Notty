@@ -318,6 +318,32 @@ func TestRunOpen(t *testing.T) {
 	assertOrder(t, out.String(), "2/2", "open failed: no viewer installed", altLeave)
 }
 
+func TestRunOpenMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "gone.png")
+	v, out := newTestViewer([]string{missing}, imgrender.ProtoHalfBlocks, strings.NewReader("oq"))
+	called := false
+	v.Open = func(string) error { called = true; return nil }
+	runViewer(t, v)
+	if called {
+		t.Error("opener called for a missing file")
+	}
+	assertOrder(t, out.String(), "image not found", "gone.png  1/1    file not found", altLeave)
+}
+
+func TestRunProtoOff(t *testing.T) {
+	dir := t.TempDir()
+	a := writePNG(t, dir, "a.png", 40, 20)
+	v, out := newTestViewer([]string{a, filepath.Join(dir, "gone.png")}, imgrender.ProtoOff, strings.NewReader("nq"))
+	runViewer(t, v)
+	s := out.String()
+	// "images are disabled" is 19 columns: centered on row 12 of 23.
+	assertOrder(t, s, cup(12, 31)+"images are disabled", "a.png  40x20  1/2", "image not found", "2/2", altLeave)
+	if strings.Contains(s, "▀") {
+		t.Error("images drawn although disabled")
+	}
+}
+
 func TestRunResizeRedraws(t *testing.T) {
 	dir := t.TempDir()
 	a := writePNG(t, dir, "a.png", 40, 20)
