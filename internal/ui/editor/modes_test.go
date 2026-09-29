@@ -429,6 +429,24 @@ func TestReplaceAll(t *testing.T) {
 	}
 }
 
+func TestSetCursor(t *testing.T) {
+	doc := "zero\none\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine"
+	m := newModel(t, testOptions(t), doc, buffer.Pos{}, 40, 4)
+	m = m.SetCursor(buffer.Pos{Line: 8})
+	if m.Cursor() != (buffer.Pos{Line: 8}) || m.Dirty() {
+		t.Fatalf("cursor = %+v dirty %v", m.Cursor(), m.Dirty())
+	}
+	if rows := plainView(m); !slices.Contains(rows, " eight") {
+		t.Errorf("line 8 not scrolled into view: %q", rows)
+	}
+	if c := m.CursorPosition(); c == nil {
+		t.Error("no cursor after SetCursor")
+	}
+	if m = m.SetCursor(buffer.Pos{Line: 99, Col: 9}); m.Cursor().Line != 9 {
+		t.Errorf("cursor not clamped: %+v", m.Cursor())
+	}
+}
+
 func TestSetPath(t *testing.T) {
 	m := newModel(t, testOptions(t), "a", buffer.Pos{}, 40, 5)
 	m, _ = typeKeys(m, "i", "x")

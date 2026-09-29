@@ -150,6 +150,14 @@ func (m Model) ReplaceAll(content string) (Model, tea.Cmd) {
 	return m.afterExternal(before)
 }
 
+// SetCursor moves the cursor to p, clamped to the text (the app jumps to a
+// search hit in the note already open this way), and scrolls it into view.
+// The engine keeps its mode.
+func (m Model) SetCursor(p buffer.Pos) Model {
+	m.ed.Resync(m.buf, func() { m.buf.SetCursor(p) })
+	return m.ensureVisible()
+}
+
 // SetPath renames the loaded note (after a rename or move made in the
 // app), keeping the buffer, its undo history and its dirty state.
 func (m Model) SetPath(path string) Model {
