@@ -19,6 +19,12 @@ func TestFileNameFromTitle(t *testing.T) {
 		{"only dots", "..", "Untitled.md"},
 		{"control chars removed", "a\nb\tc", "abc.md"},
 		{"unicode kept", "Café ☕", "Café ☕.md"},
+		{"md extension not doubled", "notes.md", "notes.md"},
+		{"md extension case normalized", "Notes.MD", "Notes.md"},
+		{"only md extension", ".md", "Untitled.md"},
+		{"md extension with spaces", " x .md ", "x.md"},
+		{"md only stripped once", "a.md.md", "a.md.md"},
+		{"md inside name kept", "readme.mdx", "readme.mdx.md"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -44,6 +50,7 @@ func TestTitle(t *testing.T) {
 		{"fallback nested", "no heading", "Work/Standup notes.md", "Standup notes"},
 		{"fallback empty content", "", "a.md", "a"},
 		{"fallback non-md", "", "dir/file.txt", "file.txt"},
+		{"fallback uppercase md", "", "dir/Loud.MD", "Loud"},
 		{"fenced backticks skipped", "```\n# not\n```\n# Yes\n", "x.md", "Yes"},
 		{"fenced tildes skipped", "~~~sh\n# comment\n~~~\n", "f.md", "f"},
 		{"fence needs matching char", "```\n~~~\n# inside\n```\n# out\n", "x.md", "out"},

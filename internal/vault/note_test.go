@@ -135,6 +135,9 @@ func TestCreateNote(t *testing.T) {
 		{"sanitized filename", "", " ..a/b:c ", "abc.md", "# ..a/b:c\n\n"},
 		{"empty title", "", "", "Untitled.md", "# Untitled\n\n"},
 		{"empty title collision", "", "  ", "Untitled 2.md", "# Untitled\n\n"},
+		{"md title not doubled", "", "notes.md", "notes.md", "# notes.md\n\n"},
+		{"md title collision", "", "notes.MD", "notes 2.md", "# notes.MD\n\n"},
+		{"only md title", "", ".md", "Untitled 3.md", "# .md\n\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -202,6 +205,8 @@ func TestRename(t *testing.T) {
 	}{
 		{"note keeps md", "Work/a.md", "b", "Work/b.md"},
 		{"note with md", "Work/a.md", "b.md", "Work/b.md"},
+		{"note with upper md", "Work/a.md", "b.MD", "Work/b.md"},
+		{"upper md note normalized", "Work/U.MD", "v", "Work/v.md"},
 		{"note sanitized", "Work/a.md", " .x/y ", "Work/xy.md"},
 		{"note same name", "Work/a.md", "a", "Work/a.md"},
 		{"case only", "Work/a.md", "A", "Work/A.md"},
@@ -213,7 +218,7 @@ func TestRename(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			v := openVault(t)
-			mkfiles(t, v.Root, "Work/a.md", "Work/pic.png")
+			mkfiles(t, v.Root, "Work/a.md", "Work/U.MD", "Work/pic.png")
 			before := readFile(t, v, tt.rel+suffixIfDir(v, tt.rel))
 			got, err := v.Rename(tt.rel, tt.newName)
 			if err != nil {
@@ -250,6 +255,8 @@ func TestRenameErrors(t *testing.T) {
 		{"target folder exists", "F", "G", ErrExists},
 		{"missing source", "nope.md", "x", os.ErrNotExist},
 		{"empty name", "a.md", "  ", ErrInvalidName},
+		{"only md", "a.md", ".md", ErrInvalidName},
+		{"only upper md", "a.md", " .MD ", ErrInvalidName},
 		{"folder empty name", "F", "...", ErrInvalidName},
 		{"root", "", "x", ErrInvalidPath},
 	}

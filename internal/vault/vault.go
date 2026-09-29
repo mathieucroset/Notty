@@ -138,4 +138,6 @@ func hidden(parent, name string) bool {
 	return parent == "" && hiddenTopLevel[name]
 }
 
-func isNoteName(name string) bool { return strings.HasSuffix(name, ".md") }
+// isNoteName reports whether a file name has the note extension (".md",
+// ignoring case).
+func isNoteName(name string) bool { return hasNoteExt(name) }

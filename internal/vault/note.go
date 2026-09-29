@@ -102,8 +102,11 @@ func (v *Vault) CreateNote(folder, title string) (string, error) {
 	if err := os.MkdirAll(v.Abs(dir), 0o755); err != nil {
 		return "", fmt.Errorf("vault: create note in %q: %w", dir, err)
 	}
-	base := strings.TrimSuffix(FileNameFromTitle(title), ".md")
-	rel, err := v.claim(dir, base, ".md", func(abs string) error {
+	base := noteBase(title)
+	if base == "" {
+		base = untitled
+	}
+	rel, err := v.claim(dir, base, noteExt, func(abs string) error {
 		// O_EXCL reserves the name so concurrent creators cannot collide.
 		f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if err != nil {
@@ -163,8 +166,9 @@ func (v *Vault) claim(dir, base, ext string, create func(abs string) error) (str
 }
 
 // Rename renames the note, folder or file at rel within its folder. newName
-// is sanitized like a title; notes keep their ".md" extension, which is
-// appended if omitted. It fails with ErrExists if the target is taken.
+// is sanitized like a title. Notes always end in ".md": a user-typed ".md"
+// in any case is normalized, and it is appended if omitted. It fails with
+// ErrExists if the target is taken.
 func (v *Vault) Rename(rel, newName string) (string, error) {
 	src := clean(rel)
 	if src == "" {
@@ -175,10 +179,12 @@ func (v *Vault) Rename(rel, newName string) (string, error) {
 		return "", fmt.Errorf("vault: rename %q: %w", src, err)
 	}
 	name := sanitizeName(newName)
-	if fi.Mode().IsRegular() && isNoteName(src) && !isNoteName(name) {
-		name += ".md"
+	if fi.Mode().IsRegular() && isNoteName(src) {
+		if name = noteBase(newName); name != "" {
+			name += noteExt
+		}
 	}
-	if strings.TrimSuffix(name, ".md") == "" {
+	if name == "" {
 		return "", fmt.Errorf("vault: rename %q to %q: %w", src, newName, ErrInvalidName)
 	}
 	return v.move(src, path.Join(path.Dir(src), name))

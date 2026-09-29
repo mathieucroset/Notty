@@ -96,6 +96,7 @@ func TestTree(t *testing.T) {
 		"b.md",
 		"A.md",
 		"c.txt",
+		"D.MD",
 		"zeta/",
 		"Alpha/note.md",
 		"Alpha/.hidden.md",
@@ -131,6 +132,7 @@ func TestTree(t *testing.T) {
 		{"A.md", false, true},
 		{"b.md", false, true},
 		{"c.txt", false, false},
+		{"D.MD", false, true},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("tree:\n got  %v\n want %v", got, want)
