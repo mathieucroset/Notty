@@ -159,10 +159,12 @@ func TestFullTextEmptyQueryClearsHitsWithoutDebounce(t *testing.T) {
 		t.Fatal("expected hits for \"auth\"")
 	}
 
+	// The first three backspaces ("aut", "au", "a") still schedule a
+	// debounce; only the fourth, which empties the query, must not.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m, backspaceCmd := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	m, backspaceCmd = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	m, backspaceCmd = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	m, backspaceCmd = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if backspaceCmd != nil {
 		t.Error("clearing the query to empty should not schedule a debounce")
 	}
