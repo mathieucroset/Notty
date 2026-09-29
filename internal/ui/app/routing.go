@@ -15,6 +15,9 @@ func (m *Model) keyContext() keys.Context {
 	if m.overlayOpen() {
 		return keys.Overlay
 	}
+	if m.history != nil {
+		return keys.History
+	}
 	if m.focus == FocusSidebar {
 		if m.sidebar.PickerOpen() {
 			// The inline tag picker behaves like an overlay: ctrl+k moves
@@ -48,6 +51,11 @@ func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.overlayOpen() {
 		return m.updateOverlay(k)
+	}
+	if m.history != nil {
+		h, cmd := m.history.Update(k)
+		m.history = &h
+		return cmd
 	}
 	if m.focus == FocusSidebar {
 		// esc dismisses the newest sticky error before it reaches the

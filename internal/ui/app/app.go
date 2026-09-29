@@ -18,6 +18,7 @@ import (
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
 	"github.com/mathieucroset/notty/internal/ui/dialog"
+	"github.com/mathieucroset/notty/internal/ui/history"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/sidebar"
 	"github.com/mathieucroset/notty/internal/ui/statusbar"
@@ -130,6 +131,10 @@ type Model struct {
 	openTasks  int
 	trash      trash.Model
 	trashCount int
+
+	// history is the full-screen History view, or nil when closed.
+	history     *history.Model
+	historyPath string
 	note    note
 	openSeq int // number of the latest open request
 	sync    msgs.SyncStatusMsg
@@ -302,6 +307,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd, ok := m.updateTrashMsg(msg); ok {
 			return m, cmd
 		}
+		if cmd, ok := m.updateHistoryMsg(msg); ok {
+			return m, cmd
+		}
 		// Toast expiry ticks.
 		var cmd tea.Cmd
 		m.toast, cmd = m.toast.Update(msg)
@@ -369,6 +377,10 @@ func (m *Model) relayout() {
 	}
 	m.tasks = m.tasks.SetSize(l.Content.W, l.Content.H)
 	m.trash = m.trash.SetSize(l.Content.W, l.Content.H)
+	if m.history != nil {
+		h := m.history.SetSize(m.width, m.height)
+		m.history = &h
+	}
 	m.status.SetSize(l.Status.W)
 }
 
@@ -419,6 +431,9 @@ func (m *Model) render() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
 	}
 
+	if m.history != nil {
+		return m.withToasts(m.withOverlay(m.history.View()))
+	}
 	l := ComputeLayout(m.width, m.height, m.sidebarVisible)
 	var panes []string
 	if l.SidebarVisible {
