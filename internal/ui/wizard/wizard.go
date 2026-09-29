@@ -218,6 +218,10 @@ type Model struct {
 	remote        remoteCheck
 	cancelRemote  context.CancelFunc
 
+	// ghCtx bounds the background gh check; Cancel stops it.
+	ghCtx    context.Context
+	cancelGH context.CancelFunc
+
 	// Identity form and setup run.
 	run runState
 
@@ -248,6 +252,7 @@ func New(mode Mode, defaultVault string, currentTheme string, env Env, styles th
 	m.vaultInput.CursorEnd()
 	m.run = newRunState()
 	m.theme.base = styles
+	m.ghCtx, m.cancelGH = context.WithCancel(context.Background())
 	m.repoInput = newInput("notes")
 	m.repoInput.SetValue("notes")
 	m.repoInput.CursorEnd()
@@ -387,7 +392,32 @@ func (m Model) ghCmd() tea.Cmd {
 	if gh == nil {
 		return func() tea.Msg { return ghMsg{ok: false} }
 	}
-	return func() tea.Msg { return ghMsg{ok: gh.Available(context.Background())} }
+	ctx := m.ghCtx
+	return func() tea.Msg { return ghMsg{ok: gh.Available(ctx)} }
+}
+
+// Cancel stops any work in flight: the gh check, the remote check, the
+// identity check or update, and the setup run (whose context is canceled, so
+// the runner returns). Late results are ignored. The app calls it on quit.
+// Steps already done stay done; they are safe to run again.
+func (m Model) Cancel() Model {
+	if m.cancelGH != nil {
+		m.cancelGH()
+	}
+	if m.cancelRemote != nil || m.remote.busy {
+		m.resetRemote()
+	}
+	m.stopRun()
+	if m.run.settingIdentity {
+		m.run.settingIdentity = false
+		m.run.identityErr = "Canceled."
+		m.focus()
+	}
+	if m.stage == StageRun && m.busy() {
+		m.run.phase, m.run.runErr = phaseFailed, errors.New("setup canceled")
+	}
+	m.run.gen++ // ignore late results
+	return m
 }
 
 func (m Model) inspectCmd(seq int, path string) tea.Cmd {

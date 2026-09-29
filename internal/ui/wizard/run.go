@@ -33,8 +33,11 @@ type (
 		gen int
 		err error
 	}
-	identitySetMsg struct{ err error }
-	planMsg        struct {
+	identitySetMsg struct {
+		gen int
+		err error
+	}
+	planMsg struct {
 		gen   int
 		req   setup.Request
 		steps []setup.Step
@@ -60,6 +63,11 @@ type runState struct {
 	identityErr           string
 	settingIdentity       bool
 
+	// ctx bounds the identity check or update, the planning and the run
+	// that follow it; cancel stops them (Cancel, a new attempt, the end).
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// Run.
 	gen        int
 	phase      runPhase
@@ -75,6 +83,29 @@ func newRunState() runState {
 	r.nameInput = newInput("Ada Lovelace")
 	r.emailInput = newInput("ada@example.com")
 	return r
+}
+
+// newRunContext cancels the previous attempt's context and starts a new one.
+func (m *Model) newRunContext() context.Context {
+	m.stopRun()
+	m.run.ctx, m.run.cancel = context.WithCancel(context.Background())
+	return m.run.ctx
+}
+
+// stopRun cancels the current attempt's context.
+func (m *Model) stopRun() {
+	if m.run.cancel != nil {
+		m.run.cancel()
+		m.run.cancel = nil
+	}
+}
+
+// runContext is the current attempt's context.
+func (m Model) runContext() context.Context {
+	if m.run.ctx == nil {
+		return context.Background()
+	}
+	return m.run.ctx
 }
 
 // request builds the setup request from the collected choices.
@@ -101,13 +132,14 @@ func (m Model) startSetup() (Model, tea.Cmd) {
 	m.run.gen++
 	m.run.steps, m.run.current, m.run.failed, m.run.runErr = nil, -1, -1, nil
 	m.focus()
+	ctx := m.newRunContext()
 	check := m.env.CheckIdentity
 	if check == nil {
 		return m.plan()
 	}
 	m.run.phase = phaseChecking
 	gen, dir := m.run.gen, m.expandedVault()
-	cmd := func() tea.Msg { return identityCheckedMsg{gen: gen, err: check(context.Background(), dir)} }
+	cmd := func() tea.Msg { return identityCheckedMsg{gen: gen, err: check(ctx, dir)} }
 	return m, tea.Batch(cmd, m.spin())
 }
 
@@ -117,7 +149,7 @@ func (m Model) plan() (Model, tea.Cmd) {
 	m.run.phase = phasePreparing
 	m.focus()
 	gen, req := m.run.gen, m.request()
-	inspect, inspectRemote := m.env.Inspect, m.env.InspectRemote
+	inspect, inspectRemote, ctx := m.env.Inspect, m.env.InspectRemote, m.runContext()
 	cmd := func() tea.Msg {
 		msg := planMsg{gen: gen, req: req}
 		if inspect == nil {
@@ -135,7 +167,7 @@ func (m Model) plan() (Model, tea.Cmd) {
 				msg.err = errors.New("setup: no remote inspector")
 				return msg
 			}
-			if rs, err = inspectRemote(context.Background(), req.URL); err != nil {
+			if rs, err = inspectRemote(ctx, req.URL); err != nil {
 				msg.err = err
 				return msg
 			}
@@ -150,14 +182,14 @@ func (m Model) plan() (Model, tea.Cmd) {
 // delivered through a channel, one message per Cmd (progress may be called
 // from another goroutine, such as the syncer's worker).
 func (m Model) execCmd(gen int, req setup.Request, steps []setup.Step) tea.Cmd {
-	run := m.env.Run
+	run, ctx := m.env.Run, m.runContext()
 	return func() tea.Msg {
 		if run == nil {
 			return runDoneMsg{gen: gen, err: errors.New("setup: no runner")}
 		}
 		ch := make(chan tea.Msg, len(steps)+1)
 		go func() {
-			conflicted, err := run(context.Background(), req, steps, func(i int, _ setup.Step) {
+			conflicted, err := run(ctx, req, steps, func(i int, _ setup.Step) {
 				select {
 				case ch <- progressMsg{gen: gen, i: i, ch: ch}:
 				default: // progress is advisory; never block the runner
@@ -187,13 +219,16 @@ func (m Model) updateRun(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, cmd, true
 
 	case identitySetMsg:
+		if msg.gen != m.run.gen || m.stage != StageIdentity {
+			return m, nil, true
+		}
 		m.run.settingIdentity = false
 		m.focus()
 		if msg.err != nil {
 			m.run.identityErr = "Couldn't save it: " + msg.err.Error()
 			return m, nil, true
 		}
-		m.run.gen++
+		// The run that follows keeps this attempt's context and gen.
 		m.run.steps, m.run.current, m.run.failed, m.run.runErr = nil, -1, -1, nil
 		m, cmd := m.plan()
 		return m, cmd, true
@@ -203,6 +238,7 @@ func (m Model) updateRun(msg tea.Msg) (Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		if msg.err != nil {
+			m.stopRun()
 			m.run.phase, m.run.runErr = phaseFailed, msg.err
 			return m, nil, true
 		}
@@ -219,6 +255,7 @@ func (m Model) updateRun(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if msg.gen != m.run.gen || m.stage != StageRun {
 			return m, nil, true
 		}
+		m.stopRun() // release the attempt's context
 		if msg.err != nil {
 			if errors.Is(msg.err, setup.ErrNoIdentity) {
 				return m.showIdentity(""), nil, true
@@ -317,7 +354,9 @@ func (m Model) identityKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 		m.run.settingIdentity, m.run.identityErr = true, ""
 		m.focus()
-		cmd := func() tea.Msg { return identitySetMsg{err: set(context.Background(), name, email)} }
+		m.run.gen++
+		gen, ctx := m.run.gen, m.newRunContext()
+		cmd := func() tea.Msg { return identitySetMsg{gen: gen, err: set(ctx, name, email)} }
 		return m, tea.Batch(cmd, m.spin())
 	}
 	return m.updateInput(msg)
