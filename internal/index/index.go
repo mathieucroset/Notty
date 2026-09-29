@@ -361,9 +361,9 @@ func HasTag(n *Note, tag string) bool {
 	return false
 }
 
-// OpenTasks returns every task across all notes, done ones included (the
+// AllTasks returns every task across all notes, open and done (the
 // Tasks view filters them), sorted by path then line.
-func (ix *Index) OpenTasks() []TaskRef {
+func (ix *Index) AllTasks() []TaskRef {
 	var out []TaskRef
 	for _, n := range ix.Notes() { // already sorted by path
 		for _, t := range n.Tasks { // already in line order

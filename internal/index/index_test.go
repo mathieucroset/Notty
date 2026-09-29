@@ -421,12 +421,12 @@ func TestNotesWithTag(t *testing.T) {
 	}
 }
 
-func TestOpenTasks(t *testing.T) {
+func TestAllTasks(t *testing.T) {
 	ix := New()
 	ix.UpdateContent("b.md", "# B\n- [ ] b1\ntext\n- [x] b2 @2026-10-01\n")
 	ix.UpdateContent("a.md", "# A\n- [ ] a1\n")
 	ix.UpdateContent("c.md", "# C\nno tasks\n")
-	got := ix.OpenTasks()
+	got := ix.AllTasks()
 	type row struct {
 		Path, Title, Text string
 		Line              int
@@ -442,7 +442,7 @@ func TestOpenTasks(t *testing.T) {
 		{"b.md", "B", "b2 @2026-10-01", 3, true},
 	}
 	if !reflect.DeepEqual(rows, want) {
-		t.Errorf("OpenTasks =\n%+v\nwant\n%+v", rows, want)
+		t.Errorf("AllTasks =\n%+v\nwant\n%+v", rows, want)
 	}
 	if got[2].Task.Due == nil {
 		t.Error("due date not parsed")
@@ -473,7 +473,7 @@ func TestConcurrentReadsDuringUpdate(t *testing.T) {
 				}
 				_ = ix.TagCounts()
 				_ = ix.NotesWithTag("t1")
-				_ = ix.OpenTasks()
+				_ = ix.AllTasks()
 				_, _ = ix.Get("d0/n0.md")
 				_ = ix.Len()
 				_ = ix.Problems()
