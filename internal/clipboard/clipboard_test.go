@@ -3,11 +3,18 @@ package clipboard
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
 
 var validPNG = append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, []byte("fake-image-data")...)
+
+// tempPNGName is the temp file name ReadImage uses on darwin/windows,
+// mirroring the pid-suffixed name clipboard.go builds so tests stay in
+// sync regardless of which process runs them.
+var tempPNGName = fmt.Sprintf("notty-clip-%d.png", os.Getpid())
 
 // runCall records one invocation of the fake Run function.
 type runCall struct {
@@ -245,9 +252,10 @@ func TestReadImage_Darwin_Success(t *testing.T) {
 		calls = append(calls, runCall{name: name, args: args})
 		return nil, nil
 	}
+	wantPath := "/faketmp/" + tempPNGName
 	c.ReadFile = func(path string) ([]byte, error) {
-		if path != "/faketmp/notty-clip.png" {
-			t.Fatalf("ReadFile called with %q, want /faketmp/notty-clip.png", path)
+		if path != wantPath {
+			t.Fatalf("ReadFile called with %q, want %q", path, wantPath)
 		}
 		return validPNG, nil
 	}
@@ -266,7 +274,7 @@ func TestReadImage_Darwin_Success(t *testing.T) {
 		t.Fatalf("unexpected osascript args: %v", calls[0].args)
 	}
 	script := calls[0].args[1]
-	wantScript := `write (the clipboard as «class PNGf») to (open for access POSIX file "/faketmp/notty-clip.png" with write permission)`
+	wantScript := `write (the clipboard as «class PNGf») to (open for access POSIX file "` + wantPath + `" with write permission)`
 	if script != wantScript {
 		t.Fatalf("osascript script = %q, want %q", script, wantScript)
 	}
@@ -324,9 +332,10 @@ func TestReadImage_Windows_Success(t *testing.T) {
 		calls = append(calls, runCall{name: name, args: args})
 		return nil, nil
 	}
+	wantPath := `/faketmp\` + tempPNGName
 	c.ReadFile = func(path string) ([]byte, error) {
-		if path != `/faketmp\notty-clip.png` {
-			t.Fatalf("ReadFile called with %q, want /faketmp\\notty-clip.png", path)
+		if path != wantPath {
+			t.Fatalf("ReadFile called with %q, want %q", path, wantPath)
 		}
 		return validPNG, nil
 	}
@@ -345,11 +354,25 @@ func TestReadImage_Windows_Success(t *testing.T) {
 		t.Fatalf("unexpected powershell args: %v", calls[0].args)
 	}
 	script := calls[0].args[2]
-	if !strings.Contains(script, `/faketmp\notty-clip.png`) {
+	if !strings.Contains(script, wantPath) {
 		t.Fatalf("powershell script = %q, want it to reference temp path", script)
 	}
 	if !strings.Contains(script, "System.Windows.Forms") || !strings.Contains(script, "ImageFormat]::Png") {
 		t.Fatalf("powershell script = %q, missing expected fragments", script)
+	}
+}
+
+// TestTempPNGPath_IncludesPID guards against a filename collision when two
+// notty processes race to read an image from the clipboard at once: each
+// process must round-trip through its own temp file.
+func TestTempPNGPath_IncludesPID(t *testing.T) {
+	var calls []runCall
+	c := fakeClipboard(&calls)
+	c.GOOS = "darwin"
+	got := c.tempPNGPath()
+	want := "/faketmp/" + fmt.Sprintf("notty-clip-%d.png", os.Getpid())
+	if got != want {
+		t.Fatalf("tempPNGPath() = %q, want %q", got, want)
 	}
 }
 

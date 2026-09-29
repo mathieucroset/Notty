@@ -230,7 +230,8 @@ func (c *Clipboard) tempPNGPath() string {
 		sep = "\\"
 	}
 	dir := strings.TrimRight(c.TempDir(), "/\\")
-	return dir + sep + "notty-clip.png"
+	name := fmt.Sprintf("notty-clip-%d.png", os.Getpid())
+	return dir + sep + name
 }
 
 // hasMIMEType reports whether out (newline-separated MIME types, as printed
