@@ -2,6 +2,7 @@ package tags
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,33 @@ func TestParse(t *testing.T) {
 				t.Errorf("Parse(%q) = %#v, want %#v", tt.content, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCodeSpanScanIsBounded(t *testing.T) {
+	// A code span whose closer lies beyond MaxScan bytes is not recognized,
+	// which keeps FindTags linear on huge lines.
+	long := "`" + strings.Repeat("a ", MaxScan) + "#x`"
+	if got := FindTags(long); len(got) != 1 {
+		t.Errorf("FindTags(long unclosed-within-bound span) = %v, want one tag", got)
+	}
+	short := "`" + strings.Repeat("a ", 10) + "#x`"
+	if got := FindTags(short); got != nil {
+		t.Errorf("FindTags(short span) = %v, want nil", got)
+	}
+}
+
+func BenchmarkFindTagsPathological(b *testing.B) {
+	// Backtick runs of increasing length never find a closer.
+	var sb strings.Builder
+	for n := 1; sb.Len() < 1<<20; n++ {
+		sb.WriteString(strings.Repeat("`", n%500+1))
+		sb.WriteString(" #t ")
+	}
+	line := sb.String()
+	b.ResetTimer()
+	for b.Loop() {
+		FindTags(line)
 	}
 }
 

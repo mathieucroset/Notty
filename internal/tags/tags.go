@@ -9,6 +9,7 @@
 package tags
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -136,10 +137,17 @@ func codeSpans(line string) [][2]int {
 	return out
 }
 
+// MaxScan bounds how far (in bytes) a parser searches forward for a closing
+// delimiter, such as the end of an inline code span. Constructs longer than
+// this are treated as literal text, which keeps per-line parsing linear on
+// pathological input.
+const MaxScan = 2000
+
 // findBacktickRun finds the start of the next backtick run of exactly n
-// backticks at or after from, or -1.
+// backticks in line[from:from+MaxScan], or -1.
 func findBacktickRun(line string, from, n int) int {
-	for j := from; j < len(line); {
+	limit := min(len(line), from+MaxScan)
+	for j := from; j < limit; {
 		if line[j] != '`' {
 			j++
 			continue
@@ -161,13 +169,10 @@ func runLen(s string, i int, c byte) int {
 	return n
 }
 
+// inRanges reports whether i lies in one of the sorted, disjoint ranges rs.
 func inRanges(rs [][2]int, i int) bool {
-	for _, r := range rs {
-		if i >= r[0] && i < r[1] {
-			return true
-		}
-	}
-	return false
+	k := sort.Search(len(rs), func(k int) bool { return rs[k][1] > i })
+	return k < len(rs) && rs[k][0] <= i
 }
 
 // FenceOpen reports whether line opens a fenced code block: up to three
