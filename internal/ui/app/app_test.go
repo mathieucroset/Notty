@@ -197,6 +197,25 @@ func TestSidebarHiddenWhenNarrowAndToggle(t *testing.T) {
 	}
 }
 
+func TestFocusNeverOnUndrawnSidebar(t *testing.T) {
+	m := start(t, testOptions(t), 40, 12)
+	if m.Focus() != FocusMain {
+		t.Fatalf("initial focus = %v, want FocusMain", m.Focus())
+	}
+	run(t, m, keyMsg("tab"))
+	if m.Focus() != FocusMain {
+		t.Errorf("tab at 40x12: focus = %v, want FocusMain", m.Focus())
+	}
+	run(t, m, keyMsg("ctrl+b")) // too narrow: the sidebar still cannot be drawn
+	run(t, m, msgs.FocusSidebarMsg{})
+	if m.Focus() != FocusMain {
+		t.Errorf("FocusSidebarMsg at 40x12: focus = %v, want FocusMain", m.Focus())
+	}
+	if strings.Contains(screen(m), "◆ Notty") {
+		t.Errorf("sidebar drawn at 40 columns:\n%s", screen(m))
+	}
+}
+
 func TestCycleNoteView(t *testing.T) {
 	m := start(t, testOptions(t), 120, 30)
 	want := []NoteView{ViewSplit, ViewPreview, ViewEditor}

@@ -119,8 +119,8 @@ func New(opts Options) *Model {
 // Focus returns the focused pane.
 func (m *Model) Focus() Focus { return m.focus }
 
-// SidebarVisible reports whether the sidebar is shown.
-func (m *Model) SidebarVisible() bool { return m.sidebarVisible }
+// SidebarVisible reports whether the sidebar is drawn.
+func (m *Model) SidebarVisible() bool { return m.sidebarShown() }
 
 // MainView returns what the main pane shows.
 func (m *Model) MainView() MainView { return m.mainView }
@@ -172,7 +172,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case msgs.FocusMainMsg:
 		m.setFocus(FocusMain)
 	case msgs.FocusSidebarMsg:
-		if !m.sidebarVisible {
+		if !m.sidebarShown() {
 			m.sidebarVisible, m.sidebarToggled = true, true
 			m.relayout()
 		}
@@ -219,8 +219,15 @@ func (m *Model) showNote(p, content string) tea.Cmd {
 	return saveLocalCmd(m.opts.Local, m.opts.LocalPath)
 }
 
+// sidebarShown reports whether the sidebar is actually drawn: it is
+// toggled on and the terminal is wide enough for it.
+func (m *Model) sidebarShown() bool {
+	return ComputeLayout(m.width, m.height, m.sidebarVisible).SidebarVisible
+}
+
+// setFocus moves focus, never onto a sidebar that is not drawn.
 func (m *Model) setFocus(f Focus) {
-	if f == FocusSidebar && !m.sidebarVisible {
+	if f == FocusSidebar && !m.sidebarShown() {
 		f = FocusMain
 	}
 	m.focus = f
