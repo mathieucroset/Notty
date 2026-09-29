@@ -22,6 +22,7 @@ import (
 	"github.com/mathieucroset/notty/internal/index"
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
+	"github.com/mathieucroset/notty/internal/recovery"
 	"github.com/mathieucroset/notty/internal/syncer"
 	"github.com/mathieucroset/notty/internal/ui/dialog"
 	"github.com/mathieucroset/notty/internal/ui/editor"
@@ -84,6 +85,9 @@ type Options struct {
 	// WizardEnv replaces the wizard's environment (tests); nil uses
 	// wizard.DefaultEnv.
 	WizardEnv *wizard.Env
+	// Snapshot is kept holding the open buffer, for main to save after a
+	// panic (spec §9); nil keeps none.
+	Snapshot *recovery.Snapshot
 }
 
 // Focus is the pane with keyboard focus.
@@ -247,6 +251,9 @@ type Model struct {
 	// wizard is the first-run wizard or the "Set up sync" wizard, full
 	// screen, or nil.
 	wizard *wizard.Model
+
+	// recorded is the buffer state last copied to Options.Snapshot.
+	recorded bufferMark
 }
 
 // New builds the root model.
@@ -345,6 +352,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(append([]tea.Cmd{cmd}, m.deferred...)...)
 		m.deferred = nil
 	}
+	m.recordBuffer()
 	return m, cmd
 }
 
