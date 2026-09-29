@@ -61,6 +61,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.pasteClipboardText(msg)
+	case toggleMsg:
+		return m.replayToggle(msg)
+	case insertTextMsg:
+		return m.InsertText(msg.text)
 	case AutosaveTickMsg:
 		return m, m.autosave(msg)
 	case flashEndMsg:
@@ -111,8 +115,8 @@ func (m Model) apply(run func() vim.Effect) (Model, tea.Cmd) {
 
 // ChangeCmd returns the Cmd to run after a buffer change: it emits
 // ChangedMsg and schedules the autosave tick for the current version. The
-// editor runs it itself after keys and pastes; the app runs it after
-// ApplyToggle and InsertText.
+// editor runs it itself after keys and pastes, and ApplyToggle and
+// InsertText return it.
 func (m Model) ChangeCmd() tea.Cmd {
 	p, v := m.path, m.buf.Version()
 	delay := time.Duration(m.opts.AutosaveMS) * time.Millisecond

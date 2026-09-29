@@ -56,55 +56,97 @@ func (m Model) Unlock(replay bool) (Model, tea.Cmd, int) {
 	return m, tea.Batch(cmds...), dropped
 }
 
+// toggleMsg and insertTextMsg are ApplyToggle and InsertText calls queued
+// during the merge lock and replayed by Unlock.
+type toggleMsg struct {
+	line int
+	text string
+}
+
+type insertTextMsg struct{ text string }
+
 // ApplyToggle toggles the task identified by (line, lineText) from outside
 // the editor (spec §5 "Toggling a task from outside the editor"): if the
-// line number drifted the task is found by its text. The toggle is one undo
-// step. It reports false when the task is not found or the note is
-// read-only; the app then shows a warning toast. The app runs ChangeCmd
-// afterwards so the change is autosaved.
-func (m Model) ApplyToggle(line int, lineText string) (Model, bool) {
+// line number drifted the task is found by its text. The toggle is its own
+// undo step and the returned Cmd reports the change and schedules autosave.
+// It reports false when the task is not found or the note is read-only; the
+// app then shows a warning toast. While locked the toggle is queued (and
+// reported as done); if it fails on replay, the editor emits the toast.
+func (m Model) ApplyToggle(line int, lineText string) (Model, tea.Cmd, bool) {
 	if m.readOnly {
-		return m, false
+		return m, nil, false
+	}
+	if m.locked {
+		m.queue = append(m.queue, toggleMsg{line: line, text: lineText})
+		return m, nil, true
 	}
 	lines := m.aux.linesOf(m.buf)
 	i, ok := tasks.FindLine(lines, line, lineText)
 	if !ok {
-		return m, false
+		return m, nil, false
 	}
-	cur := m.buf.Cursor()
-	m.buf.BeginGroupAt(cur)
-	m.buf.Replace(buffer.Range{Start: buffer.Pos{Line: i}, End: buffer.Pos{Line: i, Col: m.buf.LineLen(i)}}, tasks.ToggleLine(lines[i]))
-	m.buf.EndGroup()
-	m.buf.SetCursor(cur)
-	m.syncStyle()
-	return m.ensureVisible(), true
+	before, cur := m.buf.Version(), m.buf.Cursor()
+	m.ed.Resync(m.buf, func() {
+		m.buf.BeginGroupAt(cur)
+		m.buf.Replace(buffer.Range{Start: buffer.Pos{Line: i}, End: buffer.Pos{Line: i, Col: m.buf.LineLen(i)}}, tasks.ToggleLine(lines[i]))
+		m.buf.EndGroup()
+		m.buf.SetCursor(cur)
+	})
+	m, cmd := m.afterExternal(before)
+	return m, cmd, true
 }
 
 // InsertText inserts text on its own line at the cursor (used by the app
 // after an image import to insert "![](/attachments/...)"): it replaces the
 // cursor line when that line is blank, otherwise it goes on a new line
-// below. The insertion is one undo step. The app runs ChangeCmd afterwards.
-func (m Model) InsertText(text string) Model {
+// below. The insertion is its own undo step and the returned Cmd reports
+// the change and schedules autosave. While locked it is queued.
+func (m Model) InsertText(text string) (Model, tea.Cmd) {
 	if m.readOnly || text == "" {
-		return m
+		return m, nil
 	}
-	cur := m.buf.Cursor()
-	m.buf.BeginGroupAt(cur)
-	var end buffer.Pos
-	if isBlank(m.buf.Line(cur.Line)) {
-		end = m.buf.Replace(buffer.Range{Start: buffer.Pos{Line: cur.Line}, End: buffer.Pos{Line: cur.Line, Col: m.buf.LineLen(cur.Line)}}, text)
-	} else {
-		end = m.buf.Insert(buffer.Pos{Line: cur.Line, Col: m.buf.LineLen(cur.Line)}, "\n"+text)
+	if m.locked {
+		m.queue = append(m.queue, insertTextMsg{text: text})
+		return m, nil
 	}
-	m.buf.EndGroup()
-	if m.typing() {
-		m.buf.SetCursor(end)
-	} else {
-		m.buf.SetCursor(buffer.Pos{Line: end.Line})
-	}
+	before, cur := m.buf.Version(), m.buf.Cursor()
+	typing := m.typing()
+	m.ed.Resync(m.buf, func() {
+		m.buf.BeginGroupAt(cur)
+		var end buffer.Pos
+		if isBlank(m.buf.Line(cur.Line)) {
+			end = m.buf.Replace(buffer.Range{Start: buffer.Pos{Line: cur.Line}, End: buffer.Pos{Line: cur.Line, Col: m.buf.LineLen(cur.Line)}}, text)
+		} else {
+			end = m.buf.Insert(buffer.Pos{Line: cur.Line, Col: m.buf.LineLen(cur.Line)}, "\n"+text)
+		}
+		m.buf.EndGroup()
+		if typing {
+			m.buf.SetCursor(end)
+		} else {
+			m.buf.SetCursor(buffer.Pos{Line: end.Line})
+		}
+	})
 	m.aux.forgetMissing()
-	m.syncStyle()
-	return m.ensureVisible()
+	return m.afterExternal(before)
+}
+
+// afterExternal restyles and reports a change made outside the engine.
+func (m Model) afterExternal(before uint64) (Model, tea.Cmd) {
+	var cmd tea.Cmd
+	if m.buf.Version() != before {
+		m.syncStyle()
+		cmd = m.ChangeCmd()
+	}
+	return m.ensureVisible(), cmd
+}
+
+// replayToggle applies a toggle queued during the lock.
+func (m Model) replayToggle(msg toggleMsg) (Model, tea.Cmd) {
+	m, cmd, ok := m.ApplyToggle(msg.line, msg.text)
+	if !ok {
+		return m, emit(msgs.ToastMsg{Level: msgs.ToastWarn, Text: "Task not found: " + msg.text})
+	}
+	return m, cmd
 }
 
 // typing reports whether the engine is in a text-entry mode (insert mode or

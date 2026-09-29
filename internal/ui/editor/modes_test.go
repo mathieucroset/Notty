@@ -186,12 +186,22 @@ func TestApplyToggle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newModel(t, testOptions(t), doc, buffer.Pos{Line: 1, Col: 3}, 40, 5)
-			m, ok := m.ApplyToggle(tt.line, tt.text)
+			m, cmd, ok := m.ApplyToggle(tt.line, tt.text)
 			if ok != tt.ok || m.Content() != tt.want {
 				t.Fatalf("ApplyToggle = %v, %q; want %v, %q", ok, m.Content(), tt.ok, tt.want)
 			}
 			if !ok {
+				if cmd != nil {
+					t.Error("failed toggle returned a Cmd")
+				}
 				return
+			}
+			out := collect(cmd)
+			if _, ok := find[ChangedMsg](out); !ok {
+				t.Error("toggle does not report the change")
+			}
+			if tick, ok := find[AutosaveTickMsg](out); !ok || tick.Version != m.Version() {
+				t.Error("toggle does not schedule autosave")
 			}
 			if m.Cursor() != (buffer.Pos{Line: 1, Col: 3}) {
 				t.Errorf("cursor moved to %+v", m.Cursor())
@@ -206,7 +216,7 @@ func TestApplyToggle(t *testing.T) {
 		})
 	}
 	ro := newModel(t, testOptions(t), doc, buffer.Pos{}, 40, 5).SetReadOnly(true, "")
-	if _, ok := ro.ApplyToggle(1, "- [ ] one"); ok {
+	if _, _, ok := ro.ApplyToggle(1, "- [ ] one"); ok {
 		t.Error("toggle applied to a read-only note")
 	}
 }
@@ -225,7 +235,10 @@ func TestInsertText(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newModel(t, testOptions(t), tt.doc, tt.cur, 40, 5)
-			m = m.InsertText("![](/attachments/x.png)")
+			m, cmd := m.InsertText("![](/attachments/x.png)")
+			if _, ok := find[ChangedMsg](collect(cmd)); !ok {
+				t.Error("InsertText does not report the change")
+			}
 			if m.Content() != tt.want || m.CursorLine() != tt.line {
 				t.Errorf("got %q line %d, want %q line %d", m.Content(), m.CursorLine(), tt.want, tt.line)
 			}
@@ -304,5 +317,48 @@ func TestLoadClearsQueue(t *testing.T) {
 	m, _, dropped := m.Unlock(true)
 	if dropped != 0 || m.Content() != "other" {
 		t.Errorf("keys queued for the old note reached the new one: %q (dropped %d)", m.Content(), dropped)
+	}
+}
+
+func TestExternalEditsAreOwnUndoStep(t *testing.T) {
+	m := newModel(t, testOptions(t), "- [ ] task\nnote", buffer.Pos{Line: 1, Col: 4}, 40, 5)
+	m, _ = typeKeys(m, "a", "1")
+	m, _, ok := m.ApplyToggle(0, "- [ ] task")
+	if !ok || m.ModeName() != "INSERT" {
+		t.Fatalf("toggle ok=%v mode=%s", ok, m.ModeName())
+	}
+	m, _ = m.InsertText("![](/a.png)")
+	m, _ = typeKeys(m, "2", "esc")
+	steps := []string{
+		"- [x] task\nnote1\n![](/a.png)",
+		"- [x] task\nnote1",
+		"- [ ] task\nnote1",
+		"- [ ] task\nnote",
+	}
+	for _, want := range steps {
+		m, _ = typeKeys(m, "u")
+		if m.Content() != want {
+			t.Fatalf("undo gives %q, want %q", m.Content(), want)
+		}
+	}
+}
+
+func TestExternalEditsQueuedWhileLocked(t *testing.T) {
+	m := newModel(t, testOptions(t), "- [ ] a\n", buffer.Pos{Line: 1}, 40, 5).Lock()
+	m, cmd, ok := m.ApplyToggle(0, "- [ ] a")
+	if !ok || cmd != nil || m.Content() != "- [ ] a\n" {
+		t.Fatalf("locked toggle applied: ok=%v %q", ok, m.Content())
+	}
+	m, _ = m.InsertText("![](/a.png)")
+	m, _, _ = m.ApplyToggle(0, "- [ ] missing")
+	if m.Content() != "- [ ] a\n" {
+		t.Fatalf("locked insert applied: %q", m.Content())
+	}
+	m, cmd, dropped := m.Unlock(true)
+	if dropped != 0 || m.Content() != "- [x] a\n![](/a.png)\n" {
+		t.Errorf("replay: %q dropped %d", m.Content(), dropped)
+	}
+	if toast, ok := find[msgs.ToastMsg](collect(cmd)); !ok || !strings.Contains(toast.Text, "missing") {
+		t.Error("failed replayed toggle does not toast")
 	}
 }
