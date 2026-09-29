@@ -29,7 +29,7 @@ func TestRunRedrawsOnSIGWINCH(t *testing.T) {
 	dir := t.TempDir()
 	a := writePNG(t, dir, "a.png", 40, 20)
 	inR, inW := io.Pipe()
-	defer inR.Close()
+	defer func() { _ = inR.Close() }()
 	v, out := newTestViewer([]string{a}, imgrender.ProtoHalfBlocks, inR)
 	widths := make(chan int)
 	v.Size = func() (int, int, error) { return <-widths, 24, nil }
@@ -50,7 +50,7 @@ func TestRunRedrawsOnSIGWINCH(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	inW.Close()
+	_ = inW.Close()
 	s := out.String()
 	assertOrder(t, s, "\x1b[24;1H\x1b[7ma.png", "\x1b[24;1H\x1b[7ma.png", altLeave)
 	if !strings.Contains(s, padRight("a.png  40x20  1/1    "+hints, 39)+"\x1b[0m") {

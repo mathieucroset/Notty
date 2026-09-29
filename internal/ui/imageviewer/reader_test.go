@@ -23,8 +23,8 @@ func nextBatch(t *testing.T, k *keyReader, within time.Duration) []Key {
 
 func TestKeyReaderLoneEscWaits(t *testing.T) {
 	r, w := io.Pipe()
-	defer r.Close()
-	defer w.Close()
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
 	const wait = 40 * time.Millisecond
 	k := startKeyReader(r, wait)
 	defer k.stop()
@@ -43,8 +43,8 @@ func TestKeyReaderLoneEscWaits(t *testing.T) {
 
 func TestKeyReaderJoinsSplitSequence(t *testing.T) {
 	r, w := io.Pipe()
-	defer r.Close()
-	defer w.Close()
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
 	k := startKeyReader(r, 5*time.Second)
 	defer k.stop()
 	go func() {

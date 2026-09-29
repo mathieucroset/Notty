@@ -354,7 +354,7 @@ func TestRunResizeRedraws(t *testing.T) {
 	dir := t.TempDir()
 	a := writePNG(t, dir, "a.png", 40, 20)
 	inR, inW := io.Pipe()
-	defer inR.Close()
+	defer func() { _ = inR.Close() }()
 	v, out := newTestViewer([]string{a}, imgrender.ProtoHalfBlocks, inR)
 	resize := make(chan struct{})
 	stopped := make(chan struct{})
@@ -374,7 +374,7 @@ func TestRunResizeRedraws(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	inW.Close()
+	_ = inW.Close()
 	select {
 	case <-stopped:
 	default:
@@ -398,8 +398,8 @@ func TestRunOSPipeLeavesLaterInputUnread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
-	defer w.Close()
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
 	v, _ := newTestViewer([]string{a}, imgrender.ProtoHalfBlocks, r)
 	if _, err := w.Write([]byte("q")); err != nil {
 		t.Fatal(err)
@@ -427,8 +427,8 @@ func TestKeyReaderStopEndsGoroutine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
-	defer w.Close()
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
 	k := startKeyReader(r, 0)
 	if _, err := w.Write([]byte("n")); err != nil {
 		t.Fatal(err)
