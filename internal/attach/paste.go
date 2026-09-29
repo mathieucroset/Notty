@@ -11,12 +11,13 @@ import (
 
 // ParsePastedPath extracts a usable image file path from a bracketed paste
 // (spec §6.2 "Pasted path"). It trims surrounding whitespace, strips
-// surrounding single or double quotes, strips a "file://" prefix and
-// URL-decodes what follows, unescapes backslash-escaped characters (shell
-// escaping such as "\ " -> " " and "\(" -> "(") on non-Windows platforms,
-// and expands a leading "~/" to the user's home directory. It reports
-// ok=false unless the result is a single line, has a supported image
-// extension (case-insensitive), and exists(path) is true.
+// surrounding single or double quotes, strips a "file://" prefix (including
+// any authority such as "localhost" before the path) and URL-decodes what
+// follows, unescapes backslash-escaped characters (shell escaping such as
+// "\ " -> " " and "\(" -> "(") on non-Windows platforms, and expands a
+// leading "~/" to the user's home directory. It reports ok=false unless the
+// result is a single line, has a supported image extension
+// (case-insensitive), and exists(path) is true.
 func ParsePastedPath(paste string, exists func(string) bool) (string, bool) {
 	return parsePastedPath(paste, exists, runtime.GOOS)
 }
@@ -34,6 +35,7 @@ func parsePastedPath(paste string, exists func(string) bool, goos string) (strin
 	s = stripQuotes(s)
 
 	if rest, ok := strings.CutPrefix(s, "file://"); ok {
+		rest = stripFileURLAuthority(rest, goos)
 		if decoded, err := url.PathUnescape(rest); err == nil {
 			s = decoded
 		} else {
@@ -61,6 +63,37 @@ func parsePastedPath(paste string, exists func(string) bool, goos string) (strin
 		return "", false
 	}
 	return s, true
+}
+
+// stripFileURLAuthority removes a "file://" URL's authority component (the
+// part between the scheme and the next "/", such as "localhost" in
+// "file://localhost/Users/me/pic.png"), leaving a path that starts with
+// "/". rest is what remains of the URL after the "file://" prefix itself
+// has already been removed, so "file://localhost/Users/me/pic.png" ->
+// "/Users/me/pic.png" and a URL with no authority
+// ("file:///Users/me/pic.png" -> rest "/Users/me/pic.png") is left as is.
+// On "windows", a resulting "/C:/..." drive path additionally has its
+// leading "/" stripped, so "file:///C:/x.png" becomes "C:/x.png" rather
+// than "/C:/x.png".
+func stripFileURLAuthority(rest, goos string) string {
+	if !strings.HasPrefix(rest, "/") {
+		if i := strings.IndexByte(rest, '/'); i >= 0 {
+			rest = rest[i:]
+		} else {
+			rest = "/" + rest
+		}
+	}
+	if goos == "windows" && len(rest) >= 4 && isDriveLetter(rest[1]) && rest[2] == ':' &&
+		(rest[3] == '/' || rest[3] == '\\') {
+		rest = rest[1:]
+	}
+	return rest
+}
+
+// isDriveLetter reports whether b is an ASCII letter, as used in a Windows
+// drive letter such as "C:".
+func isDriveLetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // stripQuotes removes a single matching pair of surrounding single or
