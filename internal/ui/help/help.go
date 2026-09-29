@@ -43,11 +43,11 @@ func New(styles theme.Styles) Model {
 }
 
 // SetSize sizes the overlay for a termW x termH terminal: about 90% wide and
-// 85% tall.
+// 85% tall, but never wider or taller than the terminal itself.
 func (m Model) SetSize(termW, termH int) Model {
 	m.termWidth = termW
-	m.width = max(termW*widthPct/100, 20)
-	m.height = max(termH*heightPct/100, 5)
+	m.width = clampInt(termW*widthPct/100, 1, max(termW, 1))
+	m.height = clampInt(termH*heightPct/100, 1, max(termH, 1))
 	m.content = m.renderContent()
 	m.offset = clampInt(m.offset, 0, m.maxOffset())
 	return m
@@ -111,7 +111,7 @@ func (m Model) oneColumn(width int) []string {
 }
 
 func (m Model) twoColumn(width int) []string {
-	colWidth := max((width-1)/2, 10)
+	colWidth := max((width-1)/2, 1)
 
 	formatted := make([][]string, len(m.sections))
 	total := 0
@@ -176,8 +176,8 @@ func formatSection(sec Section, styles theme.Styles, width int) []string {
 // border and padding.
 func (m Model) innerWidth() int {
 	w := m.width - 2 - 4 // border (2) + horizontal padding (2x2)
-	if w < 10 {
-		w = 10
+	if w < 1 {
+		w = 1
 	}
 	return w
 }

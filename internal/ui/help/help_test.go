@@ -120,6 +120,20 @@ func TestSetSizeSizesRelativeToTerminal(t *testing.T) {
 	}
 }
 
+func TestSetSizeNeverExceedsTinyTerminal(t *testing.T) {
+	for _, tc := range []struct{ w, h int }{{20, 4}, {10, 3}} {
+		m := New(testStyles(t)).SetSize(tc.w, tc.h)
+		if m.width > tc.w {
+			t.Errorf("SetSize(%d,%d): width = %d, exceeds terminal width %d", tc.w, tc.h, m.width, tc.w)
+		}
+		if m.height > tc.h {
+			t.Errorf("SetSize(%d,%d): height = %d, exceeds terminal height %d", tc.w, tc.h, m.height, tc.h)
+		}
+		// Rendering at this size must not panic.
+		_ = m.View()
+	}
+}
+
 func TestViewFitsWithinSize(t *testing.T) {
 	m := New(testStyles(t)).SetSize(120, 40)
 	view := m.View()
