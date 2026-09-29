@@ -2,6 +2,7 @@ package preview
 
 import (
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"os"
 	"path"
@@ -219,7 +220,7 @@ func (j renderJob) glamour(tr *glamour.TermRenderer, md string) []string {
 	j.sh.glamourCalls.Add(1)
 	var lines []string
 	if tr != nil {
-		if out, err := tr.Render(md); err == nil {
+		if out, err := safeRender(tr, md); err == nil {
 			lines = strings.Split(out, "\n")
 		}
 	}
@@ -234,6 +235,23 @@ func (j renderJob) glamour(tr *glamour.TermRenderer, md string) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
+}
+
+// renderMarkdown is the Glamour call, replaceable in tests.
+var renderMarkdown = func(tr *glamour.TermRenderer, md string) (string, error) {
+	return tr.Render(md)
+}
+
+// safeRender runs renderMarkdown and turns a panic (a Glamour or goldmark
+// bug on odd input) into an error, so one segment falls back to its raw
+// lines instead of crashing the program from a worker goroutine.
+func safeRender(tr *glamour.TermRenderer, md string) (out string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("glamour panicked: %v", r)
+		}
+	}()
+	return renderMarkdown(tr, md)
 }
 
 // image resolves, decodes (through the cache) and renders one image link.

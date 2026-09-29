@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mathieucroset/notty/internal/imgrender"
@@ -130,6 +131,23 @@ func TestRenderShowsGlamourText(t *testing.T) {
 	}
 	if strings.Contains(v, "**") {
 		t.Fatalf("markdown not rendered:\n%s", v)
+	}
+}
+
+func TestGlamourPanicFallsBackToRawLines(t *testing.T) {
+	orig := renderMarkdown
+	t.Cleanup(func() { renderMarkdown = orig })
+	renderMarkdown = func(tr *glamour.TermRenderer, md string) (string, error) {
+		if strings.Contains(md, "boom") {
+			panic("bad input")
+		}
+		return orig(tr, md)
+	}
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	m, _ = setContent(t, m, "n.md", "# Fine\n\nboom **raw**")
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "Fine") || !strings.Contains(v, "boom **raw**") {
+		t.Fatalf("view:\n%s", v)
 	}
 }
 
