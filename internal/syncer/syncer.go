@@ -55,6 +55,11 @@ type repoAPI interface {
 	DiffNameStatus(from, to string) ([]gitsync.Change, error)
 	ConflictedFiles() ([]gitsync.Conflict, error)
 	CommitMerge(msg string) error
+	PathConflicts() ([]gitsync.PathConflict, []gitsync.Conflict, error)
+	ShowBlob(id string) ([]byte, error)
+	Add(paths ...string) error
+	Remove(paths ...string) error
+	trashRepo
 }
 
 const (
@@ -198,8 +203,12 @@ func (s *Syncer) SyncNow() {
 // merge is still in progress with conflicts left, it stays in Conflict.
 func (s *Syncer) ConflictResolved() {
 	s.enqueue(job{fn: func() {
-		if s.repo.MergeInProgress() && !s.concludeMerge() {
-			return
+		if s.repo.MergeInProgress() {
+			if !s.concludeMerge() {
+				return
+			}
+		} else {
+			s.emitTrashWarnings()
 		}
 		s.mu.Lock()
 		s.status = Status{State: Idle}
@@ -483,7 +492,21 @@ func (s *Syncer) concludeMerge() bool {
 		s.fail(fmt.Errorf("syncer: %w", err))
 		return false
 	}
+	s.emitTrashWarnings()
 	return true
+}
+
+// emitTrashWarnings checks the merge commit at HEAD (made on top of
+// ORIG_HEAD after a conflict) for notes trashed remotely but edited here.
+func (s *Syncer) emitTrashWarnings() {
+	if revID(s.repo, "HEAD^2") == "" || revID(s.repo, "HEAD^1") != revID(s.repo, "ORIG_HEAD") {
+		return
+	}
+	ws, err := detectTrashWarnings(s.repo, s.dir, "ORIG_HEAD", s.hostname)
+	if err != nil || len(ws) == 0 {
+		return
+	}
+	s.emit(Update{Status: s.Status(), TrashWarnings: ws})
 }
 
 // conflictedPaths lists the unmerged paths, sorted.
@@ -624,10 +647,7 @@ func (s *Syncer) needsPush() bool {
 	return !s.repo.HasUpstream() && s.headExists()
 }
 
-func (s *Syncer) headExists() bool {
-	_, err := s.repo.MergeBase("HEAD", "HEAD")
-	return err == nil
-}
+func (s *Syncer) headExists() bool { return revID(s.repo, "HEAD") != "" }
 
 // mergeSection is the locked merge section of spec §7. It reports whether
 // the merge stopped with conflicts (the syncer is then in Conflict).
@@ -666,6 +686,9 @@ func (s *Syncer) mergeSection() (conflicted bool, err error) {
 	}
 	var paths []string
 	if stopped {
+		if err := s.autoResolve(); err != nil {
+			return false, err
+		}
 		if paths, err = s.conflictedPaths(); err != nil {
 			return false, err
 		}
@@ -685,6 +708,8 @@ func (s *Syncer) mergeSection() (conflicted bool, err error) {
 			return false, fmt.Errorf("syncer: merge: %w", err)
 		}
 	}
+	// Warnings are best effort: a failed check must not fail the sync.
+	u.TrashWarnings, _ = detectTrashWarnings(s.repo, s.dir, "ORIG_HEAD", s.hostname)
 	u.Status = s.Status()
 	s.emit(u)
 	return false, nil
