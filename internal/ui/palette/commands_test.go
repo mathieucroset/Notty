@@ -130,6 +130,56 @@ func TestDefaultCommandsHelpAndQuitKeysMatchGlobalKeys(t *testing.T) {
 	}
 }
 
+// TestDefaultCommandsDeriveKeysFromKeyTables asserts that the Key shown for
+// each spec §8 command that mirrors a sidebar action is derived from
+// keys.Bindings(keys.Sidebar) by matching its help description, not
+// hardcoded, and is rendered with a dim "key · context" label. It
+// independently re-derives the expected key from the same key table (rather
+// than calling the production keyFor helper) so a stale hardcoded string in
+// DefaultCommands, or a description that no longer matches, both fail this
+// test.
+func TestDefaultCommandsDeriveKeysFromKeyTables(t *testing.T) {
+	findKey := func(t *testing.T, ctx keys.Context, desc string) string {
+		t.Helper()
+		for _, b := range keys.Bindings(ctx) {
+			if b.Help().Desc == desc {
+				return b.Help().Key
+			}
+		}
+		t.Fatalf("no binding in %s with description %q", ctx, desc)
+		return ""
+	}
+
+	cmds := DefaultCommands()
+	byID := make(map[string]Command, len(cmds))
+	for _, c := range cmds {
+		byID[c.ID] = c
+	}
+
+	cases := []struct {
+		id   string
+		desc string
+	}{
+		{"new-note", "new note"},
+		{"new-folder", "new folder"},
+		{"resolve-conflicts", "open resolver"},
+		{"error-log", "error log"},
+	}
+	for _, tc := range cases {
+		want := findKey(t, keys.Sidebar, tc.desc) + " · sidebar"
+		if got := byID[tc.id].Key; got != want {
+			t.Errorf("%s: Key = %q, want %q", tc.id, got, want)
+		}
+	}
+
+	if got := byID["tasks"].Key; got != "" {
+		t.Errorf("tasks: Key = %q, want empty (no dedicated keybinding)", got)
+	}
+	if got := byID["trash"].Key; got != "" {
+		t.Errorf("trash: Key = %q, want empty (no dedicated keybinding)", got)
+	}
+}
+
 func toLower(s string) string {
 	b := []byte(s)
 	for i, c := range b {

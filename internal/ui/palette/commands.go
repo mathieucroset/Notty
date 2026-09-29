@@ -4,6 +4,8 @@
 package palette
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/mathieucroset/notty/internal/ui/keys"
@@ -49,9 +51,23 @@ type CleanAttachmentsMsg struct{}
 // OpenConfigMsg asks the app to open config.toml in $EDITOR.
 type OpenConfigMsg struct{}
 
-// helpKey returns the display key for a global action, e.g. "F1".
-func helpKey(a keys.Action) string {
+// globalKey returns the display key for a global action, e.g. "F1".
+func globalKey(a keys.Action) string {
 	return keys.GlobalKeys[a].Help().Key
+}
+
+// keyFor looks up the binding in ctx whose help description is desc, and
+// formats it for display as "key · context" (e.g. "n · sidebar"). It
+// derives the key from the real key tables instead of hardcoding it, so the
+// palette can never show a keybinding that has drifted from ctx's actual
+// bindings. It returns "" if no such binding exists.
+func keyFor(ctx keys.Context, desc string) string {
+	for _, b := range keys.Bindings(ctx) {
+		if h := b.Help(); h.Desc == desc {
+			return h.Key + " · " + strings.ToLower(ctx.String())
+		}
+	}
+	return ""
 }
 
 // DefaultCommands returns the command palette's command list (spec §8), in
@@ -61,11 +77,13 @@ func DefaultCommands() []Command {
 		{
 			ID:   "new-note",
 			Name: "New note",
+			Key:  keyFor(keys.Sidebar, "new note"),
 			Msg:  func() tea.Msg { return msgs.RequestNewNote{} },
 		},
 		{
 			ID:   "new-folder",
 			Name: "New folder",
+			Key:  keyFor(keys.Sidebar, "new folder"),
 			Msg:  func() tea.Msg { return msgs.RequestNewFolder{} },
 		},
 		{
@@ -97,6 +115,7 @@ func DefaultCommands() []Command {
 		{
 			ID:   "resolve-conflicts",
 			Name: "Resolve conflicts",
+			Key:  keyFor(keys.Sidebar, "open resolver"),
 			Msg:  func() tea.Msg { return msgs.OpenResolverMsg{} },
 		},
 		{
@@ -117,6 +136,7 @@ func DefaultCommands() []Command {
 		{
 			ID:   "error-log",
 			Name: "Error log",
+			Key:  keyFor(keys.Sidebar, "error log"),
 			Msg:  func() tea.Msg { return msgs.OpenErrorLogMsg{} },
 		},
 		{
@@ -127,13 +147,13 @@ func DefaultCommands() []Command {
 		{
 			ID:   "help",
 			Name: "Help",
-			Key:  helpKey(keys.Help),
+			Key:  globalKey(keys.Help),
 			Msg:  func() tea.Msg { return msgs.OpenHelpMsg{} },
 		},
 		{
 			ID:   "quit",
 			Name: "Quit",
-			Key:  helpKey(keys.Quit),
+			Key:  globalKey(keys.Quit),
 			Msg:  func() tea.Msg { return msgs.QuitMsg{} },
 		},
 	}
