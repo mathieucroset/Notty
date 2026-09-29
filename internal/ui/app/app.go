@@ -3,6 +3,7 @@
 package app
 
 import (
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -194,7 +195,23 @@ func (m *Model) Init() tea.Cmd {
 	}
 	m.indexing = true
 	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault), m.startupTrashCmd(),
-		listenWatcherCmd(m.opts.Watcher))
+		listenWatcherCmd(m.opts.Watcher), m.reopenLastNoteCmd())
+}
+
+// reopenLastNoteCmd reopens the note open when the app last quit, at its
+// saved cursor, if it still exists.
+func (m *Model) reopenLastNoteCmd() tea.Cmd {
+	last := m.opts.Local.LastNote
+	if last == "" {
+		return nil
+	}
+	abs := m.opts.Vault.Abs(last)
+	return func() tea.Msg {
+		if info, err := os.Stat(abs); err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		return msgs.OpenNoteMsg{Path: last, Line: -1}
+	}
 }
 
 // Update handles a message.

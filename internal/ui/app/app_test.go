@@ -401,6 +401,25 @@ func TestOpenNote(t *testing.T) {
 	}
 }
 
+func TestLastNoteReopenedOnStart(t *testing.T) {
+	opts := testOptions(t)
+	opts.Local.LastNote = "ideas.md"
+	m := start(t, opts, 120, 30)
+	if m.NotePath() != "ideas.md" {
+		t.Errorf("NotePath = %q, want the last note reopened", m.NotePath())
+	}
+
+	opts = testOptions(t)
+	opts.Local.LastNote = "gone.md"
+	m = start(t, opts, 120, 30)
+	if m.NotePath() != "" {
+		t.Errorf("NotePath = %q, want nothing for a missing last note", m.NotePath())
+	}
+	if len(m.toast.Log()) != 0 {
+		t.Errorf("toasts = %v, want none for a missing last note", toastTexts(m))
+	}
+}
+
 func TestOpenNoteFromSidebar(t *testing.T) {
 	m := start(t, testOptions(t), 120, 30)
 	// Rows: Work, ideas.md. Move to ideas and press enter.
