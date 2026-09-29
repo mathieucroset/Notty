@@ -98,3 +98,33 @@ func TestPaste(t *testing.T) {
 		}
 	})
 }
+
+func TestSanitize(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"a\r\nb", "a\nb"},
+		{"one\rtwo\rthree", "one\ntwo\nthree"},
+		{"esc\x1b[2Jseq", "esc[2Jseq"},
+		{"osc\x1b]52;c;aGk=\x07end", "osc]52;c;aGk=end"},
+		{"bs\x08\x00del\x7f", "bsdel"},
+		{"tab\tkept\nnl", "tab\tkept\nnl"},
+		{"日本語 😀", "日本語 😀"},
+	}
+	for _, tt := range tests {
+		if got := sanitize(tt.in); got != tt.want {
+			t.Errorf("sanitize(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestPasteIsSanitized(t *testing.T) {
+	m := newModel(t, testOptions(t), "", buffer.Pos{}, 40, 5)
+	m, _ = typeKeys(m, "i")
+	m, _ = m.Update(tea.PasteMsg{Content: "one\rtwo\x1b[2J"})
+	if got := m.Content(); got != "one\ntwo[2J" {
+		t.Errorf("paste content = %q", got)
+	}
+	m, _ = m.Update(clipboardTextMsg{path: m.Path(), text: "\r\nx\x07"})
+	if got := m.Content(); got != "one\ntwo[2J\nx" {
+		t.Errorf("clipboard content = %q", got)
+	}
+}

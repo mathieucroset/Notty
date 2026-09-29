@@ -2,6 +2,7 @@ package editor
 
 import (
 	"os"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -27,11 +28,30 @@ func (m Model) handlePaste(msg tea.PasteMsg) (Model, tea.Cmd) {
 	if msg.Content == "" {
 		return m, m.readClipboardCmd(false)
 	}
-	if p, ok := attach.ParsePastedPath(msg.Content, fileExists); ok {
+	text := sanitize(msg.Content)
+	if text == "" {
+		return m, nil
+	}
+	if p, ok := attach.ParsePastedPath(text, fileExists); ok {
 		return m, emit(msgs.ImportImageMsg{Path: p})
 	}
 	return m.apply(func() vim.Effect {
-		m.ed.PasteClipboard(m.buf, msg.Content, false)
+		m.ed.PasteClipboard(m.buf, text, false)
 		return vim.Effect{}
 	})
+}
+
+// sanitize prepares pasted or clipboard text for the buffer: CRLF and lone
+// CR become LF, and control characters other than tab and newline (escape
+// sequences, backspaces, NUL...) are dropped so they never reach the
+// terminal.
+func sanitize(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	return strings.Map(func(r rune) rune {
+		if (r < 0x20 && r != '\t' && r != '\n') || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }

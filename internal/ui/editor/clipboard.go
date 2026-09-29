@@ -71,7 +71,7 @@ func (m Model) pasteClipboardText(msg clipboardTextMsg) (Model, tea.Cmd) {
 		return m.flash()
 	}
 	return m.apply(func() vim.Effect {
-		m.ed.PasteClipboard(m.buf, msg.text, msg.before)
+		m.ed.PasteClipboard(m.buf, sanitize(msg.text), msg.before)
 		return vim.Effect{}
 	})
 }
