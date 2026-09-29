@@ -85,7 +85,12 @@ type Model struct {
 	searching bool
 	cancel    context.CancelFunc
 
-	previewCache map[previewKey][]string
+	// Preview state: rendering happens off the View path (see preview.go).
+	// previewCurrentKey is the excerpt the current selection wants; the
+	// actual rendered lines, once ready, live in previewCache.
+	previewCache      *lruCache
+	previewCurrentKey previewKey
+	previewSeq        int
 }
 
 // New returns a finder overlay for mode, searching notes. recents is the
@@ -104,12 +109,21 @@ func New(mode Mode, notes []*index.Note, recents []string, styles theme.Styles, 
 		styles:       styles,
 		palette:      palette,
 		surface:      lipgloss.NewStyle().Background(palette.Surface),
-		previewCache: map[previewKey][]string{},
+		previewCache: newLRUCache(previewCacheCapacity),
 	}
 	if mode == Fuzzy {
 		m.recomputeFuzzy()
 	}
 	return m
+}
+
+// Init starts rendering the initially selected result's preview, returning
+// the updated Model (which now expects that render) alongside the command
+// that produces it. Like Update, it threads the Model through rather than
+// mutating in place; the caller invokes it once, alongside the rest of the
+// application's initial commands, after New and SetSize.
+func (m Model) Init() (Model, tea.Cmd) {
+	return m.checkPreview()
 }
 
 // SetSize sets the terminal size. The overlay box is 80% of the width and
@@ -149,18 +163,29 @@ func (m Model) listRows() int {
 	return max(m.bodyHeight()/itemLines, 1)
 }
 
-// Update handles key presses, the full-text debounce tick, and full-text
-// search results. Unrecognized messages are ignored.
+// Update handles key presses, the full-text debounce tick and search
+// results, and full-text preview renders. Unrecognized messages are
+// ignored. After handling the message, it always re-checks whether the
+// selection now points at a different preview (see checkPreview in
+// preview.go) and, if so, folds in the command that (re)renders it — this
+// centralizes preview triggering rather than repeating it at every call
+// site that can change the selection.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		return m.handleKey(msg)
+		m, cmd = m.handleKey(msg)
 	case debounceMsg:
-		return m.handleDebounce(msg)
+		m, cmd = m.handleDebounce(msg)
 	case ftResultMsg:
-		return m.handleResult(msg)
+		m, cmd = m.handleResult(msg)
+	case previewRenderedMsg:
+		m, cmd = m.handlePreviewRendered(msg)
+	default:
+		return m, nil
 	}
-	return m, nil
+	m, previewCmd := m.checkPreview()
+	return m, tea.Batch(cmd, previewCmd)
 }
 
 func (m Model) handleKey(k tea.KeyPressMsg) (Model, tea.Cmd) {

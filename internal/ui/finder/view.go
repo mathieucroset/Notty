@@ -67,6 +67,20 @@ func (m Model) footerLine() string {
 	return " " + m.bgStyle(m.styles.Muted, false).Render("enter open · esc close · ctrl+j/k move")
 }
 
+// paneWidths splits the body's content width cw between the list pane and
+// the preview pane, with a one-column separator between them.
+func (m Model) paneWidths(cw int) (listW, previewW int) {
+	listW = cw * listWidthPct / 100
+	if listW < 1 {
+		listW = min(1, cw)
+	}
+	previewW = max(cw-listW-1, 0)
+	if previewW == 0 {
+		listW = cw
+	}
+	return listW, previewW
+}
+
 // bodyRows renders the body: the results list on the left (listWidthPct of
 // cw), a one-column separator, and the note preview on the right.
 func (m Model) bodyRows(cw int, wrap func(string) string) []string {
@@ -75,15 +89,7 @@ func (m Model) bodyRows(cw int, wrap func(string) string) []string {
 		return nil
 	}
 
-	listW := cw * listWidthPct / 100
-	if listW < 1 {
-		listW = min(1, cw)
-	}
-	previewW := max(cw-listW-1, 0)
-	if previewW == 0 {
-		listW = cw
-	}
-
+	listW, previewW := m.paneWidths(cw)
 	listLines := m.listPane(listW, bodyH)
 	previewLines := m.previewPaneLines(previewW, bodyH)
 	sep := lipgloss.NewStyle().Foreground(m.palette.Muted).Inherit(m.surface).Render("│")
