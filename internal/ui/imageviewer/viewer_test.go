@@ -323,7 +323,7 @@ func TestKeyReaderStopEndsGoroutine(t *testing.T) {
 	}
 	defer r.Close()
 	defer w.Close()
-	k := startKeyReader(r)
+	k := startKeyReader(r, 0)
 	if _, err := w.Write([]byte("n")); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestKeyReaderStopEndsGoroutine(t *testing.T) {
 	// The goroutine is now blocked reading an open pipe; stop must end it.
 	k.stop()
 	select {
-	case <-k.done:
+	case <-k.readerDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("reader goroutine still running after stop")
 	}

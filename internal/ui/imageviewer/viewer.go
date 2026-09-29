@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 
@@ -64,10 +63,19 @@ type Viewer struct {
 	// (open on macOS, ShellExecute on Windows), without waiting for it.
 	Open func(path string) error
 
+	// QuitRequested reports that the viewer was closed with ctrl+q, which
+	// quits Notty from every context (spec §4.4). Bubble Tea cannot see
+	// that key while the viewer owns the terminal, so the app's tea.Exec
+	// callback must check it and turn it into a tea.QuitMsg (tea.Quit).
+	// Run resets it on entry.
+	QuitRequested bool
+
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 
+	// escWait overrides defaultEscWait (test hook).
+	escWait time.Duration
 	// watch reports terminal resizes until stop is called (test hook).
 	watch func(size func() (int, int, error)) (resized <-chan struct{}, stop func())
 }
@@ -91,13 +99,15 @@ func (v *Viewer) SetStderr(w io.Writer) { v.stderr = w }
 type fder interface{ Fd() uintptr }
 
 // Run takes over the terminal and shows the images until the user closes
-// the viewer (q or esc) or the input ends. The terminal state (raw mode,
+// the viewer (q, esc, ctrl+c, or ctrl+q, which also sets QuitRequested) or
+// the input ends. The terminal state (raw mode,
 // alternate screen, cursor, Kitty images) is restored on every exit path,
 // including panics.
 func (v *Viewer) Run() (err error) {
 	if len(v.Paths) == 0 {
 		return errors.New("image viewer: no images")
 	}
+	v.QuitRequested = false
 	in, out := v.stdin, v.stdout
 	if in == nil {
 		in = os.Stdin
@@ -128,7 +138,7 @@ func (v *Viewer) Run() (err error) {
 		}
 	}()
 
-	keys := startKeyReader(in)
+	keys := startKeyReader(in, v.escWait)
 	defer keys.stop()
 	watch := v.watch
 	if watch == nil {
@@ -183,6 +193,9 @@ func (s *session) handle(batch []Key) bool {
 	for _, k := range batch {
 		switch k {
 		case Quit:
+			return true
+		case QuitApp:
+			s.v.QuitRequested = true
 			return true
 		case Next, Prev:
 			if k == Next {
@@ -382,63 +395,4 @@ func defaultSize(files ...any) func() (int, int, error) {
 		}
 		return 0, 0, errors.New("terminal size: not a terminal")
 	}
-}
-
-// keyReader reads and decodes keys in a goroutine.
-type keyReader struct {
-	keys chan []Key
-	done chan struct{} // closed when the goroutine exits
-	quit chan struct{}
-	cr   interface {
-		Cancel() bool
-		Close() error
-	}
-}
-
-// startKeyReader starts reading in. A terminal (or any file the platform
-// can poll) is read through a cancelable reader, so stop leaves no
-// goroutine reading bytes that belong to Bubble Tea afterwards. Other
-// readers cannot be interrupted; their goroutine ends at EOF.
-func startKeyReader(in io.Reader) *keyReader {
-	k := &keyReader{keys: make(chan []Key), done: make(chan struct{}), quit: make(chan struct{})}
-	src := in
-	if cr, err := uv.NewCancelReader(in); err == nil {
-		k.cr, src = cr, cr
-	}
-	go func() {
-		defer close(k.done)
-		buf := make([]byte, 256)
-		for {
-			n, err := src.Read(buf)
-			if n > 0 {
-				if keys := DecodeKeys(buf[:n]); len(keys) > 0 {
-					select {
-					case k.keys <- keys:
-					case <-k.quit:
-						return
-					}
-				}
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	return k
-}
-
-// stop ends the reader. For a cancelable reader it waits until the
-// goroutine has exited.
-func (k *keyReader) stop() {
-	close(k.quit)
-	if k.cr == nil {
-		return
-	}
-	if k.cr.Cancel() {
-		select {
-		case <-k.done:
-		case <-time.After(time.Second):
-		}
-	}
-	_ = k.cr.Close()
 }
