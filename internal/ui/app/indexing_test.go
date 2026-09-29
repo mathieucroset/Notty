@@ -60,6 +60,33 @@ func TestIndexBuiltAtStartup(t *testing.T) {
 	}
 }
 
+// TestChangesDuringIndexBuildReplayed changes files after the startup
+// build has read the vault but before its result lands: the changes are
+// queued and re-read once the index is installed.
+func TestChangesDuringIndexBuildReplayed(t *testing.T) {
+	opts := testOptions(t)
+	m := New(opts)
+	run(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	startup := execCmd(m.Init()) // the build has read the vault
+
+	writeFile(t, opts.Vault, "external.md", "# External\n")
+	run(t, m, watchEventMsg{paths: []string{"external.md"}})
+	writeFile(t, opts.Vault, "created.md", "# Created\n")
+	run(t, m, fileOpMsg{op: opNewNote, path: "created.md"})
+
+	for _, msg := range startup {
+		run(t, m, msg)
+	}
+	for _, p := range []string{"external.md", "created.md"} {
+		if _, ok := m.ix.Get(p); !ok {
+			t.Errorf("%s changed during the build is not indexed", p)
+		}
+	}
+	if len(m.pendingIndex) != 0 {
+		t.Errorf("queue not drained: %v", m.pendingIndex)
+	}
+}
+
 func TestIndexProblemsToast(t *testing.T) {
 	opts := testOptions(t)
 	writeFile(t, opts.Vault, "bad.md", "# Bad\n\xff\xfe\n")

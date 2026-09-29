@@ -127,6 +127,7 @@ func (m *Model) handleTaskToggled(msg taskToggledMsg) tea.Cmd {
 	case msg.notFound:
 		return m.pushToast(msgs.ToastWarn, "That task changed in "+msg.path+"; it was not toggled")
 	}
+	m.queueReindex(msg.path)
 	m.refreshIndexViews()
 	return m.reloadNoteIf(msg.path)
 }

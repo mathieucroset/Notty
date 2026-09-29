@@ -38,14 +38,29 @@ func (m *Model) handleIndexBuilt(msg indexBuiltMsg) tea.Cmd {
 	}
 	m.ix = msg.ix
 	m.refreshIndexViews()
+	replay := reindexCmd(m.opts.Vault, m.ix, m.pendingIndex)
+	m.pendingIndex = nil
 	problems := m.ix.Problems()
 	switch len(problems) {
 	case 0:
-		return nil
+		return replay
 	case 1:
-		return m.pushToast(msgs.ToastWarn, fmt.Sprintf("1 note has a problem: %v", problems[0]))
+		return tea.Batch(replay, m.pushToast(msgs.ToastWarn, fmt.Sprintf("1 note has a problem: %v", problems[0])))
 	}
-	return m.pushToast(msgs.ToastWarn, fmt.Sprintf("%d notes have problems, first: %v", len(problems), problems[0]))
+	return tea.Batch(replay, m.pushToast(msgs.ToastWarn, fmt.Sprintf("%d notes have problems, first: %v", len(problems), problems[0])))
+}
+
+// queueReindex remembers paths changed while the startup index builds (the
+// build may have read them before the change), to re-read once it lands.
+func (m *Model) queueReindex(paths ...string) {
+	if m.ix != nil || !m.indexing {
+		return
+	}
+	for _, p := range paths {
+		if p != "" {
+			m.pendingIndex = append(m.pendingIndex, p)
+		}
+	}
 }
 
 // refreshIndexViews recomputes everything the sidebar shows from the index.

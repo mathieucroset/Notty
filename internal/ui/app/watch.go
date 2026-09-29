@@ -57,6 +57,7 @@ func listenWatcherCmd(w *watcher.Watcher) tea.Cmd {
 // handleWatchEvent re-indexes the changed paths, refreshes the tree and
 // reloads the open note if it changed, then keeps listening.
 func (m *Model) handleWatchEvent(msg watchEventMsg) tea.Cmd {
+	m.queueReindex(msg.paths...)
 	return tea.Batch(
 		reindexCmd(m.opts.Vault, m.ix, msg.paths),
 		loadTreeCmd(m.opts.Vault),
@@ -119,6 +120,7 @@ func (m *Model) handleSaved(msg savedMsg) tea.Cmd {
 	if msg.err != nil {
 		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s: %v", msg.path, msg.err))
 	}
+	m.queueReindex(msg.path)
 	if msg.path == m.note.path {
 		m.handleNoteReloaded(noteReloadedMsg{path: msg.path, content: msg.content})
 		m.note.dirty = false

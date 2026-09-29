@@ -273,6 +273,7 @@ func (m *Model) handleFileOp(msg fileOpMsg) tea.Cmd {
 	if msg.path == "" {
 		return m.pushToast(msgs.ToastError, friendlyError(msg.op, msg.err))
 	}
+	m.queueReindex(msg.old, msg.path)
 	var cmds []tea.Cmd
 	if msg.err != nil {
 		cmds = append(cmds, m.pushToast(msgs.ToastWarn,
@@ -347,5 +348,6 @@ func (m *Model) handleExternalDone(msg externalDoneMsg) tea.Cmd {
 	if msg.err != nil {
 		return m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err))
 	}
+	m.queueReindex(msg.path)
 	return tea.Batch(reindexCmd(m.opts.Vault, m.ix, []string{msg.path}), loadTreeCmd(m.opts.Vault), m.reloadNoteIf(msg.path))
 }

@@ -125,6 +125,9 @@ type Model struct {
 	// ix is the note index, nil until the startup build finishes.
 	ix       *index.Index
 	indexing bool
+	// pendingIndex holds paths changed while the startup index was
+	// building; they are re-read once it lands.
+	pendingIndex []string
 	// filterTag is the tag the sidebar tree is filtered by, or "".
 	filterTag string
 

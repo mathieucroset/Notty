@@ -168,6 +168,7 @@ func (m *Model) handleRestored(msg restoredMsg) tea.Cmd {
 		return tea.Batch(m.pushToast(msgs.ToastError, fmt.Sprintf("Could not restore: %v", msg.err)),
 			loadTrashCmd(m.opts.Vault))
 	}
+	m.queueReindex(msg.path)
 	cmds := []tea.Cmd{
 		m.pushToast(msgs.ToastInfo, "Restored to "+msg.path),
 		loadTreeCmd(m.opts.Vault),
