@@ -89,8 +89,8 @@ func (m *Model) updateCounts() {
 // toggleTask toggles a task from outside the editor (spec §5): in the
 // buffer when the note is open, otherwise on disk.
 func (m *Model) toggleTask(msg msgs.ToggleTaskMsg) tea.Cmd {
-	if m.isConflicted(msg.Path) {
-		return m.pushToast(msgs.ToastWarn, "Resolve the conflict in "+msg.Path+" first")
+	if cmd, refused := m.refuseConflicted(msg.Path); refused {
+		return cmd
 	}
 	if cmd, open := m.applyToggleInEditor(msg); open {
 		return cmd

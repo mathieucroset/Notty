@@ -18,10 +18,7 @@ import (
 
 // newEditor builds the note editor from the configuration.
 func newEditor(opts Options, mapMsg func(tea.Msg) tea.Msg) editor.Model {
-	clip := opts.Clipboard
-	if clip == nil {
-		clip = clipboard.Default()
-	}
+	clip := clipboardOf(opts)
 	return editor.New(editor.Options{
 		Vim:         opts.Config.Vim,
 		LineNumbers: opts.Config.LineNumbers,
@@ -33,6 +30,17 @@ func newEditor(opts Options, mapMsg func(tea.Msg) tea.Msg) editor.Model {
 		MapMsg:      mapMsg,
 	})
 }
+
+// clipboardOf is the clipboard the editors paste from.
+func clipboardOf(opts Options) editor.Clipboard {
+	if opts.Clipboard != nil {
+		return opts.Clipboard
+	}
+	return clipboard.Default()
+}
+
+// editorClipboard is the clipboard the editors paste from.
+func (m *Model) editorClipboard() editor.Clipboard { return clipboardOf(m.opts) }
 
 // mapEditorMsg intercepts the editor's focus requests, which it makes
 // synchronously inside Update, so they apply before the next key is
@@ -261,6 +269,9 @@ func (m *Model) handleEditorKey(k tea.KeyPressMsg) tea.Cmd {
 
 // handlePaste sends a bracketed paste to the editor when it has focus.
 func (m *Model) handlePaste(msg tea.PasteMsg) tea.Cmd {
+	if m.resolver != nil && !m.overlayOpen() {
+		return m.updateResolver(msg)
+	}
 	if m.overlayOpen() || m.history != nil || m.opts.WizardNeeded || !m.editorFocused() {
 		return nil
 	}
@@ -318,7 +329,11 @@ func (m *Model) commandLine() string {
 // There is none while an overlay or full-screen view is open, or when the
 // editor does not have focus.
 func (m *Model) cursor() *tea.Cursor {
-	if m.width <= 0 || m.height <= 0 || m.opts.WizardNeeded || m.overlayOpen() || m.history != nil || !m.editorFocused() {
+	if m.resolver != nil && !m.overlayOpen() && m.width > 0 && m.height > 0 {
+		return m.resolver.CursorPosition()
+	}
+	if m.width <= 0 || m.height <= 0 || m.opts.WizardNeeded || m.overlayOpen() || m.history != nil || m.resolver != nil ||
+		!m.editorFocused() {
 		return nil
 	}
 	if line := m.commandLine(); line != "" {

@@ -219,14 +219,6 @@ func (m *Model) setupSync() tea.Cmd {
 	return m.pushToast(msgs.ToastInfo, "Sync is not set up yet")
 }
 
-// openResolver opens the conflict resolver on p ("" for the first
-// conflict).
-// TODO(resolver pass, Task 34): open the resolver when there are conflicts.
-func (m *Model) openResolver(p string) tea.Cmd {
-	_ = p
-	return m.pushToast(msgs.ToastInfo, "No conflicts to resolve")
-}
-
 // openConfig opens config.toml in $EDITOR.
 func (m *Model) openConfig() tea.Cmd {
 	m.beginExec()

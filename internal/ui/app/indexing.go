@@ -94,6 +94,9 @@ func (m *Model) applyFilter() {
 
 // togglePin pins or unpins p and saves the pins.
 func (m *Model) togglePin(p string) tea.Cmd {
+	if cmd, refused := m.refuseConflicted(p); refused {
+		return cmd
+	}
 	m.opts.Pins.Toggle(p)
 	m.sidebar.SetPins(m.opts.Pins.Pins)
 	m.noteChanged(pinsPath)

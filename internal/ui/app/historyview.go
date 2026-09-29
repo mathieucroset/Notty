@@ -90,8 +90,8 @@ func (m *Model) handleHistoryLoaded(msg historyLoadedMsg) tea.Cmd {
 // the History view. When the note is open the version replaces the buffer
 // as one undoable edit, which is then saved.
 func (m *Model) restoreVersion(msg history.RestoreVersionMsg) tea.Cmd {
-	if m.isConflicted(msg.Path) {
-		return m.pushToast(msgs.ToastWarn, "Resolve the conflict in "+msg.Path+" first")
+	if cmd, refused := m.refuseConflicted(msg.Path); refused {
+		return cmd
 	}
 	m.history = nil
 	rev := msg.Rev

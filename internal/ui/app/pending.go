@@ -74,6 +74,10 @@ func (m *Model) runPending(op pendingOp, res dialog.ResultMsg) tea.Cmd {
 	}
 	switch op.kind {
 	case opRename, opMove, opTrash:
+		// The path may have become conflicted while the dialog was open.
+		if cmd, refused := m.refuseConflicted(op.path); refused {
+			return cmd
+		}
 		if m.note.path != "" && isUnder(m.note.path, op.path) {
 			if cmd := m.saveThen(runPendingMsg{op: op, res: res}, "it was not "+opDone(op.kind)); cmd != nil {
 				return cmd

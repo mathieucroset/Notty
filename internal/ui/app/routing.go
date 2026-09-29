@@ -15,6 +15,9 @@ func (m *Model) keyContext() keys.Context {
 	if m.overlayOpen() {
 		return keys.Overlay
 	}
+	if m.resolver != nil {
+		return m.resolver.KeyContext()
+	}
 	if m.history != nil {
 		return keys.History
 	}
@@ -57,6 +60,9 @@ func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.overlayOpen() {
 		return m.updateOverlay(k)
+	}
+	if m.resolver != nil {
+		return m.updateResolver(k)
 	}
 	if m.history != nil {
 		h, cmd := m.history.Update(k)

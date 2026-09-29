@@ -50,8 +50,11 @@ func (m *Model) importImage(msg msgs.ImportImageMsg) tea.Cmd {
 	if m.opts.Vault == nil || m.note.path == "" {
 		return m.pushToast(msgs.ToastInfo, "Open a note to add an image")
 	}
+	if cmd, refused := m.refuseConflicted(m.note.path); refused {
+		return cmd
+	}
 	if m.editor.ModeName() == "READ-ONLY" {
-		return m.pushToast(msgs.ToastWarn, "Resolve the conflict in "+m.note.path+" first")
+		return m.pushToast(msgs.ToastWarn, conflictRefusal(m.note.path))
 	}
 	note := m.note.path
 	if msg.Path != "" {

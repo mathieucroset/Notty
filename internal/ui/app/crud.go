@@ -122,6 +122,9 @@ func (m *Model) requestRename(p string) tea.Cmd {
 	if m.opts.Vault == nil || p == "" {
 		return nil
 	}
+	if cmd, refused := m.refuseConflicted(p); refused {
+		return cmd
+	}
 	d := dialog.NewInput(dlgRename, "Rename '"+displayName(p)+"'", "New name", displayName(p), requireName, m.opts.Styles)
 	m.openDialog(d, pendingOp{kind: opRename, path: p})
 	return nil
@@ -130,6 +133,9 @@ func (m *Model) requestRename(p string) tea.Cmd {
 func (m *Model) requestMove(p string) tea.Cmd {
 	if m.opts.Vault == nil || p == "" {
 		return nil
+	}
+	if cmd, refused := m.refuseConflicted(p); refused {
+		return cmd
 	}
 	folders := m.moveTargets(p)
 	suggest := func(prefix string) []string {
@@ -168,6 +174,9 @@ func (m *Model) requestMove(p string) tea.Cmd {
 func (m *Model) requestTrash(p string) tea.Cmd {
 	if m.opts.Vault == nil || p == "" {
 		return nil
+	}
+	if cmd, refused := m.refuseConflicted(p); refused {
+		return cmd
 	}
 	d := dialog.NewConfirm(dlgTrash, "Move to trash", "Move '"+displayName(p)+"' to trash?",
 		"Move to trash", "Cancel", true, m.opts.Styles)
@@ -383,6 +392,9 @@ func (m *Model) openExternal(rel string) tea.Cmd {
 func (m *Model) editExternal(rel string) tea.Cmd {
 	if m.opts.Vault == nil || rel == "" {
 		return nil
+	}
+	if cmd, refused := m.refuseConflicted(rel); refused {
+		return cmd
 	}
 	if m.mutLocked {
 		// Never hand a file to $EDITOR while a merge rewrites the vault.

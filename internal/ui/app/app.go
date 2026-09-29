@@ -28,6 +28,7 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/history"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/preview"
+	"github.com/mathieucroset/notty/internal/ui/resolver"
 	"github.com/mathieucroset/notty/internal/ui/sidebar"
 	"github.com/mathieucroset/notty/internal/ui/statusbar"
 	"github.com/mathieucroset/notty/internal/ui/tasksview"
@@ -233,6 +234,11 @@ type Model struct {
 	quitStatus string
 	// releaseLock frees the vault lock taken when the wizard finished.
 	releaseLock func()
+
+	// resolver is the full-screen conflict resolver, or nil when closed;
+	// conflictFiles are its files by path.
+	resolver      *resolver.Model
+	conflictFiles map[string]resolver.File
 }
 
 // New builds the root model.
@@ -501,6 +507,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd, ok := m.updateHistoryMsg(msg); ok {
 			return m, cmd
 		}
+		if cmd, ok := m.updateResolverMsg(msg); ok {
+			return m, cmd
+		}
 		if cmd, ok := m.updateCommandMsg(msg); ok {
 			return m, cmd
 		}
@@ -649,6 +658,10 @@ func (m *Model) relayout() {
 		h := m.history.SetSize(m.width, m.height)
 		m.history = &h
 	}
+	if m.resolver != nil {
+		r := m.resolver.SetSize(m.width, m.height)
+		m.resolver = &r
+	}
 	m.sizeNoteViews(l.Content.W, l.Content.H)
 	m.resizeOverlay()
 	m.status.SetSize(l.Status.W)
@@ -695,6 +708,9 @@ func (m *Model) render() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
 	}
 
+	if m.resolver != nil {
+		return m.withToasts(m.withOverlay(m.resolver.View()))
+	}
 	if m.history != nil {
 		return m.withToasts(m.withOverlay(m.history.View()))
 	}
