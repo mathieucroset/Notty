@@ -252,15 +252,54 @@ func (b *Buffer) TextIn(r Range) string {
 }
 
 // SetText replaces the whole contents (e.g. on reload from disk) as one
-// undoable change, keeping the cursor clamped. Identical text is a no-op. It
-// does not mark the buffer saved; callers do that if appropriate.
+// undoable change, keeping the cursor clamped. Lines shared at the start and
+// end of the old and new text are left alone, so only the differing middle
+// is edited (FirstChangedLine stays accurate and undo stores less).
+// Identical text is a no-op. It does not mark the buffer saved; callers do
+// that if appropriate.
 func (b *Buffer) SetText(text string) {
 	body, trailing := splitText(text)
-	if trailing == b.trailingNewline && body == strings.Join(b.lines, "\n") {
+	old, lines := b.lines, strings.Split(body, "\n")
+	if trailing == b.trailingNewline && slices.Equal(old, lines) {
 		return
 	}
-	last := len(b.lines) - 1
-	b.editTrailing(bpos{}, bpos{line: last, off: len(b.lines[last])}, body, trailing)
+
+	// p common leading lines, s common trailing lines, not overlapping.
+	p := 0
+	for p < min(len(old), len(lines)) && old[p] == lines[p] {
+		p++
+	}
+	s := 0
+	for p+s < min(len(old), len(lines)) && old[len(old)-1-s] == lines[len(lines)-1-s] {
+		s++
+	}
+	oldEnd, newMid := len(old)-s, lines[p:len(lines)-s]
+	lastOld := bpos{line: len(old) - 1, off: len(old[len(old)-1])}
+
+	switch {
+	case s > 0:
+		// Whole lines (with their "\n") between two kept regions.
+		text := ""
+		if len(newMid) > 0 {
+			text = strings.Join(newMid, "\n") + "\n"
+		}
+		b.editTrailing(bpos{line: p}, bpos{line: oldEnd}, text, trailing)
+	case p < len(old) && len(newMid) > 0:
+		// Old lines from p to the end become newMid.
+		b.editTrailing(bpos{line: p}, lastOld, strings.Join(newMid, "\n"), trailing)
+	case p < len(old):
+		// New text is a strict prefix: drop old lines p.. and their
+		// preceding "\n" (p >= 1 because the new text has at least one line).
+		b.editTrailing(bpos{line: p - 1, off: len(old[p-1])}, lastOld, "", trailing)
+	default:
+		// Old text is a prefix: append newMid lines (empty when only the
+		// trailing newline changes, recorded as an empty edit).
+		text := ""
+		if len(newMid) > 0 {
+			text = "\n" + strings.Join(newMid, "\n")
+		}
+		b.editTrailing(lastOld, lastOld, text, trailing)
+	}
 }
 
 // edit applies and records a primitive change that keeps the

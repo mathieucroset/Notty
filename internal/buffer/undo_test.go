@@ -394,6 +394,70 @@ func TestSetTextUndoable(t *testing.T) {
 	}
 }
 
+// TestSetTextEditsOnlyChangedLines checks that SetText keeps the common
+// prefix and suffix lines out of the edit, so FirstChangedLine is accurate
+// and the undo record holds only the differing lines.
+func TestSetTextEditsOnlyChangedLines(t *testing.T) {
+	tests := []struct {
+		name         string
+		initial      string
+		text         string
+		wantFirst    int
+		wantRemoved  string
+		wantInserted string
+	}{
+		{"change middle line", "l0\nl1\nl2\nl3\nl4", "l0\nl1\nX\nl3\nl4", 2, "l2\n", "X\n"},
+		{"insert middle line", "l0\nl1\nl2", "l0\nNEW\nl1\nl2", 1, "", "NEW\n"},
+		{"delete middle line", "l0\nl1\nl2", "l0\nl2", 1, "l1\n", ""},
+		{"append lines", "l0\nl1", "l0\nl1\nl2\nl3", 1, "", "\nl2\nl3"},
+		{"truncate lines", "l0\nl1\nl2", "l0", 0, "\nl1\nl2", ""},
+		{"change last line", "l0\nl1\n", "l0\nX\n", 1, "l1", "X"},
+		{"change first line", "a\nb", "z\nb", 0, "a\n", "z\n"},
+		{"replace everything", "a\nb", "x\ny", 0, "a\nb", "x\ny"},
+		{"only trailing newline", "a\nb", "a\nb\n", 1, "", ""},
+		{"from empty", "", "a\nb", 0, "", "a\nb"},
+		{"to empty", "abc\ndef\n", "", 0, "abc\ndef", ""},
+		{"duplicate lines", "x\nx", "x", 0, "\nx", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := New(tt.initial)
+			b.SetText(tt.text)
+			if got, want := b.String(), normalizeNewlines(tt.text); got != want {
+				t.Fatalf("String() = %q, want %q", got, want)
+			}
+			if got := b.FirstChangedLine(); got != tt.wantFirst {
+				t.Errorf("FirstChangedLine() = %d, want %d", got, tt.wantFirst)
+			}
+			if len(b.undo) != 1 || len(b.undo[0].changes) != 1 {
+				t.Fatalf("want exactly one recorded change, got %d steps", len(b.undo))
+			}
+			c := b.undo[0].changes[0]
+			if c.removed != tt.wantRemoved || c.inserted != tt.wantInserted {
+				t.Errorf("recorded removed=%q inserted=%q, want removed=%q inserted=%q",
+					c.removed, c.inserted, tt.wantRemoved, tt.wantInserted)
+			}
+			b.Undo()
+			if got := b.String(); got != tt.initial {
+				t.Errorf("after undo String() = %q, want %q", got, tt.initial)
+			}
+			b.Redo()
+			if got, want := b.String(), normalizeNewlines(tt.text); got != want {
+				t.Errorf("after redo String() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestSetTextKeepsCursorOnUntouchedLine(t *testing.T) {
+	b := New("l0\nl1\nl2\nlong line four")
+	b.SetCursor(P(3, 9))
+	b.SetText("l0\nchanged\nl2\nlong line four")
+	if got := b.Cursor(); got != P(3, 9) {
+		t.Errorf("Cursor() = %v, want %v", got, P(3, 9))
+	}
+}
+
 // TestUndoRedoRandomWalk applies a scripted mix of edits, then checks that
 // undoing everything restores the original and redoing everything restores
 // the final text.
@@ -447,7 +511,14 @@ func TestUndoRedoRandomized(t *testing.T) {
 		randPos := func() Pos { return P(r.IntN(b.LineCount()+1), r.IntN(12)) }
 		for range 60 {
 			v := b.Version()
-			switch r.IntN(4) {
+			switch r.IntN(5) {
+			case 4:
+				// Reload an earlier state (exercises SetText's line diff).
+				target := states[r.IntN(len(states))]
+				b.SetText(target)
+				if got := b.String(); got != target {
+					t.Fatalf("seed %d: SetText gave %q, want %q", seed, got, target)
+				}
 			case 0:
 				b.Insert(randPos(), pieces[r.IntN(len(pieces))])
 			case 1:
