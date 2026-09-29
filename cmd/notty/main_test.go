@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/mathieucroset/notty/internal/ui/app"
 )
@@ -21,6 +23,7 @@ type fixture struct {
 	gitFound   bool
 	tuiErr     error
 	got        *app.Options
+	during     func() // runs while the TUI would be running
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -69,8 +72,12 @@ func (f *fixture) env() env {
 			}
 			return "", errors.New("not found")
 		},
+		lockWait: 300 * time.Millisecond,
 		runTUI: func(opts app.Options) error {
 			f.got = &opts
+			if f.during != nil {
+				f.during()
+			}
 			return f.tuiErr
 		},
 	}
@@ -225,4 +232,54 @@ func TestErrors(t *testing.T) {
 			t.Errorf("stderr = %q", f.stderr.String())
 		}
 	})
+}
+
+func TestVaultLock(t *testing.T) {
+	f := newFixture(t)
+	f.makeRepo(t)
+	f.writeConfig(t, "")
+	lockPath := filepath.Join(f.vaultDir, ".notty", "lock")
+
+	var secondCode int
+	var secondErr string
+	f.during = func() {
+		if _, err := os.Stat(lockPath); err != nil {
+			t.Errorf("lock not held while the TUI runs: %v", err)
+		}
+		g := newFixture(t)
+		g.configPath = f.configPath
+		secondCode = run([]string{"--vault", f.vaultDir}, g.env())
+		secondErr = g.stderr.String()
+		if g.got != nil {
+			t.Error("second instance started its TUI")
+		}
+	}
+	if code := run([]string{"--vault", f.vaultDir}, f.env()); code != 0 {
+		t.Fatalf("first run exit code %d, stderr %q", code, f.stderr.String())
+	}
+	if secondCode != 1 {
+		t.Errorf("second run exit code %d, want 1", secondCode)
+	}
+	for _, want := range []string{"waiting for vault lock", "pid " + strconv.Itoa(os.Getpid())} {
+		if !strings.Contains(secondErr, want) {
+			t.Errorf("second run stderr %q missing %q", secondErr, want)
+		}
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Errorf("lock not released after the TUI exits: %v", err)
+	}
+}
+
+func TestWizardTakesNoLock(t *testing.T) {
+	f := newFixture(t)
+	f.makeRepo(t) // repo but no config file: wizard
+	if code := run([]string{"--vault", f.vaultDir}, f.env()); code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	if !f.got.WizardNeeded {
+		t.Fatal("expected wizard mode")
+	}
+	if _, err := os.Stat(filepath.Join(f.vaultDir, ".notty", "lock")); !os.IsNotExist(err) {
+		t.Errorf("wizard mode created a lock: %v", err)
+	}
 }

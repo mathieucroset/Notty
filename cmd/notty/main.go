@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -33,7 +34,10 @@ type env struct {
 	configPath     string
 	stateDir       string
 	lookPath       func(name string) (string, error)
-	runTUI         func(app.Options) error
+	// lockWait is how long to wait for a vault lock held by another
+	// process (spec §9: 10s, covering a running headless sync).
+	lockWait time.Duration
+	runTUI   func(app.Options) error
 }
 
 func main() {
@@ -43,6 +47,7 @@ func main() {
 		configPath: config.ConfigPath(),
 		stateDir:   config.StateDir(),
 		lookPath:   exec.LookPath,
+		lockWait:   10 * time.Second,
 		runTUI: func(opts app.Options) error {
 			_, err := tea.NewProgram(app.New(opts)).Run()
 			return err
@@ -133,7 +138,7 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 	}
 
 	// 5. Lock, open, and load per-vault state.
-	release, err := acquireLock(root)
+	release, err := acquireLock(root, e.lockWait, e.stderr)
 	if err != nil {
 		return app.Options{}, noop, err
 	}
@@ -172,9 +177,18 @@ func wizardNeeded(configPath, root string, lookPath func(string) (string, error)
 	return false
 }
 
-// acquireLock takes the vault instance lock (spec §9).
-// TODO(Task 13): use vault.AcquireLock once it lands on main.
-func acquireLock(root string) (release func(), err error) {
-	_ = root
-	return func() {}, nil
+// acquireLock takes the vault instance lock (spec §9). When another
+// process holds it, it says so on stderr and waits up to wait before
+// giving up with vault.ErrLocked, whose message names the holder.
+func acquireLock(root string, wait time.Duration, stderr io.Writer) (release func(), err error) {
+	lock, err := vault.AcquireLock(root, 0)
+	var held vault.ErrLocked
+	if errors.As(err, &held) && wait > 0 {
+		fmt.Fprintln(stderr, "notty: waiting for vault lock…")
+		lock, err = vault.AcquireLock(root, wait)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return func() { _ = lock.Release() }, nil
 }
