@@ -13,6 +13,7 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/palette"
 	"github.com/mathieucroset/notty/internal/ui/theme"
+	"github.com/mathieucroset/notty/internal/ui/wizard"
 )
 
 func TestStartupWarningsShownAsToasts(t *testing.T) {
@@ -298,13 +299,86 @@ func TestThemePickerRestoresFromMemory(t *testing.T) {
 	}
 }
 
-// TestLatePreviewAfterCloseIgnored: a preview command that lands after the
-// picker closed (commands run concurrently) must not change the colors,
-// since nothing would restore them.
-func TestLatePreviewAfterCloseIgnored(t *testing.T) {
-	m := start(t, testOptions(t), 120, 30)
-	run(t, m, palette.ThemePreviewMsg{Name: "nord"})
-	if got := m.opts.Palette.Name; got != "catppuccin-mocha" {
-		t.Errorf("palette = %q after a preview with no picker open", got)
+// builtin returns the built-in palette name.
+func builtin(t *testing.T, name string) theme.Palette {
+	t.Helper()
+	p, ok := theme.Get(name)
+	if !ok {
+		t.Fatalf("no built-in %q", name)
+	}
+	return p
+}
+
+// TestLatePalettePreviewsDropped: previews run as concurrent commands, so
+// one can land after the picker left theme mode, or after a newer one;
+// either is dropped.
+func TestLatePalettePreviewsDropped(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, m *Model)
+		late  palette.ThemePreviewMsg
+		want  string
+	}{
+		{"picker closed", func(*testing.T, *Model) {}, palette.ThemePreviewMsg{Name: "nord", Seq: 100}, "catppuccin-mocha"},
+		{"after esc", func(t *testing.T, m *Model) {
+			openThemePicker(t, m)
+			run(t, m, keyMsg("esc"))
+		}, palette.ThemePreviewMsg{Name: "nord", Seq: 100}, "catppuccin-mocha"},
+		{"after the choice", func(t *testing.T, m *Model) {
+			openThemePicker(t, m)
+			run(t, m, palette.ThemeChosenMsg{Name: "catppuccin-latte"})
+		}, palette.ThemePreviewMsg{Name: "nord", Seq: 100}, "catppuccin-latte"},
+		{"stale seq after a newer one", func(t *testing.T, m *Model) {
+			openThemePicker(t, m)
+			run(t, m, palette.ThemePreviewMsg{Name: "catppuccin-latte", Seq: 100})
+		}, palette.ThemePreviewMsg{Name: "nord", Seq: 99}, "catppuccin-latte"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := start(t, testOptions(t), 120, 30)
+			tt.setup(t, m)
+			run(t, m, tt.late)
+			if got := m.opts.Palette.Name; got != tt.want {
+				t.Errorf("palette = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestLateWizardPreviewsDropped: the same for the wizard's previews, which
+// are also dropped once the wizard is done (while the vault opens).
+func TestLateWizardPreviewsDropped(t *testing.T) {
+	tests := []struct {
+		name   string
+		wizard bool
+		setup  func(t *testing.T, m *Model)
+		late   wizard.ThemePreviewMsg
+		want   string
+	}{
+		{"no wizard", false, func(*testing.T, *Model) {},
+			wizard.ThemePreviewMsg{Palette: builtin(t, "nord"), Seq: 100}, "catppuccin-mocha"},
+		{"after DoneMsg", true, func(t *testing.T, m *Model) {
+			// The vault is not opened yet: its command is not run.
+			m.Update(wizard.DoneMsg{Vault: m.opts.Config.Vault, Palette: builtin(t, "catppuccin-latte")})
+		}, wizard.ThemePreviewMsg{Palette: builtin(t, "nord"), Seq: 100}, "catppuccin-latte"},
+		{"stale seq after a newer one", true, func(t *testing.T, m *Model) {
+			run(t, m, wizard.ThemePreviewMsg{Palette: builtin(t, "catppuccin-latte"), Seq: 100})
+		}, wizard.ThemePreviewMsg{Palette: builtin(t, "nord"), Seq: 99}, "catppuccin-latte"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := testOptions(t)
+			if tt.wizard {
+				gittest.Isolate(t)
+				opts = wizardOptions(t)
+			}
+			m := start(t, opts, 100, 30)
+			t.Cleanup(m.Shutdown)
+			tt.setup(t, m)
+			run(t, m, tt.late)
+			if got := m.opts.Palette.Name; got != tt.want {
+				t.Errorf("palette = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

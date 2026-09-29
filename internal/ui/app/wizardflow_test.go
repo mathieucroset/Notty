@@ -154,7 +154,7 @@ func TestWizardThemePreviewRethemes(t *testing.T) {
 	gittest.Isolate(t)
 	m := start(t, wizardOptions(t), 100, 30)
 	nord, _ := theme.Get("nord")
-	run(t, m, wizard.ThemePreviewMsg{Palette: nord})
+	run(t, m, wizard.ThemePreviewMsg{Palette: nord, Seq: 1})
 	if m.opts.Palette.Name != "nord" {
 		t.Errorf("palette = %q, want nord", m.opts.Palette.Name)
 	}

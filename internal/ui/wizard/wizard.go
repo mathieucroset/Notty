@@ -106,8 +106,13 @@ type QuitMsg struct{}
 type CancelMsg struct{}
 
 // ThemePreviewMsg asks the app to re-theme with Palette while the user
-// browses themes (or to go back to the current one on esc).
-type ThemePreviewMsg struct{ Palette theme.Palette }
+// browses themes (or to go back to the current one on esc). Seq grows with
+// each preview of a wizard: commands run concurrently, so the app drops a
+// preview older than one it already applied.
+type ThemePreviewMsg struct {
+	Palette theme.Palette
+	Seq     uint64
+}
 
 // Stage is the screen the wizard is showing.
 type Stage int

@@ -292,3 +292,31 @@ func TestThemeViewFitsSize(t *testing.T) {
 		checkFits(t, m, sz[0], sz[1], 0)
 	}
 }
+
+// TestThemePreviewSeq: every preview, including esc's return to the
+// current theme, carries a larger Seq than the one before.
+func TestThemePreviewSeq(t *testing.T) {
+	f := &fakeEnv{vaultState: setup.Empty}
+	m := start(t, FirstRun, f)
+	m, _ = press(t, m, "enter", "down", "enter")
+	var seqs []uint64
+	for _, k := range []string{"down", "down", "up", "esc"} {
+		var out []tea.Msg
+		m, out = press(t, m, k)
+		var got []uint64
+		for _, msg := range out {
+			if p, ok := msg.(ThemePreviewMsg); ok {
+				got = append(got, p.Seq)
+			}
+		}
+		if len(got) != 1 {
+			t.Fatalf("%s emitted %d previews, want 1", k, len(got))
+		}
+		seqs = append(seqs, got[0])
+	}
+	for i := 1; i < len(seqs); i++ {
+		if seqs[i] <= seqs[i-1] {
+			t.Errorf("preview seqs %v are not increasing", seqs)
+		}
+	}
+}

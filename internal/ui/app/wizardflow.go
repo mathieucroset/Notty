@@ -86,11 +86,7 @@ func (m *Model) updateWizard(msg tea.Msg) tea.Cmd {
 func (m *Model) updateWizardMsg(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case wizard.ThemePreviewMsg:
-		m.applyPalette(msg.Palette)
-		if m.wizard != nil {
-			w := m.wizard.SetStyles(m.opts.Styles)
-			m.wizard = &w
-		}
+		m.previewWizardTheme(msg)
 	case wizard.DoneMsg:
 		return m.handleWizardDone(msg), true
 	case wizard.QuitMsg:
@@ -103,6 +99,19 @@ func (m *Model) updateWizardMsg(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	return nil, true
+}
+
+// previewWizardTheme shows a theme the wizard previews. Previews run as
+// concurrent commands: one landing with no wizard, once it is done, or
+// after a newer one, is dropped.
+func (m *Model) previewWizardTheme(msg wizard.ThemePreviewMsg) {
+	if m.wizard == nil || m.wizardDone || msg.Seq <= m.lastWizardSeq {
+		return
+	}
+	m.lastWizardSeq = msg.Seq
+	m.applyPalette(msg.Palette)
+	w := m.wizard.SetStyles(m.opts.Styles)
+	m.wizard = &w
 }
 
 // handleWizardDone finishes the wizard: on first run it saves the vault and
@@ -120,7 +129,9 @@ func (m *Model) handleWizardDone(msg wizard.DoneMsg) tea.Cmd {
 		root = abs
 	}
 	// The wizard resolved the theme (it never finishes on one that does
-	// not load): apply it, then save its name.
+	// not load): apply it, then save its name. Late previews are dropped
+	// from here on.
+	m.wizardDone = true
 	if msg.Palette.Name != "" {
 		m.applyPalette(msg.Palette)
 		m.themeName = msg.Palette.Name
@@ -185,6 +196,8 @@ func openVaultCmd(root, themeName, cfgPath, stateDir string, wait time.Duration)
 // index, trash purge, watcher and syncer (which enters Conflict when the
 // setup's merge conflicted).
 func (m *Model) handleVaultOpened(msg vaultOpenedMsg) tea.Cmd {
+	// On failure the wizard stays up and can finish again.
+	m.wizardDone = false
 	if msg.err != nil {
 		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not open the vault: %v", msg.err))
 	}
@@ -229,6 +242,7 @@ func (m *Model) setupSync() tea.Cmd {
 	env.Run = setupRunner(m.syncSvc.RunSetup, env.GH, m.repo.Dir)
 	w := wizard.New(wizard.SetupSync, m.repo.Dir, m.opts.Palette, m.opts.Catalog, env, m.opts.Styles).SetSize(m.width, m.height)
 	m.wizard = &w
+	m.lastWizardSeq, m.wizardDone = 0, false
 	return w.Init()
 }
 

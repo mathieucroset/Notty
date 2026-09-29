@@ -462,3 +462,44 @@ func TestSetStylesRethemes(t *testing.T) {
 		t.Error("SetStyles changed the content")
 	}
 }
+
+// TestThemePreviewSeq: each preview carries a larger Seq, so the app can
+// drop one that arrives after a newer one.
+func TestThemePreviewSeq(t *testing.T) {
+	m := openThemeMode(t, []string{"a", "b", "c"}, "a")
+	var seqs []uint64
+	for _, k := range []string{"down", "down", "up"} {
+		var cmd tea.Cmd
+		m, cmd = m.Update(key(k))
+		got := collectMsgs(cmd)
+		if len(got) != 1 {
+			t.Fatalf("%s emitted %v, want one preview", k, got)
+		}
+		p, ok := got[0].(ThemePreviewMsg)
+		if !ok {
+			t.Fatalf("%s emitted %T, want ThemePreviewMsg", k, got[0])
+		}
+		seqs = append(seqs, p.Seq)
+	}
+	for i := 1; i < len(seqs); i++ {
+		if seqs[i] <= seqs[i-1] {
+			t.Errorf("preview seqs %v are not increasing", seqs)
+		}
+	}
+}
+
+func TestInThemeMode(t *testing.T) {
+	m := newTestPalette(t)
+	if m.InThemeMode() {
+		t.Error("a new palette is in theme mode")
+	}
+	m = findCommand(t, m, idSwitchTheme)
+	m, _ = m.Update(key("enter"))
+	if !m.InThemeMode() {
+		t.Error("the theme picker is not in theme mode")
+	}
+	m, _ = m.Update(key("esc"))
+	if m.InThemeMode() {
+		t.Error("esc left the palette in theme mode")
+	}
+}

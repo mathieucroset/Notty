@@ -26,6 +26,8 @@ type themeState struct {
 	// base is the styles the wizard was opened with, restored when esc
 	// leaves the step.
 	base theme.Styles
+	// previewSeq is the Seq of the last ThemePreviewMsg emitted.
+	previewSeq uint64
 }
 
 // enterTheme shows the theme list after a successful first-run setup, with
@@ -75,7 +77,8 @@ func (m Model) themeKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.stage = StageSync
 		m.sub = subList
 		m.focus()
-		return m, emit(ThemePreviewMsg{Palette: m.current})
+		m.theme.previewSeq++
+		return m, emit(ThemePreviewMsg{Palette: m.current, Seq: m.theme.previewSeq})
 	}
 	return m, nil
 }
@@ -91,7 +94,8 @@ func (m Model) preview(name string) (Model, tea.Cmd) {
 	}
 	m.styles = theme.NewStyles(p).WithIcons(m.styles.Icons)
 	m.applyStyles()
-	return m, emit(ThemePreviewMsg{Palette: p})
+	m.theme.previewSeq++
+	return m, emit(ThemePreviewMsg{Palette: p, Seq: m.theme.previewSeq})
 }
 
 const (

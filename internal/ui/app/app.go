@@ -149,6 +149,13 @@ type Model struct {
 	// lastThemeErr is the last theme load warning shown while previewing,
 	// so moving over a broken theme again does not repeat it.
 	lastThemeErr string
+	// lastPaletteSeq and lastWizardSeq are the Seq of the last theme
+	// preview accepted from the open palette and wizard: an older one,
+	// arriving late from a concurrent command, is dropped.
+	lastPaletteSeq, lastWizardSeq uint64
+	// wizardDone is set from the wizard's DoneMsg until the vault opened:
+	// a late wizard preview must not change the theme being saved.
+	wizardDone bool
 
 	width, height  int
 	sidebarVisible bool

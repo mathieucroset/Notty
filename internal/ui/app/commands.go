@@ -57,6 +57,7 @@ func (m *Model) openPalette() {
 		SetSize(m.width, m.height)
 	m.openOverlay(&overlayState{kind: overlayPalette, palette: p, paletteOrig: m.opts.Palette})
 	m.lastThemeErr = ""
+	m.lastPaletteSeq = 0
 }
 
 // openFinder opens the fuzzy finder (ctrl+p) or full-text search (ctrl+f)
@@ -191,13 +192,16 @@ func (m *Model) paletteOverlay() *overlayState {
 
 // previewTheme shows the theme highlighted in the picker. A theme that
 // does not load keeps the current colors, with a warning toast (once per
-// distinct error while the picker is open). A preview landing after the
-// picker closed is dropped: nothing would restore it.
-func (m *Model) previewTheme(name string) tea.Cmd {
-	if m.paletteOverlay() == nil {
+// distinct error while the picker is open). Previews run as concurrent
+// commands: one landing once the picker left theme mode (esc, the choice,
+// a close), or after a newer one, is dropped.
+func (m *Model) previewTheme(msg palette.ThemePreviewMsg) tea.Cmd {
+	o := m.paletteOverlay()
+	if o == nil || !o.palette.InThemeMode() || msg.Seq <= m.lastPaletteSeq {
 		return nil
 	}
-	err := m.applyTheme(name)
+	m.lastPaletteSeq = msg.Seq
+	err := m.applyTheme(msg.Name)
 	if err == nil {
 		return nil
 	}
@@ -380,7 +384,7 @@ func (m *Model) updateCommandMsg(msg tea.Msg) (tea.Cmd, bool) {
 	case toast.CloseLogMsg:
 		m.closeOverlayKind(overlayLog)
 	case palette.ThemePreviewMsg:
-		return m.previewTheme(msg.Name), true
+		return m.previewTheme(msg), true
 	case palette.ThemeCancelMsg:
 		m.cancelThemePreview()
 	case palette.ThemeChosenMsg:

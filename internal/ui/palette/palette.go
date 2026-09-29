@@ -23,8 +23,13 @@ const maxHeightPct = 60
 type CloseMsg struct{}
 
 // ThemePreviewMsg is emitted as the highlight moves in the theme picker, so
-// the app can re-render live with the previewed theme.
-type ThemePreviewMsg struct{ Name string }
+// the app can re-render live with the previewed theme. Seq grows with each
+// preview of a palette: commands run concurrently, so the app drops a
+// preview older than one it already applied.
+type ThemePreviewMsg struct {
+	Name string
+	Seq  uint64
+}
 
 // ThemeChosenMsg is emitted when enter confirms a theme in the picker. It
 // comes alone: the app resolves the theme and closes the palette itself.
@@ -64,6 +69,8 @@ type Model struct {
 	themeNames   []string
 	themeCursor  int
 	currentTheme string
+	// previewSeq is the Seq of the last preview emitted.
+	previewSeq uint64
 
 	styles theme.Styles
 	width  int
@@ -107,6 +114,10 @@ func (m Model) SetThemeNames(names []string) Model {
 	}
 	return m
 }
+
+// InThemeMode reports whether the theme picker is showing: previews are
+// only wanted then.
+func (m Model) InThemeMode() bool { return m.mode == modeTheme }
 
 // SetStyles re-themes the palette, so the theme picker previews the
 // highlighted theme on itself too.
@@ -220,20 +231,24 @@ func (m Model) updateTheme(k tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, func() tea.Msg { return ThemeChosenMsg{Name: name} }
 	case "down", "ctrl+j":
 		m.themeCursor = clampInt(m.themeCursor+1, 0, max(len(m.themeNames)-1, 0))
-		return m, m.previewCmd()
+		cmd := m.previewCmd()
+		return m, cmd
 	case "up", "ctrl+k":
 		m.themeCursor = clampInt(m.themeCursor-1, 0, max(len(m.themeNames)-1, 0))
-		return m, m.previewCmd()
+		cmd := m.previewCmd()
+		return m, cmd
 	}
 	return m, nil
 }
 
-func (m Model) previewCmd() tea.Cmd {
+// previewCmd previews the highlighted theme with the next Seq.
+func (m *Model) previewCmd() tea.Cmd {
 	if m.themeCursor < 0 || m.themeCursor >= len(m.themeNames) {
 		return nil
 	}
-	name := m.themeNames[m.themeCursor]
-	return func() tea.Msg { return ThemePreviewMsg{Name: name} }
+	m.previewSeq++
+	msg := ThemePreviewMsg{Name: m.themeNames[m.themeCursor], Seq: m.previewSeq}
+	return func() tea.Msg { return msg }
 }
 
 func closeCmd() tea.Cmd {
