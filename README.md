@@ -20,7 +20,9 @@ Bubble Tea.
 - Automatic, invisible sync to a private GitHub repository, with an in-app
   conflict resolver for the rare cases that need one
 - 7 themes: Catppuccin (Mocha / Latte), Tokyo Night (Night / Day), Rosé Pine
-  (Main / Dawn), and Nord
+  (Main / Dawn), and Nord — plus your own theme files, live-reloaded, and
+  [matugen](https://github.com/InioX/matugen) support so Notty follows your
+  wallpaper
 
 ## Install
 
@@ -133,7 +135,7 @@ Here's the full set of keys, with their defaults:
 
 ```toml
 vault = "~/Notes"            # where your notes live
-theme = "catppuccin-mocha"   # see the theme list above; also settable live from the command palette
+theme = "catppuccin-mocha"   # a built-in or your own theme (see Themes below); also settable live from the command palette
 vim = true                   # vim-style modal editing; false for a plain typing mode
 line_numbers = false         # show line numbers in the editor (relative, when on)
 editor = ""                  # command for ctrl+e; falls back to $VISUAL, then $EDITOR, then nano (notepad on Windows)
@@ -169,6 +171,107 @@ checkboxes, sync states, toasts and the like:
 Only icons change: pane borders and separators are box-drawing characters
 in every set. Any other value is an error at startup.
 
+### Themes
+
+`theme` is one of the built-in themes — `catppuccin-mocha` (the default),
+`catppuccin-latte`, `tokyo-night`, `tokyo-night-day`, `rose-pine`,
+`rose-pine-dawn`, `nord` — or the name of a theme file of your own. You can
+also switch live with **Switch theme** in the command palette (`ctrl+k`),
+which previews each theme and saves your choice to the local config.
+
+#### Your own theme
+
+A theme file lives in the `themes` folder next to `config.toml`:
+`~/.config/notty/themes/<name>.toml` on Linux and macOS
+(`$XDG_CONFIG_HOME/notty/themes/` when that is set),
+`%APPDATA%\notty\themes\<name>.toml` on Windows. Its name is the file name
+without `.toml`, so `themes/dusk.toml` is `theme = "dusk"`; the theme picker
+and the first-run wizard list it after the built-ins. A file named like a
+built-in theme (`nord.toml`, say) is ignored: built-ins can't be overridden.
+Symlinked theme files work too, which is handy with a dotfile manager.
+
+Colors are `"#RRGGBB"` strings (any case). Unknown keys are an error, so a
+typo doesn't go unnoticed.
+
+| Key | Required | Colors | When left out |
+|---|---|---|---|
+| `base` | yes | the main background | |
+| `surface` | yes | raised panel backgrounds | |
+| `overlay` | yes | selection and highlight backgrounds | |
+| `text` | yes | body text | |
+| `subtext` | yes | secondary text | |
+| `muted` | yes | dim markup, unfocused borders | |
+| `accent` | yes | the main accent | |
+| `accent2` | yes | the second accent | |
+| `error` | yes | errors | |
+| `success` | no | success states | `#a6d189` in a dark theme, `#40a02b` in a light one |
+| `warning` | no | warnings | `#e5c890` in a dark theme, `#df8e1d` in a light one |
+| `headings` | no | headings H1 to H6 (also code highlighting): a list of up to 6 colors | each missing level alternates `accent`, `accent2`: H1, H3 and H5 get `accent`, H2, H4 and H6 `accent2` (`[accent, accent2][i % 2]` for level `i`, H1 = 0) |
+| `dark` | no | `true` for a dark theme, `false` for a light one | `true` when `base` is dark (relative luminance below 0.5) |
+
+A complete example:
+
+<!-- example theme file: loaded by internal/ui/theme/readme_test.go -->
+```toml
+# ~/.config/notty/themes/dusk.toml — use it with theme = "dusk"
+base     = "#141318"   # main background
+surface  = "#201f24"   # raised panel background
+overlay  = "#36343a"   # selection / highlight background
+text     = "#e6e1e9"
+subtext  = "#cac4cf"
+muted    = "#948f99"   # dim markup, unfocused borders
+accent   = "#cfbcff"
+accent2  = "#f2b7c2"
+error    = "#ffb4ab"
+
+# optional
+success  = "#a6d189"
+warning  = "#e5c890"
+headings = ["#cfbcff", "#f2b7c2", "#cbc2db"]   # H1, H2, H3; H4–H6 fall back
+dark     = true
+```
+
+**Live reload.** Notty watches the `themes` folder: save the theme file
+you're using and the colors change at once, no restart. A file that doesn't
+load (half-written, a typo) keeps the current colors and shows a warning
+naming the problem; the next good save applies silently. Deleting the file
+keeps the current colors, and it's loaded again when it comes back. Changes
+made to a symlink's target outside the `themes` folder are picked up the
+next time Notty starts.
+
+If the configured theme can't be loaded when Notty starts — for example
+`theme = "matugen"` synced through the vault's `.notty/settings.toml` to a
+machine without that file — Notty starts in `catppuccin-mocha` with a
+warning, and switches to your theme as soon as its file appears.
+
+#### Following your wallpaper with matugen (Noctalia)
+
+[matugen](https://github.com/InioX/matugen) generates Material You colors
+from your wallpaper; desktop shells such as Noctalia run it for you. To give
+Notty the same colors, run:
+
+```sh
+notty theme matugen
+```
+
+It writes Notty's matugen template to `~/.config/notty/matugen-template.toml`
+(an existing file is never overwritten) and prints the entry to add to your
+matugen config — for Noctalia, to its `user-templates.toml`:
+
+```toml
+[templates.notty]
+input_path  = "~/.config/notty/matugen-template.toml"
+output_path = "~/.config/notty/themes/matugen.toml"
+```
+
+(The printed paths are the real ones on your machine.) Then set
+`theme = "matugen"` in `config.toml`, or pick `matugen` with **Switch theme**
+once the file exists. From then on, every time matugen renders the template
+— a new wallpaper, a light/dark switch — Notty picks the new colors up by
+itself: no `post_hook` or restart needed. The template leaves `dark`,
+`success` and `warning` to the defaults above, so it works in both light and
+dark schemes.
+
 ## CLI
 
 ```
@@ -176,6 +279,7 @@ notty                          Open the TUI on the configured vault
 notty new "<title>" [--folder Work]
                                 Create a note (optionally inside a folder) and open it
 notty sync                      Run one headless sync cycle and exit; nonzero on conflict or error
+notty theme matugen             Write the matugen template and print the matugen config for it
 notty --vault <path>            Override the configured vault path for this run
 notty --version                 Print the version and exit
 ```
