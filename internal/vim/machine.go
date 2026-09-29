@@ -55,6 +55,11 @@ type Editor interface {
 	PasteClipboard(b *buffer.Buffer, text string, before bool)
 	ModeName() string
 	SetReadOnly(bool)
+	// Reset returns to the idle state (normal mode / no selection) on b,
+	// closing any open undo group. The UI calls it when it loads a note or
+	// replaces the text. Handing a different buffer to Handle or
+	// PasteClipboard resets implicitly.
+	Reset(b *buffer.Buffer)
 	// Selection returns the selection to highlight. End is exclusive; a
 	// selection that includes a line break ends at the start of the next
 	// line (which may be one past the last line for a linewise selection
@@ -69,9 +74,10 @@ const wantEOL = math.MaxInt
 type Machine struct {
 	mode     Mode
 	readOnly bool
-	pending  []string   // normal/visual keys typed so far
-	curswant int        // desired column for vertical motions
-	lastPos  buffer.Pos // cursor when the last key was handled
+	pending  []string       // normal/visual keys typed so far
+	curswant int            // desired column for vertical motions
+	lastPos  buffer.Pos     // cursor when the last key was handled
+	buf      *buffer.Buffer // buffer the state belongs to
 	nav      WrapNavigator
 	lastFind findState
 
@@ -141,6 +147,7 @@ func (m *Machine) isVisual() bool { return m.mode == Visual || m.mode == VisualL
 // Handle processes one key.
 func (m *Machine) Handle(b *buffer.Buffer, k Key) Effect {
 	m.eff = Effect{}
+	m.attach(b)
 	if b.Cursor() != m.lastPos {
 		// Moved from outside (mouse, reload): forget the desired column.
 		m.curswant = b.Cursor().Col
@@ -409,6 +416,7 @@ func (m *Machine) execVisualSpecial(b *buffer.Buffer, c cmd) bool {
 // NeedClipboard effect: at the cursor in insert mode, otherwise like p / P
 // (linewise if text ends with a newline).
 func (m *Machine) PasteClipboard(b *buffer.Buffer, text string, before bool) {
+	m.attach(b)
 	defer func() { m.lastPos = b.Cursor() }()
 	if text == "" || m.readOnly {
 		return
@@ -426,6 +434,47 @@ func (m *Machine) PasteClipboard(b *buffer.Buffer, text string, before bool) {
 	m.put(b, register{text: text, linewise: strings.HasSuffix(text, "\n")}, before, count)
 	m.endChange(b)
 	m.clampNormal(b)
+}
+
+// attach makes b the current buffer. Switching buffers ends the insert
+// session (closing its undo group on the old buffer) and drops visual,
+// command-line and pending state.
+func (m *Machine) attach(b *buffer.Buffer) {
+	if m.buf == b {
+		return
+	}
+	if m.buf != nil {
+		m.idle()
+	}
+	m.buf = b
+	m.lastPos = b.Cursor()
+	m.curswant = b.Cursor().Col
+}
+
+// idle closes any open change group and returns to normal mode.
+func (m *Machine) idle() {
+	if m.groupBuf != nil {
+		if m.mode == Insert {
+			m.insertRepeat = 0
+			m.leaveInsert(m.groupBuf)
+		} else {
+			m.endChange(m.groupBuf)
+		}
+	}
+	m.mode = Normal
+	m.pending = nil
+	m.cmdPrefix, m.cmdText = "", ""
+	m.pasteCount = 0
+}
+
+// Reset returns to normal mode on b, closing any open undo group (see
+// Editor).
+func (m *Machine) Reset(b *buffer.Buffer) {
+	m.idle()
+	m.buf = b
+	m.clampNormal(b)
+	m.lastPos = b.Cursor()
+	m.curswant = b.Cursor().Col
 }
 
 // SetReadOnly toggles read-only mode (conflicted notes). Only motions,

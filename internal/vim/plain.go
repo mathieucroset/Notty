@@ -13,6 +13,7 @@ type Plain struct {
 	anchor    buffer.Pos
 	curswant  int
 	lastPos   buffer.Pos
+	buf       *buffer.Buffer // buffer the state belongs to
 
 	// typing groups consecutive insertions into one undo step until a
 	// non-insertion key.
@@ -41,9 +42,40 @@ func (p *Plain) SetReadOnly(ro bool) {
 	}
 }
 
+// attach makes b the current buffer; switching buffers closes the typing
+// group on the old one and drops the selection.
+func (p *Plain) attach(b *buffer.Buffer) {
+	if p.buf == b {
+		return
+	}
+	if p.buf != nil {
+		p.idle()
+	}
+	p.buf = b
+	p.lastPos = b.Cursor()
+	p.curswant = b.Cursor().Col
+}
+
+// idle closes the typing group and clears the selection.
+func (p *Plain) idle() {
+	if p.groupBuf != nil {
+		p.endTyping(p.groupBuf)
+	}
+	p.selecting = false
+}
+
+// Reset returns to the idle state on b, closing any open undo group (see
+// Editor).
+func (p *Plain) Reset(b *buffer.Buffer) {
+	p.idle()
+	p.buf = b
+	p.lastPos = b.Cursor()
+	p.curswant = b.Cursor().Col
+}
+
 // Selection returns the shift-selection, if any.
 func (p *Plain) Selection(b *buffer.Buffer) (buffer.Range, bool) {
-	if !p.selecting {
+	if !p.selecting || b != p.buf {
 		return buffer.Range{}, false
 	}
 	r := buffer.Range{Start: b.Clamp(p.anchor), End: b.Cursor()}.Normalized()
@@ -62,6 +94,7 @@ var plainEdits = map[string]bool{
 // Handle processes one key.
 func (p *Plain) Handle(b *buffer.Buffer, k Key) Effect {
 	var eff Effect
+	p.attach(b)
 	if b.Cursor() != p.lastPos {
 		p.curswant = b.Cursor().Col
 	}
@@ -318,6 +351,7 @@ func (p *Plain) shiftLines(b *buffer.Buffer, indent bool) {
 // PasteClipboard inserts clipboard text at the cursor, replacing the
 // selection, as one undo step.
 func (p *Plain) PasteClipboard(b *buffer.Buffer, text string, before bool) {
+	p.attach(b)
 	defer func() { p.lastPos = b.Cursor() }()
 	if p.readOnly || text == "" {
 		return

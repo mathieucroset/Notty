@@ -58,7 +58,7 @@ func (m *Machine) visualRange(b *buffer.Buffer) (buffer.Range, bool) {
 // Selection returns the visual selection for rendering. A linewise
 // selection ends at the start of the line after the last selected one.
 func (m *Machine) Selection(b *buffer.Buffer) (buffer.Range, bool) {
-	if !m.isVisual() {
+	if !m.isVisual() || b != m.buf {
 		return buffer.Range{}, false
 	}
 	r, lw := m.visualRange(b)
