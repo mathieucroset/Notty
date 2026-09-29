@@ -7,9 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -62,8 +60,8 @@ type Viewer struct {
 	// Size returns the terminal size. Default: term.GetSize on stdout (or
 	// stdin when stdout is not a terminal).
 	Size func() (cols, rows int, err error)
-	// Open opens path with the system image viewer. Default: xdg-open,
-	// open, or cmd /c start.
+	// Open opens path with the system image viewer. Default: xdg-open
+	// (open on macOS, ShellExecute on Windows), without waiting for it.
 	Open func(path string) error
 
 	stdin  io.Reader
@@ -384,28 +382,6 @@ func defaultSize(files ...any) func() (int, int, error) {
 		}
 		return 0, 0, errors.New("terminal size: not a terminal")
 	}
-}
-
-// openWithSystem opens path with the platform's default application
-// without waiting for it.
-func openWithSystem(path string) error {
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", path)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", path)
-	default:
-		cmd = exec.Command("xdg-open", path)
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("open %s: %w", filepath.Base(path), err)
-	}
-	go func() { _ = cmd.Wait() }()
-	return nil
 }
 
 // keyReader reads and decodes keys in a goroutine.
