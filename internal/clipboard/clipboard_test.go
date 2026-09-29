@@ -33,6 +33,7 @@ func fakeClipboard(calls *[]runCall) *Clipboard {
 		Env:      func(string) string { return "" },
 		TempDir:  func() string { return "/faketmp" },
 		ReadFile: func(string) ([]byte, error) { return nil, errors.New("unstubbed ReadFile") },
+		Remove:   func(string) error { return nil },
 	}
 }
 
@@ -324,6 +325,46 @@ func TestReadImage_Darwin_NonPNGBytes(t *testing.T) {
 	}
 }
 
+// TestReadImage_Darwin_StaleTempFileIsNotReportedAsFreshImage is a
+// regression test for a critical bug: a PNG left over from a previous
+// ReadImage call must never be mistaken for the current clipboard content
+// when osascript produces nothing this time (e.g. the clipboard now holds
+// no image). ReadImage must remove the temp path before running osascript,
+// so that if osascript doesn't recreate it, the post-run ReadFile fails
+// and ReadImage returns ErrNoImage instead of the stale bytes.
+func TestReadImage_Darwin_StaleTempFileIsNotReportedAsFreshImage(t *testing.T) {
+	var calls []runCall
+	c := fakeClipboard(&calls)
+	c.GOOS = "darwin"
+
+	removed := false
+	c.Remove = func(string) error {
+		removed = true
+		return nil
+	}
+	c.Run = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, runCall{name: name, args: args})
+		// osascript "succeeds" but the clipboard has no image, so it
+		// writes nothing new to the temp file this time.
+		return nil, nil
+	}
+	c.ReadFile = func(string) ([]byte, error) {
+		if removed {
+			return nil, errors.New("no such file")
+		}
+		// A stale PNG left on disk from an earlier, successful call.
+		return validPNG, nil
+	}
+
+	_, err := c.ReadImage()
+	if !errors.Is(err, ErrNoImage) {
+		t.Fatalf("ReadImage() error = %v, want ErrNoImage (must not report the stale temp file as a fresh image)", err)
+	}
+	if !removed {
+		t.Fatalf("ReadImage() never called Remove on the temp path")
+	}
+}
+
 // TestReadImage_Darwin_EscapesTempPathForAppleScript guards against a temp
 // dir containing a double quote or backslash breaking out of the
 // AppleScript double-quoted POSIX file literal.
@@ -466,6 +507,43 @@ func TestReadImage_Windows_FileNotCreated(t *testing.T) {
 	}
 }
 
+// TestReadImage_Windows_StaleTempFileIsNotReportedAsFreshImage is the
+// Windows counterpart of the macOS regression test: a PNG left over from a
+// previous ReadImage call must never be mistaken for the current clipboard
+// content when powershell produces nothing this time.
+func TestReadImage_Windows_StaleTempFileIsNotReportedAsFreshImage(t *testing.T) {
+	var calls []runCall
+	c := fakeClipboard(&calls)
+	c.GOOS = "windows"
+
+	removed := false
+	c.Remove = func(string) error {
+		removed = true
+		return nil
+	}
+	c.Run = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, runCall{name: name, args: args})
+		// powershell runs but the clipboard has no image, so $i is $null
+		// and nothing is (re)written to the temp file this time.
+		return nil, nil
+	}
+	c.ReadFile = func(string) ([]byte, error) {
+		if removed {
+			return nil, errors.New("file does not exist")
+		}
+		// A stale PNG left on disk from an earlier, successful call.
+		return validPNG, nil
+	}
+
+	_, err := c.ReadImage()
+	if !errors.Is(err, ErrNoImage) {
+		t.Fatalf("ReadImage() error = %v, want ErrNoImage (must not report the stale temp file as a fresh image)", err)
+	}
+	if !removed {
+		t.Fatalf("ReadImage() never called Remove on the temp path")
+	}
+}
+
 func TestReadImage_UnsupportedGOOS(t *testing.T) {
 	var calls []runCall
 	c := fakeClipboard(&calls)
@@ -541,7 +619,7 @@ func TestErrNoTool_Error(t *testing.T) {
 
 func TestDefault(t *testing.T) {
 	c := Default()
-	if c.LookPath == nil || c.Run == nil || c.Env == nil || c.TempDir == nil || c.ReadFile == nil {
+	if c.LookPath == nil || c.Run == nil || c.Env == nil || c.TempDir == nil || c.ReadFile == nil || c.Remove == nil {
 		t.Fatalf("Default() left required fields nil: %+v", c)
 	}
 	if c.GOOS == "" {

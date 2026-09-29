@@ -58,6 +58,7 @@ type Clipboard struct {
 	Env      func(string) string
 	TempDir  func() string
 	ReadFile func(string) ([]byte, error)
+	Remove   func(string) error
 
 	readText  func() (string, error) // atotto by default
 	writeText func(string) error     // atotto by default
@@ -75,6 +76,7 @@ func Default() *Clipboard {
 		Env:       os.Getenv,
 		TempDir:   os.TempDir,
 		ReadFile:  os.ReadFile,
+		Remove:    os.Remove,
 		readText:  atotto.ReadAll,
 		writeText: atotto.WriteAll,
 	}
@@ -179,6 +181,11 @@ func (c *Clipboard) readImageDarwin() ([]byte, error) {
 	}
 
 	tmpPath := c.tempPNGPath()
+	// Clear any stale file left over from a previous run before invoking
+	// osascript, so a crash or a "no image" result can never be masked by
+	// leftover data from an earlier successful paste.
+	_ = c.Remove(tmpPath)
+
 	script := `write (the clipboard as «class PNGf») to (open for access POSIX file "` + escapeAppleScriptString(tmpPath) + `" with write permission)`
 	if _, err := c.Run("osascript", "-e", script); err != nil {
 		// osascript fails with "Can't make ... into type PNGf" (or any
@@ -187,7 +194,7 @@ func (c *Clipboard) readImageDarwin() ([]byte, error) {
 	}
 
 	data, err := c.ReadFile(tmpPath)
-	_ = os.Remove(tmpPath)
+	_ = c.Remove(tmpPath)
 	if err != nil {
 		return nil, ErrNoImage
 	}
@@ -203,6 +210,12 @@ func (c *Clipboard) readImageWindows() ([]byte, error) {
 	}
 
 	tmpPath := c.tempPNGPath()
+	// Clear any stale file left over from a previous run before invoking
+	// powershell: the file's presence afterwards is the source of truth
+	// for whether the clipboard held an image, so a leftover file here
+	// would be misread as a fresh paste.
+	_ = c.Remove(tmpPath)
+
 	script := `Add-Type -AssemblyName System.Windows.Forms, System.Drawing; ` +
 		`$i=[Windows.Forms.Clipboard]::GetImage(); ` +
 		`if($i){$i.Save('` + escapePowerShellString(tmpPath) + `',[System.Drawing.Imaging.ImageFormat]::Png)}`
@@ -211,7 +224,7 @@ func (c *Clipboard) readImageWindows() ([]byte, error) {
 	_, _ = c.Run("powershell", "-NoProfile", "-Command", script)
 
 	data, err := c.ReadFile(tmpPath)
-	_ = os.Remove(tmpPath)
+	_ = c.Remove(tmpPath)
 	if err != nil {
 		return nil, ErrNoImage
 	}
