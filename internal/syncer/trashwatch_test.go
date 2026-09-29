@@ -1,6 +1,10 @@
 package syncer
 
 import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -64,6 +68,77 @@ func TestTrashWarningLastChangeFromThisHost(t *testing.T) {
 	}
 	if got := h.rec.trashWarnings(); !slices.Equal(got, want) {
 		t.Fatalf("TrashWarnings = %+v, want one per trashed item %+v", got, want)
+	}
+}
+
+// fakeTrashRepo models a merge commit HEAD with parents O (ours) and T
+// (theirs) and merge base B, where T trashed note.md.
+type fakeTrashRepo struct{ local []gitsync.Change }
+
+func (f *fakeTrashRepo) MergeBase(a, b string) (string, error) {
+	revs := map[string]string{"O": "O", "HEAD": "M", "HEAD^1": "O", "HEAD^2": "T"}
+	if a == b {
+		if id, ok := revs[a]; ok {
+			return id, nil
+		}
+		return "", errors.New("unknown revision")
+	}
+	return "B", nil
+}
+
+func (f *fakeTrashRepo) DiffNameStatus(from, to string) ([]gitsync.Change, error) {
+	switch {
+	case from == "O" && to == "HEAD":
+		return []gitsync.Change{
+			{Status: 'R', OldPath: "note.md", Path: ".trash/" + deskTrashID + "/note.md"},
+			{Status: 'A', Path: ".trash/" + deskTrashID + "/meta.json"},
+		}, nil
+	case from == "B" && to == "O":
+		return f.local, nil
+	}
+	return nil, fmt.Errorf("unexpected diff %s..%s", from, to)
+}
+
+func (f *fakeTrashRepo) ShowAt(rev, path string) ([]byte, error) {
+	if rev == "O" && path == "note.md" {
+		return []byte("x"), nil
+	}
+	return nil, errors.New("missing")
+}
+
+func (f *fakeTrashRepo) LastCommitAdding(string) (string, error) { return "D", nil }
+
+func (f *fakeTrashRepo) LastCommitHostFor(string, string) (string, error) { return "desktop", nil }
+
+func TestTrashWarningLocalChangeKinds(t *testing.T) {
+	dir := t.TempDir()
+	metaDir := filepath.Join(dir, ".trash", deskTrashID)
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metaDir, "meta.json"), []byte(`{"original_path":"note.md","host":"desktop"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		local []gitsync.Change
+		warn  bool
+	}{
+		{"edited", []gitsync.Change{{Status: 'M', Path: "note.md"}}, true},
+		{"renamed here with edits", []gitsync.Change{{Status: 'R', OldPath: "draft.md", Path: "note.md"}}, true},
+		{"other note edited", []gitsync.Change{{Status: 'M', Path: "other.md"}}, false},
+		{"untouched", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws, err := detectTrashWarnings(&fakeTrashRepo{local: tt.local}, dir, "O", "laptop")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(ws) == 1; got != tt.warn {
+				t.Fatalf("warnings = %+v, want warning: %v", ws, tt.warn)
+			}
+		})
 	}
 }
 

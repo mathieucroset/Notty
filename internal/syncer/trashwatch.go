@@ -64,7 +64,9 @@ func detectTrashWarnings(r trashRepo, dir, origHead, host string) ([]TrashWarnin
 	}
 	editedHere := map[string]bool{}
 	for _, c := range local {
-		if c.Status == 'M' || c.Status == 'A' {
+		// A rename to the path counts too: git reports a rename with edits
+		// as R, and the content at that path changed here.
+		if c.Status == 'M' || c.Status == 'A' || c.Status == 'R' {
 			editedHere[c.Path] = true
 		}
 	}
