@@ -218,14 +218,20 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 
 	// The theme: built-in or <ConfigDir>/themes/<name>.toml (user themes
 	// spec §1). A theme that does not load falls back, with a warning toast
-	// once the app runs; Config.Theme keeps the wanted name.
+	// once the app runs; Config.Theme keeps the wanted name. A missing file
+	// (e.g. a synced theme = "matugen" on a machine without matugen) says
+	// where it was looked for; any other error names the theme itself
+	// ("theme mine.toml: ...").
 	cat := theme.Catalog{Dir: filepath.Join(filepath.Dir(e.configPath), "themes")}
 	var warnings []string
 	p, err := cat.Resolve(cfg.Theme)
 	if err != nil {
 		slog.Warn("theme not loaded", "theme", cfg.Theme, "err", err, "fallback", fallbackTheme)
-		// Resolve's errors name the theme ("theme mine.toml: ...").
-		warnings = append(warnings, fmt.Sprintf("Could not load %v — using %s", err, fallbackTheme))
+		if errors.Is(err, fs.ErrNotExist) {
+			warnings = append(warnings, fmt.Sprintf("Theme %q not found in %s — using %s", cfg.Theme, tildePath(cat.Dir), fallbackTheme))
+		} else {
+			warnings = append(warnings, fmt.Sprintf("Could not load %v — using %s", err, fallbackTheme))
+		}
 		p, _ = theme.Get(fallbackTheme)
 	}
 	opts := app.Options{

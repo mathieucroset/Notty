@@ -337,7 +337,8 @@ func (m *Model) NoteView() NoteView { return m.noteView }
 // NotePath returns the vault-relative path of the open note, or "".
 func (m *Model) NotePath() string { return m.note.path }
 
-// Init loads the vault tree and builds the index.
+// Init loads the vault tree and builds the index, and shows each of
+// Options.StartupWarnings as a warning toast, once (also over the wizard).
 func (m *Model) Init() tea.Cmd {
 	warnings := m.startupWarningsCmd()
 	if m.wizard != nil {

@@ -244,6 +244,16 @@ func TestUnknownThemeFallsBack(t *testing.T) {
 	}
 }
 
+// matchWild reports whether s matches pattern, where one "*" matches any
+// text.
+func matchWild(pattern, s string) bool {
+	before, after, wild := strings.Cut(pattern, "*")
+	if !wild {
+		return s == pattern
+	}
+	return len(s) >= len(before)+len(after) && strings.HasPrefix(s, before) && strings.HasSuffix(s, after)
+}
+
 // userTheme is a valid user theme file.
 const userTheme = `base = "#141318"
 surface = "#201f24"
@@ -262,16 +272,20 @@ func TestUserThemeAtStartup(t *testing.T) {
 		file        string // themes/mine.toml content; "" = absent
 		wizard      bool
 		wantPalette string
-		wantWarning bool
+		// wantWarning is the one startup warning ("" = none); {dir} is the
+		// themes directory.
+		wantWarning string
 	}{
-		{"present", userTheme, false, "mine", false},
-		{"absent", "", false, fallbackTheme, true},
-		{"invalid", "base = 1\n", false, fallbackTheme, true},
-		{"present, wizard", userTheme, true, "mine", false},
-		{"absent, wizard", "", true, fallbackTheme, true},
+		{"present", userTheme, false, "mine", ""},
+		{"absent", "", false, fallbackTheme, `Theme "mine" not found in {dir} — using ` + fallbackTheme},
+		{"invalid", "base = 1\n", false, fallbackTheme, "Could not load theme mine.toml: * — using " + fallbackTheme},
+		{"present, wizard", userTheme, true, "mine", ""},
+		{"absent, wizard", "", true, fallbackTheme, `Theme "mine" not found in {dir} — using ` + fallbackTheme},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// A home outside the temp dirs, so paths are printed in full.
+			t.Setenv("HOME", t.TempDir())
 			f := newFixture(t)
 			if !tt.wizard {
 				f.makeRepo(t)
@@ -302,11 +316,12 @@ func TestUserThemeAtStartup(t *testing.T) {
 			if o.Catalog.Dir != themes {
 				t.Errorf("Catalog.Dir = %q, want %q", o.Catalog.Dir, themes)
 			}
+			want := strings.ReplaceAll(tt.wantWarning, "{dir}", themes)
 			switch w := o.StartupWarnings; {
-			case tt.wantWarning && (len(w) != 1 || !strings.Contains(w[0], "mine")):
-				t.Errorf("StartupWarnings = %q, want one naming mine", w)
-			case !tt.wantWarning && len(w) != 0:
+			case want == "" && len(w) != 0:
 				t.Errorf("StartupWarnings = %q, want none", w)
+			case want != "" && (len(w) != 1 || !matchWild(want, w[0])):
+				t.Errorf("StartupWarnings = %q, want [%q]", w, want)
 			}
 			if got := f.stderr.String(); got != "" {
 				t.Errorf("stderr = %q, want nothing", got)
