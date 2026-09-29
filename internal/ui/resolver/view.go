@@ -8,18 +8,17 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/textutil"
 )
 
 // Layout constants.
 const (
-	listWidth      = 28  // file list width on wide terminals
-	narrowBelow    = 100 // below this width only one text column is shown
-	minSplitWidth  = 40  // below this width the file list is hidden
-	previewGap     = 2   // columns between the two binary previews
-	tabWidth       = 4   // spaces a tab is shown as
-	resolvedMarker = "✓"
-	pendingMarker  = "●"
+	listWidth     = 28  // file list width on wide terminals
+	narrowBelow   = 100 // below this width only one text column is shown
+	minSplitWidth = 40  // below this width the file list is hidden
+	previewGap    = 2   // columns between the two binary previews
+	tabWidth      = 4   // spaces a tab is shown as
 )
 
 var columnTitles = [...]string{"Yours", "Theirs", "Result"}
@@ -119,16 +118,16 @@ func (m Model) body() []string {
 }
 
 // kindIcon is the file list's icon for a file kind.
-func kindIcon(k FileKind) string {
+func kindIcon(set icons.Set, k FileKind) string {
 	switch k {
 	case Binary:
-		return "◆"
+		return set.KindBinary
 	case ModifyDelete:
-		return "±"
+		return set.KindModifyDelete
 	case PathConflict:
-		return "⇄"
+		return set.KindPath
 	}
-	return "≡"
+	return set.KindText
 }
 
 // fileList renders the file list, keeping the selection in view.
@@ -139,20 +138,20 @@ func (m Model) fileList(w, h int) []string {
 	selStyle := m.styles.SidebarSelectedFocused
 	var entries []entry
 	for i, it := range m.items {
-		mark := m.styles.Warning.Render(pendingMarker)
+		mark := m.styles.Warning.Render(m.styles.Icons.Dirty)
 		if it.file.Resolved {
-			mark = m.styles.Success.Render(resolvedMarker)
+			mark = m.styles.Success.Render(m.styles.Icons.Check)
 		}
 		name := truncateLeft(it.file.Path, max(1, w-6))
-		row := " " + mark + " " + kindIcon(it.file.Kind) + " "
+		row := " " + mark + " " + kindIcon(m.styles.Icons, it.file.Kind) + " "
 		if i == m.sel {
-			row = selStyle.Render(" ") + mark + selStyle.Render(" "+kindIcon(it.file.Kind)+" "+textutil.PadLine(name, max(0, w-5)))
+			row = selStyle.Render(" ") + mark + selStyle.Render(" "+kindIcon(m.styles.Icons, it.file.Kind)+" "+textutil.PadLine(name, max(0, w-5)))
 		} else {
 			row += name
 		}
 		e := entry{rows: []string{row}}
 		if it.err != "" {
-			e.rows = append(e.rows, m.styles.Error.Render("   ✗ "+sanitize(it.err)))
+			e.rows = append(e.rows, m.styles.Error.Render("   "+m.styles.Icons.Error+" "+sanitize(it.err)))
 		}
 		entries = append(entries, e)
 	}
@@ -219,7 +218,7 @@ func (m Model) rightPane(w, h int) []string {
 	var content []string
 	switch {
 	case it.file.Resolved:
-		content = []string{"", m.styles.Success.Render(" " + resolvedMarker + " This file is resolved.")}
+		content = []string{"", m.styles.Success.Render(" " + m.styles.Icons.Check + " This file is resolved.")}
 	case m.editing:
 		content = append([]string{m.styles.Muted.Render(" " + editNote)}, strings.Split(m.ed.View(), "\n")...)
 	case it.text != nil:
@@ -280,7 +279,7 @@ func (m Model) messageLine(it *item) string {
 		}
 		return m.styles.Muted.Render(" " + m.status)
 	case it.err != "":
-		return m.styles.Error.Render(" ✗ " + sanitize(it.err))
+		return m.styles.Error.Render(" " + m.styles.Icons.Error + " " + sanitize(it.err))
 	case it.pending:
 		return m.styles.Muted.Render(" Saving…")
 	case m.hint != "":
