@@ -642,25 +642,23 @@ func TestCloseStopsGoroutines(t *testing.T) {
 		t.Fatalf("second Close: %v", err)
 	}
 
+	waitClosed(t, "Events", w.Events())
+	waitClosed(t, "Errors", w.Errors())
+}
+
+// waitClosed drains ch until it is closed, failing after waitTimeout.
+func waitClosed[T any](t *testing.T, name string, ch <-chan T) {
+	t.Helper()
 	deadline := time.After(waitTimeout)
 	for {
 		select {
-		case _, ok := <-w.Events():
+		case _, ok := <-ch:
 			if !ok {
-				goto errorsClosed
+				return
 			}
 		case <-deadline:
-			t.Fatal("events channel not closed after Close")
+			t.Fatalf("%s channel not closed after Close", name)
 		}
-	}
-errorsClosed:
-	select {
-	case _, ok := <-w.Errors():
-		if ok {
-			t.Fatal("errors channel delivered a value after Close")
-		}
-	case <-time.After(waitTimeout):
-		t.Fatal("errors channel not closed after Close")
 	}
 }
 
