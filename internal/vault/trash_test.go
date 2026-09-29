@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +104,7 @@ func TestTrash(t *testing.T) {
 			if exists(v, orig) {
 				t.Errorf("original %q still exists", orig)
 			}
+			assertNoTmp(t, v.Root)
 			cp := v.TrashContentPath(it)
 			if want := ".trash/" + it.ID + "/" + it.Name; cp != want {
 				t.Errorf("TrashContentPath = %q, want %q", cp, want)
@@ -566,6 +568,69 @@ func TestPurgeOlderThan(t *testing.T) {
 	if want := "Fresh.md,Week.md,Exactly.md"; strings.Join(got, ",") != want {
 		t.Errorf("remaining = %v, want %s", got, want)
 	}
+}
+
+// lockItem makes a trash item's directory undeletable (its contents cannot
+// be removed) until the test ends.
+func lockItem(t *testing.T, v *Vault, it TrashItem) {
+	t.Helper()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("permission-based failure injection needs a non-root unix user")
+	}
+	dir := v.Abs(itemDir(it.ID))
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+}
+
+func TestTrashDeletionFailures(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	setup := func(t *testing.T) (*Vault, TrashItem, TrashItem) {
+		v := trashVault(t)
+		mkfiles(t, v.Root, "Stuck.md", "Free.md")
+		stuck, err := v.trashAt("Stuck.md", now.Add(-48*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		free, err := v.trashAt("Free.md", now.Add(-72*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		lockItem(t, v, stuck)
+		return v, stuck, free
+	}
+	t.Run("EmptyTrash keeps going and reports", func(t *testing.T) {
+		v, stuck, free := setup(t)
+		if err := v.EmptyTrash(); err == nil {
+			t.Fatal("EmptyTrash succeeded despite an undeletable item")
+		}
+		if exists(v, itemDir(free.ID)) {
+			t.Error("EmptyTrash stopped before removing the deletable item")
+		}
+		if !exists(v, itemDir(stuck.ID)) {
+			t.Error("undeletable item vanished")
+		}
+	})
+	t.Run("PurgeOlderThan counts only removed items", func(t *testing.T) {
+		v, stuck, free := setup(t)
+		n, err := v.PurgeOlderThan(24*time.Hour, now)
+		if err == nil {
+			t.Fatal("PurgeOlderThan succeeded despite an undeletable item")
+		}
+		if n != 1 {
+			t.Errorf("purged %d, want 1", n)
+		}
+		if exists(v, itemDir(free.ID)) || !exists(v, itemDir(stuck.ID)) {
+			t.Error("wrong items purged")
+		}
+	})
+	t.Run("DeleteForever reports", func(t *testing.T) {
+		v, stuck, _ := setup(t)
+		if err := v.DeleteForever(stuck); err == nil {
+			t.Error("DeleteForever succeeded on an undeletable item")
+		}
+	})
 }
 
 func TestTrashFolderMustBeRealDirectory(t *testing.T) {
