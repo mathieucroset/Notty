@@ -82,17 +82,17 @@ func (m Model) WithCurrentTheme(name string) Model {
 }
 
 // SetSize sizes the overlay box for a termW x termH terminal: about 60
-// columns wide (clamped to the terminal), up to 60% of the terminal's
-// height.
+// columns wide, up to 60% of the terminal's height, but never wider or
+// taller than the terminal itself.
 func (m Model) SetSize(termW, termH int) Model {
 	m.width = boxWidth
-	if maxW := termW - 4; maxW < m.width {
-		m.width = max(maxW, 20)
+	if margin := termW - 4; margin < m.width {
+		m.width = margin
 	}
-	m.height = max(termH*maxHeightPct/100, 6)
-	if m.height > termH {
-		m.height = termH
-	}
+	m.width = clampInt(m.width, 1, max(termW, 1))
+
+	m.height = termH * maxHeightPct / 100
+	m.height = clampInt(m.height, 1, max(termH, 1))
 	return m
 }
 
@@ -279,8 +279,8 @@ func (m Model) viewTheme() string {
 // border and padding.
 func (m Model) innerWidth() int {
 	w := m.width - 2 - 4 // border (2) + horizontal padding (2x2)
-	if w < 10 {
-		w = 10
+	if w < 1 {
+		w = 1
 	}
 	return w
 }
