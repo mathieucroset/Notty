@@ -605,3 +605,81 @@ func TestUndoRedoRandomized(t *testing.T) {
 		}
 	}
 }
+
+func TestBeginGroupAtRestoresCursor(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial string
+		cursor  Pos
+		edit    func(b *Buffer)
+		want    Pos
+	}{
+		// Deleting the last line starts the change at the end of the
+		// previous line; the recorded cursor wins.
+		{"delete last line", "a\nb", P(1, 0), func(b *Buffer) { b.Delete(R(0, 1, 1, 1)) }, P(1, 0)},
+		{"append at end", "ab", P(0, 0), func(b *Buffer) { b.Insert(P(0, 2), ";") }, P(0, 0)},
+		{"multi edit", "abc", P(0, 2), func(b *Buffer) {
+			b.Insert(P(0, 0), "x")
+			b.Insert(P(0, 4), "y")
+		}, P(0, 2)},
+		{"recorded cursor clamped", "abc", P(0, 9), func(b *Buffer) { b.Insert(P(0, 0), "x") }, P(0, 3)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := New(tt.initial)
+			b.BeginGroupAt(tt.cursor)
+			tt.edit(b)
+			b.EndGroup()
+			pos, ok := b.Undo()
+			if !ok || b.String() != tt.initial {
+				t.Fatalf("Undo() ok=%v String()=%q", ok, b.String())
+			}
+			if pos != tt.want || b.Cursor() != tt.want {
+				t.Errorf("Undo() pos = %v cursor = %v, want %v", pos, b.Cursor(), tt.want)
+			}
+		})
+	}
+}
+
+func TestBeginGroupAtMultipleLevels(t *testing.T) {
+	b := New("one\ntwo\nthree")
+	b.BeginGroupAt(P(1, 2))
+	b.Delete(R(1, 0, 2, 0))
+	b.EndGroup()
+	b.BeginGroupAt(P(0, 1))
+	b.Delete(R(0, 1, 0, 2))
+	b.EndGroup()
+	b.Insert(P(0, 0), "z") // plain edit: start of change
+
+	for _, want := range []Pos{P(0, 0), P(0, 1), P(1, 2)} {
+		if pos, _ := b.Undo(); pos != want {
+			t.Errorf("Undo() = %v, want %v", pos, want)
+		}
+	}
+	// Redo still goes to the start of the change.
+	if pos, _ := b.Redo(); pos != P(1, 0) {
+		t.Errorf("Redo() = %v, want %v", pos, P(1, 0))
+	}
+	// Undo after redo restores the recorded cursor again.
+	if pos, _ := b.Undo(); pos != P(1, 2) {
+		t.Errorf("Undo() after redo = %v, want %v", pos, P(1, 2))
+	}
+}
+
+func TestBeginGroupAtNestingAndPlainGroups(t *testing.T) {
+	b := New("abc")
+	b.BeginGroupAt(P(0, 1))
+	b.BeginGroupAt(P(0, 2)) // inner: ignored
+	b.Insert(P(0, 3), "d")
+	b.EndGroup()
+	b.EndGroup()
+	b.BeginGroup() // a plain group must not inherit the old cursor
+	b.Insert(P(0, 4), "e")
+	b.EndGroup()
+	if pos, _ := b.Undo(); pos != P(0, 4) {
+		t.Errorf("plain group Undo() = %v, want %v", pos, P(0, 4))
+	}
+	if pos, _ := b.Undo(); pos != P(0, 1) {
+		t.Errorf("outer BeginGroupAt Undo() = %v, want %v", pos, P(0, 1))
+	}
+}

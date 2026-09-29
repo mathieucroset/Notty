@@ -1,0 +1,70 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: notty
+    main: ./cmd/notty
+    binary: notty
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    flags:
+      - -trimpath
+
+archives:
+  - id: notty
+    ids:
+      - notty
+    formats: [tar.gz]
+    name_template: "notty_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: "Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: "Bug fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: "Others"
+      order: 999
+  filters:
+    exclude:
+      - '^docs?:'
+      - '^chore:'
+      - '^test:'
+      - '^ci:'
+
+# Publishes a Homebrew Cask to the mathieucroset/homebrew-tap repository.
+# That repository must already exist, and the release workflow must provide
+# a HOMEBREW_TAP_GITHUB_TOKEN secret with push access to it. skip_upload is
+# set to "auto" so prerelease tags (e.g. v1.0.0-rc1) don't publish a cask.
+homebrew_casks:
+  - name: notty
+    repository:
+      owner: mathieucroset
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    skip_upload: auto
+    homepage: "https://github.com/mathieucroset/notty"
+    description: "Terminal markdown notes app"
+    license: "MIT"
