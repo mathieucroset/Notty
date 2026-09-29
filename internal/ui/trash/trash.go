@@ -144,6 +144,9 @@ func (m Model) SetSize(w, h int) Model {
 
 // Title returns the pane title, e.g. "Trash · 3 items".
 func (m Model) Title() string {
+	if len(m.items) == 1 {
+		return "Trash · 1 item"
+	}
 	return fmt.Sprintf("Trash · %d items", len(m.items))
 }
 

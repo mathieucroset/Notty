@@ -150,6 +150,10 @@ func TestTitle(t *testing.T) {
 	if got, want := m.Title(), "Trash · 0 items"; got != want {
 		t.Errorf("Title() (empty) = %q, want %q", got, want)
 	}
+	m = m.SetItems(threeItems()[:1], now)
+	if got, want := m.Title(), "Trash · 1 item"; got != want {
+		t.Errorf("Title() (one) = %q, want %q", got, want)
+	}
 }
 
 func TestUpdateKeyMessages(t *testing.T) {

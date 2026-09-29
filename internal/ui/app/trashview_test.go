@@ -30,7 +30,7 @@ func TestTrashView(t *testing.T) {
 		t.Fatalf("MainView = %v, focus = %v", m.MainView(), m.Focus())
 	}
 	s := screen(m)
-	for _, want := range []string{"Trash · 1 item", "ideas", "A note app in the terminal"} {
+	for _, want := range []string{"Trash · 1 item ─", "ideas", "A note app in the terminal"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("trash view missing %q:\n%s", want, s)
 		}
