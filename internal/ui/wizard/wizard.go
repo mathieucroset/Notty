@@ -649,9 +649,7 @@ func (m Model) syncKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 func (m Model) confirmRepo() (Model, tea.Cmd) {
 	name := strings.TrimSpace(m.repoInput.Value())
-	// Reuse setup's validation of the name.
-	_, err := setup.Plan(setup.Request{Vault: "x", Choice: setup.CreateGitHub, RepoName: name, GHAvailable: true}, setup.Missing, setup.RemoteState{})
-	if err != nil {
+	if err := setup.ValidateRepoName(name); err != nil {
 		if name == "" {
 			m.repoErr = "Enter a name for the repo."
 		} else {
