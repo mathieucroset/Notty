@@ -3,6 +3,11 @@ package theme
 import (
 	"fmt"
 	"image/color"
+	"strings"
+	"sync"
+
+	chroma "github.com/alecthomas/chroma/v2"
+	chromastyles "github.com/alecthomas/chroma/v2/styles"
 
 	"charm.land/glamour/v2/ansi"
 	"charm.land/glamour/v2/styles"
@@ -16,9 +21,88 @@ func hexString(c color.Color) *string {
 	return &s
 }
 
+func hexOf(c color.Color) string { return *hexString(c) }
+
 func strPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool    { return &b }
 func uintPtr(u uint) *uint    { return &u }
+
+// chromaMu guards registration of chroma (syntax-highlighting) styles into
+// the process-global chroma/v2/styles registry.
+var chromaMu sync.Mutex
+
+// ChromaStyleName returns the name of the chroma syntax-highlighting style
+// for p, registering it in the global chroma style registry on first use.
+// Both the glamour preview (via GlamourStyle) and the editor's live code
+// highlighting call this so code-block colors always come from the same,
+// theme-specific chroma style rather than glamour's fixed "charm" style
+// name, which would otherwise freeze to whichever palette rendered first.
+func ChromaStyleName(p Palette) string {
+	name := "notty-" + p.Name
+	registerChromaStyle(name, p)
+	return name
+}
+
+// chromaEntry builds a chroma StyleEntries value (e.g. "#89b4fa bold") from
+// palette-derived attributes. fg and bg may be nil to leave them unset.
+func chromaEntry(fg, bg color.Color, bold, italic bool) string {
+	var parts []string
+	if fg != nil {
+		parts = append(parts, hexOf(fg))
+	}
+	if bg != nil {
+		parts = append(parts, "bg:"+hexOf(bg))
+	}
+	if italic {
+		parts = append(parts, "italic")
+	}
+	if bold {
+		parts = append(parts, "bold")
+	}
+	return strings.Join(parts, " ")
+}
+
+// registerChromaStyle registers name in the global chroma styles registry,
+// built from p's tokens, unless a style with that name is already
+// registered. Safe to call repeatedly and concurrently.
+func registerChromaStyle(name string, p Palette) {
+	chromaMu.Lock()
+	defer chromaMu.Unlock()
+
+	if _, ok := chromastyles.Registry[strings.ToLower(name)]; ok {
+		return
+	}
+
+	chromastyles.Register(chroma.MustNewStyle(name, chroma.StyleEntries{
+		chroma.Text:                chromaEntry(p.Text, nil, false, false),
+		chroma.Error:               chromaEntry(p.Base, p.Error, false, false),
+		chroma.Comment:             chromaEntry(p.Muted, nil, false, true),
+		chroma.CommentPreproc:      chromaEntry(p.Accent2, nil, false, false),
+		chroma.Keyword:             chromaEntry(p.Accent, nil, false, false),
+		chroma.KeywordReserved:     chromaEntry(p.Accent, nil, false, false),
+		chroma.KeywordNamespace:    chromaEntry(p.Accent2, nil, false, false),
+		chroma.KeywordType:         chromaEntry(p.Headings[4], nil, false, false),
+		chroma.Operator:            chromaEntry(p.Subtext, nil, false, false),
+		chroma.Punctuation:         chromaEntry(p.Subtext, nil, false, false),
+		chroma.Name:                chromaEntry(p.Text, nil, false, false),
+		chroma.NameBuiltin:         chromaEntry(p.Accent2, nil, false, false),
+		chroma.NameTag:             chromaEntry(p.Accent, nil, false, false),
+		chroma.NameAttribute:       chromaEntry(p.Headings[2], nil, false, false),
+		chroma.NameClass:           chromaEntry(p.Headings[1], nil, true, false),
+		chroma.NameConstant:        chromaEntry(p.Headings[3], nil, false, false),
+		chroma.NameDecorator:       chromaEntry(p.Warning, nil, false, false),
+		chroma.NameFunction:        chromaEntry(p.Success, nil, false, false),
+		chroma.LiteralNumber:       chromaEntry(p.Headings[3], nil, false, false),
+		chroma.LiteralString:       chromaEntry(p.Success, nil, false, false),
+		chroma.LiteralStringEscape: chromaEntry(p.Warning, nil, false, false),
+		chroma.GenericDeleted:      chromaEntry(p.Error, nil, false, false),
+		chroma.GenericEmph:         chromaEntry(nil, nil, false, true),
+		chroma.GenericInserted:     chromaEntry(p.Success, nil, false, false),
+		chroma.GenericStrong:       chromaEntry(nil, nil, true, false),
+		chroma.GenericSubheading:   chromaEntry(p.Subtext, nil, false, false),
+		chroma.Background:          chromaEntry(nil, p.Surface, false, false),
+	}))
+}
 
 // GlamourStyle builds a glamour ansi.StyleConfig from p's tokens, so the
 // markdown preview always matches the rest of the UI. It starts from
@@ -82,35 +166,13 @@ func GlamourStyle(p Palette) ansi.StyleConfig {
 	s.CodeBlock.Color = hexString(p.Text)
 	s.CodeBlock.BackgroundColor = hexString(p.Surface)
 	s.CodeBlock.Margin = uintPtr(2)
-	s.CodeBlock.Chroma = &ansi.Chroma{
-		Text:                ansi.StylePrimitive{Color: hexString(p.Text)},
-		Error:               ansi.StylePrimitive{Color: hexString(p.Base), BackgroundColor: hexString(p.Error)},
-		Comment:             ansi.StylePrimitive{Color: hexString(p.Muted), Italic: boolPtr(true)},
-		CommentPreproc:      ansi.StylePrimitive{Color: hexString(p.Accent2)},
-		Keyword:             ansi.StylePrimitive{Color: hexString(p.Accent)},
-		KeywordReserved:     ansi.StylePrimitive{Color: hexString(p.Accent)},
-		KeywordNamespace:    ansi.StylePrimitive{Color: hexString(p.Accent2)},
-		KeywordType:         ansi.StylePrimitive{Color: hexString(p.Headings[4])},
-		Operator:            ansi.StylePrimitive{Color: hexString(p.Subtext)},
-		Punctuation:         ansi.StylePrimitive{Color: hexString(p.Subtext)},
-		Name:                ansi.StylePrimitive{Color: hexString(p.Text)},
-		NameBuiltin:         ansi.StylePrimitive{Color: hexString(p.Accent2)},
-		NameTag:             ansi.StylePrimitive{Color: hexString(p.Accent)},
-		NameAttribute:       ansi.StylePrimitive{Color: hexString(p.Headings[2])},
-		NameClass:           ansi.StylePrimitive{Color: hexString(p.Headings[1]), Bold: boolPtr(true)},
-		NameConstant:        ansi.StylePrimitive{Color: hexString(p.Headings[3])},
-		NameDecorator:       ansi.StylePrimitive{Color: hexString(p.Warning)},
-		NameFunction:        ansi.StylePrimitive{Color: hexString(p.Success)},
-		LiteralNumber:       ansi.StylePrimitive{Color: hexString(p.Headings[3])},
-		LiteralString:       ansi.StylePrimitive{Color: hexString(p.Success)},
-		LiteralStringEscape: ansi.StylePrimitive{Color: hexString(p.Warning)},
-		GenericDeleted:      ansi.StylePrimitive{Color: hexString(p.Error)},
-		GenericEmph:         ansi.StylePrimitive{Italic: boolPtr(true)},
-		GenericInserted:     ansi.StylePrimitive{Color: hexString(p.Success)},
-		GenericStrong:       ansi.StylePrimitive{Bold: boolPtr(true)},
-		GenericSubheading:   ansi.StylePrimitive{Color: hexString(p.Subtext)},
-		Background:          ansi.StylePrimitive{BackgroundColor: hexString(p.Surface)},
-	}
+	// Register (or reuse) a theme-specific chroma style and reference it by
+	// name, rather than setting CodeBlock.Chroma: glamour's renderer always
+	// registers an inline Chroma config under the single fixed style name
+	// "charm", so the first palette rendered in a process would otherwise
+	// win permanently.
+	s.CodeBlock.Chroma = nil
+	s.CodeBlock.Theme = ChromaStyleName(p)
 
 	s.Table.Color = hexString(p.Text)
 	s.Table.CenterSeparator = strPtr("┼")

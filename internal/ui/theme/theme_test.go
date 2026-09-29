@@ -105,6 +105,61 @@ func TestNewStylesDoesNotPanic(t *testing.T) {
 	}
 }
 
+// TestChromaStyleDoesNotLeakAcrossPalettes is a regression test for a bug
+// where glamour registers CodeBlock.Chroma under the single fixed chroma
+// style name "charm" and only registers it once per process, so code-block
+// syntax colors froze to whichever palette rendered first. GlamourStyle must
+// instead register a uniquely named chroma style per palette (via
+// ChromaStyleName) so rendering a code block under two different palettes,
+// in the same process, produces different colored output.
+func TestChromaStyleDoesNotLeakAcrossPalettes(t *testing.T) {
+	const md = "```go\nfunc main() {}\n```\n"
+
+	render := func(name string) string {
+		p, ok := Get(name)
+		if !ok {
+			t.Fatalf("Get(%q) failed", name)
+		}
+		r, err := glamour.NewTermRenderer(
+			glamour.WithStyles(GlamourStyle(p)),
+			glamour.WithWordWrap(60),
+		)
+		if err != nil {
+			t.Fatalf("palette %q: NewTermRenderer error: %v", name, err)
+		}
+		out, err := r.Render(md)
+		if err != nil {
+			t.Fatalf("palette %q: Render error: %v", name, err)
+		}
+		return out
+	}
+
+	// Render mocha first, then latte, in the same process: if chroma style
+	// names collided, latte's render would still carry mocha's colors.
+	mocha := render("catppuccin-mocha")
+	latte := render("catppuccin-latte")
+
+	if mocha == latte {
+		t.Fatalf("rendered code block is identical between catppuccin-mocha and catppuccin-latte; chroma style is leaking across palettes")
+	}
+}
+
+func TestChromaStyleNameStableAndUnique(t *testing.T) {
+	for _, name := range Names() {
+		p, _ := Get(name)
+		got := ChromaStyleName(p)
+		want := "notty-" + name
+		if got != want {
+			t.Errorf("ChromaStyleName(%q) = %q, want %q", name, got, want)
+		}
+		// Calling it again must return the same name and must not panic
+		// (re-registration must be a safe no-op).
+		if again := ChromaStyleName(p); again != got {
+			t.Errorf("ChromaStyleName(%q) not stable across calls: %q then %q", name, got, again)
+		}
+	}
+}
+
 func TestGlamourStyleRenders(t *testing.T) {
 	const md = "# Hi\n\n**b** and - [x] done"
 	for _, name := range Names() {
