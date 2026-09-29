@@ -60,6 +60,7 @@ func (m *Model) refreshIndexViews() {
 	}
 	m.sidebar.SetTags(tags)
 	m.applyFilter()
+	m.refreshTasks()
 }
 
 // applyFilter limits the sidebar tree to the notes carrying the active tag

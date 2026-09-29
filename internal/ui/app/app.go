@@ -4,6 +4,7 @@ package app
 
 import (
 	"path"
+	"time"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/sidebar"
 	"github.com/mathieucroset/notty/internal/ui/statusbar"
+	"github.com/mathieucroset/notty/internal/ui/tasksview"
 	"github.com/mathieucroset/notty/internal/ui/textutil"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/ui/toast"
@@ -45,6 +47,8 @@ type Options struct {
 	// Watcher reports changes made outside the app. The app listens to it
 	// from Init and closes it on quit; nil disables watching.
 	Watcher *watcher.Watcher
+	// Now is the clock (time.Now when nil); tests fix it.
+	Now func() time.Time
 }
 
 // Focus is the pane with keyboard focus.
@@ -120,6 +124,10 @@ type Model struct {
 	// pendingSelect is a path to select in the sidebar once the next tree
 	// refresh lands (a note or folder just created, renamed or moved).
 	pendingSelect string
+
+	tasks      tasksview.Model
+	openTasks  int
+	trashCount int
 	note    note
 	openSeq int // number of the latest open request
 	sync    msgs.SyncStatusMsg
@@ -140,6 +148,7 @@ func New(opts Options) *Model {
 		sidebar:        sidebar.New(opts.Styles),
 		status:         statusbar.New(opts.Styles),
 		toast:          toast.New(opts.Styles),
+		tasks:          tasksview.New(opts.Styles, opts.Config.Tasks.DueSoonDays, opts.Config.Tasks.ShowDone),
 	}
 	m.sidebar.SetExpanded(opts.Local.Expanded)
 	m.sidebar.SetPins(opts.Pins.Pins)
@@ -231,8 +240,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case msgs.ActivateEntryMsg:
 		switch msg.Entry {
 		case msgs.EntryTasks:
-			m.mainView = ViewTasks
-			m.setFocus(FocusMain)
+			m.showTasks()
 		case msgs.EntryTrash:
 			m.mainView = ViewTrash
 			m.setFocus(FocusMain)
@@ -279,6 +287,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleWatchErr(msg)
 	case savedMsg:
 		return m, m.handleSaved(msg)
+	case msgs.ToggleTaskMsg:
+		return m, m.toggleTask(msg)
+	case taskToggledMsg:
+		return m, m.handleTaskToggled(msg)
+	case tasksview.BackMsg:
+		m.mainView = ViewNote
 	case dialog.ResultMsg:
 		return m, m.handleDialogResult(msg)
 	default:
@@ -347,6 +361,7 @@ func (m *Model) relayout() {
 	} else if m.focus == FocusSidebar {
 		m.setFocus(FocusMain)
 	}
+	m.tasks = m.tasks.SetSize(l.Content.W, l.Content.H)
 	m.status.SetSize(l.Status.W)
 }
 
@@ -411,7 +426,7 @@ func (m *Model) render() string {
 	status.Mode = m.modeLabel()
 	status.Path = m.note.path
 	if m.indexing {
-		status.Path = strings.TrimPrefix(m.note.path+" · indexing…", " · ")
+		status.Busy = "indexing…"
 	}
 	status.Words = m.note.words
 	status.Sync = m.sync
@@ -427,7 +442,7 @@ func (m *Model) render() string {
 func (m *Model) paneTitle() string {
 	switch m.mainView {
 	case ViewTasks:
-		return "Tasks"
+		return m.tasks.Title()
 	case ViewTrash:
 		return "Trash"
 	}
@@ -493,7 +508,7 @@ func (m *Model) mainContent(w, h int) string {
 	}
 	switch m.mainView {
 	case ViewTasks:
-		return centered("Tasks view coming soon")
+		return m.tasks.View()
 	case ViewTrash:
 		return centered("Trash view coming soon")
 	}

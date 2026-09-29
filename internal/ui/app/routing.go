@@ -65,6 +65,12 @@ func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 // handleMainKey handles keys for the main pane. The editor, preview, Tasks
 // and Trash components take these over in later tasks.
 func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
+	var cmd tea.Cmd
+	switch m.mainView {
+	case ViewTasks:
+		m.tasks, cmd = m.tasks.Update(k)
+		return cmd
+	}
 	switch k.String() {
 	case "tab":
 		return emit(msgs.FocusSidebarMsg{})
