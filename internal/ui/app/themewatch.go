@@ -176,7 +176,8 @@ func (m *Model) handleThemeFiles(names []string) tea.Cmd {
 		pal.palette = pal.palette.SetThemeNames(all)
 	}
 	if m.wizard != nil {
-		w, cmd := m.wizard.SetThemeNames(all)
+		// The wizard reads its highlighted and current themes again.
+		w, cmd := m.wizard.SetThemeNames(all, names)
 		m.wizard = &w
 		cmds = append(cmds, cmd)
 	}

@@ -49,12 +49,28 @@ func (m Model) enterTheme() (Model, tea.Cmd) {
 	return m, nil
 }
 
-// SetThemeNames replaces the theme step's list, e.g. when a theme file
-// appears or goes away (user themes spec §3). The cursor stays on the same
-// name when it is still listed. Otherwise it is clamped, and the theme it
-// lands on is previewed, since enter confirms the theme on screen. Before
-// the theme step it does nothing: the step lists the catalog when it opens.
-func (m Model) SetThemeNames(names []string) (Model, tea.Cmd) {
+// SetThemeNames replaces the theme step's list when theme files appear,
+// change or go away (user themes spec §3); changed are the names of the
+// theme files that changed.
+//
+//   - The current theme (restored by esc, confirmed by default) is read
+//     again when its file changed; a file that no longer loads keeps it
+//     from memory.
+//   - In the theme step, the cursor stays on the same name when it is
+//     still listed, and that theme is read again and previewed when its
+//     file changed (new colors, or an inline error that clears once the
+//     file is fixed). Otherwise the cursor is clamped and the theme it
+//     lands on is previewed, since enter confirms the theme on screen.
+//
+// Before the theme step the list itself is left alone: the step lists the
+// catalog when it opens.
+func (m Model) SetThemeNames(names, changed []string) (Model, tea.Cmd) {
+	if n := m.current.Name; slices.Contains(changed, n) {
+		if p, err := m.cat.Resolve(n); err == nil {
+			m.current = p
+			m.theme.base = theme.NewStyles(p).WithIcons(m.theme.base.Icons)
+		}
+	}
 	if m.stage != StageTheme {
 		return m, nil
 	}
@@ -65,7 +81,14 @@ func (m Model) SetThemeNames(names []string) (Model, tea.Cmd) {
 	m.theme.names = slices.Clone(names)
 	if i := slices.Index(m.theme.names, cur); i >= 0 {
 		m.theme.idx = i
-		return m, nil
+		if !slices.Contains(changed, cur) {
+			return m, nil
+		}
+		p, err := m.resolve(cur)
+		if err == nil && m.theme.err == nil && p.Key() == m.theme.cur.Key() {
+			return m, nil // same colors: nothing to show again
+		}
+		return m.show(p, err)
 	}
 	if len(m.theme.names) == 0 {
 		m.theme.idx = 0
@@ -118,7 +141,12 @@ func (m Model) themeKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 // the app to do the same. A theme that does not load keeps the colors and
 // shows its error in the step instead.
 func (m Model) preview(name string) (Model, tea.Cmd) {
-	p, err := m.resolve(name)
+	return m.show(m.resolve(name))
+}
+
+// show makes p, the highlighted theme resolved with err, the one on
+// screen: see preview.
+func (m Model) show(p theme.Palette, err error) (Model, tea.Cmd) {
 	m.theme.cur, m.theme.err = p, err
 	if err != nil {
 		return m, nil

@@ -384,7 +384,7 @@ func TestSetThemeNames(t *testing.T) {
 			if tt.wantPreview == "last" {
 				want = names[len(names)-1]
 			}
-			m, cmd := m.SetThemeNames(names)
+			m, cmd := m.SetThemeNames(names, nil)
 			m, out := drive(t, m, cmd)
 			if got := m.theme.names[m.theme.idx]; got != want {
 				t.Errorf("cursor on %q, want %q", got, want)
@@ -422,12 +422,130 @@ func TestSetThemeNamesBeforeTheThemeStep(t *testing.T) {
 	f := &fakeEnv{vaultState: setup.Empty}
 	m := New(FirstRun, "~/Notes", builtin("catppuccin-mocha"), cat, f.env(), testStyles()).SetSize(120, 40)
 	m, _ = drive(t, m, m.Init())
-	m, cmd := m.SetThemeNames([]string{"nord"})
+	m, cmd := m.SetThemeNames([]string{"nord"}, nil)
 	if cmd != nil {
 		t.Error("SetThemeNames before the theme step returned a command")
 	}
 	m, _ = press(t, m, "enter", "down", "enter")
 	if m.Stage() != StageTheme || !slices.Equal(m.theme.names, cat.Names()) {
 		t.Errorf("stage %v, names %v; want the theme step on %v", m.Stage(), m.theme.names, cat.Names())
+	}
+}
+
+// rewriteTheme writes dir/name.toml.
+func rewriteTheme(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name+theme.ThemeExt), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// goodThemeV2 is goodTheme with another base color: another palette ID.
+var goodThemeV2 = strings.Replace(goodTheme, "#141318", "#000000", 1)
+
+// TestSetThemeNamesChangedHighlight: a changed file of the highlighted
+// theme is read again and previewed, so enter confirms the new colors,
+// and a fixed file clears the inline error.
+func TestSetThemeNamesChangedHighlight(t *testing.T) {
+	tests := []struct {
+		name      string
+		highlight string
+		content   string   // new content of the highlighted file
+		changed   []string // names reported changed
+		wantErr   bool     // inline error after the refresh
+		wantNew   bool     // the preview and DoneMsg carry the new file
+	}{
+		{"rewritten", "good", goodThemeV2, []string{"good"}, false, true},
+		{"fixed", "bad", goodThemeV2, []string{"bad"}, false, true},
+		{"broken", "good", "x", []string{"good"}, true, false},
+		{"rewritten but not reported", "good", goodThemeV2, []string{"other"}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cat, dir := userCatalog(t)
+			m, _ := themeStep(t, cat, tt.highlight)
+			old := m.theme.cur
+			rewriteTheme(t, dir, tt.highlight, tt.content)
+			m, cmd := m.SetThemeNames(cat.Names(), tt.changed)
+			m, out := drive(t, m, cmd)
+
+			if got := strings.Contains(plain(m), tt.highlight+".toml"); got != tt.wantErr {
+				t.Errorf("inline error shown = %v, want %v:\n%s", got, tt.wantErr, plain(m))
+			}
+			_, done := press(t, m, "enter")
+			if tt.wantErr {
+				if len(done) != 0 {
+					t.Errorf("enter on a broken theme sent %v", done)
+				}
+				return
+			}
+			want := old.Key()
+			if tt.wantNew {
+				p, err := cat.Resolve(tt.highlight)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = p.Key()
+				if ps := previewPalettes(out); len(ps) != 1 || ps[0].Key() != want {
+					t.Errorf("previews = %v, want the new %s", previews(out), want)
+				}
+			} else if len(previews(out)) != 0 {
+				t.Errorf("previews = %v, want none", previews(out))
+			}
+			if d := doneMsg(t, done); d.Palette.Key() != want {
+				t.Errorf("DoneMsg palette = %q, want %q", d.Palette.Key(), want)
+			}
+		})
+	}
+}
+
+// TestSetThemeNamesChangedCurrent: a changed file of the current theme is
+// read again, before and during the theme step; a file that no longer
+// loads keeps the palette from memory.
+func TestSetThemeNamesChangedCurrent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantNew bool
+	}{
+		{"rewritten", goodThemeV2, true},
+		{"broken", "x", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cat, dir := userCatalog(t)
+			cur, err := cat.Resolve("good")
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := &fakeEnv{vaultState: setup.Empty}
+			m := New(FirstRun, "~/Notes", cur, cat, f.env(), testStyles()).SetSize(120, 40)
+			m, _ = drive(t, m, m.Init())
+			rewriteTheme(t, dir, "good", tt.content)
+			m, _ = m.SetThemeNames(cat.Names(), []string{"good"})
+			want := cur.Key()
+			if tt.wantNew {
+				p, err := cat.Resolve("good")
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = p.Key()
+			}
+			if m.current.Key() != want {
+				t.Errorf("current = %q, want %q", m.current.Key(), want)
+			}
+			// The theme step opens on it; enter confirms it.
+			m, _ = press(t, m, "enter", "down", "enter")
+			if m.Stage() != StageTheme {
+				t.Fatalf("stage = %v", m.Stage())
+			}
+			if _, out := press(t, m, "enter"); doneMsg(t, out).Palette.Key() != want {
+				t.Errorf("DoneMsg palette = %q, want %q", doneMsg(t, out).Palette.Key(), want)
+			}
+			// Esc goes back to it too.
+			if _, out := press(t, m, "esc"); len(previewPalettes(out)) != 1 || previewPalettes(out)[0].Key() != want {
+				t.Errorf("esc previews %v, want %q", previews(out), want)
+			}
+		})
 	}
 }

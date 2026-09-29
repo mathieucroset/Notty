@@ -297,6 +297,43 @@ func TestThemeFilesRefreshWizard(t *testing.T) {
 	}
 }
 
+// TestWizardConfirmsReloadedTheme: the first-run wizard highlights a user
+// theme whose file is then rewritten; enter saves the theme with the new
+// colors, not the ones read when the cursor landed on it.
+func TestWizardConfirmsReloadedTheme(t *testing.T) {
+	gittest.Isolate(t)
+	setIdentity(t)
+	opts := wizardOptions(t)
+	dir := withUserThemes(t, &opts, map[string]string{"mine": mineV1})
+	m := start(t, opts, 100, 30)
+	t.Cleanup(m.Shutdown)
+	stopThemeWatcher(t, m)
+	run(t, m, keyMsg("enter")) // vault folder
+	run(t, m, keyMsg("j"))     // Existing URL → Local only
+	run(t, m, keyMsg("enter"))
+	waitFor(t, m, func() bool { return m.wizard != nil && m.wizard.Stage() == wizard.StageTheme })
+	names := opts.Catalog.Names()
+	for range slices.Index(names, "mine") - slices.Index(names, "catppuccin-mocha") {
+		run(t, m, downKey)
+	}
+	if m.opts.Palette.Key() != themeKey(t, mineV1) {
+		t.Fatalf("previewed %q, want mine v1", m.opts.Palette.Key())
+	}
+
+	writeTheme(t, dir, "mine", mineV2)
+	run(t, m, themeFilesMsg{names: []string{"mine"}})
+	run(t, m, keyMsg("enter")) // theme
+	finishWizard(t, m)
+
+	if got, want := m.opts.Palette.Key(), themeKey(t, mineV2); got != want {
+		t.Errorf("palette = %q, want the rewritten mine %q", got, want)
+	}
+	b, err := os.ReadFile(opts.ConfigPath)
+	if err != nil || !strings.Contains(string(b), `theme = "mine"`) {
+		t.Errorf("config = %q (%v), want theme = \"mine\"", b, err)
+	}
+}
+
 // TestLiveReload drives the real watcher: rewriting the active theme file
 // re-themes the app, every time.
 func TestLiveReload(t *testing.T) {
