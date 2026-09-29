@@ -77,6 +77,15 @@ type Machine struct {
 
 	eff Effect // effect of the key being handled
 
+	unnamed    register
+	pasteCount int // count of a "+p waiting for PasteClipboard
+
+	// undo cursor restoration: buffer version after a change -> cursor
+	// before it (and the mirror for redo)
+	undoCur, redoCur map[uint64]buffer.Pos
+	chgCursor        buffer.Pos
+	chgVersion       uint64
+
 	// insert session
 	insertRepeat int   // count for i/a/I/A (3ifoo<esc>)
 	sessionKeys  []Key // keys typed in the current insert session
@@ -87,7 +96,9 @@ var (
 )
 
 // New returns a Machine in normal mode.
-func New() *Machine { return &Machine{} }
+func New() *Machine {
+	return &Machine{undoCur: map[uint64]buffer.Pos{}, redoCur: map[uint64]buffer.Pos{}}
+}
 
 // Mode returns the current mode.
 func (m *Machine) Mode() Mode { return m.mode }
@@ -188,11 +199,19 @@ func (m *Machine) exec(b *buffer.Buffer, c cmd) {
 		return
 	}
 	if isChange(c) {
-		b.BeginGroup()
-		m.execChange(b, c)
-		if m.mode != Insert {
-			b.EndGroup()
+		m.beginChange(b)
+		if c.op != "" {
+			m.execOperator(b, c)
+		} else {
+			m.execChange(b, c)
 		}
+		if m.mode != Insert {
+			m.endChange(b)
+		}
+		return
+	}
+	if c.op != "" {
+		m.execOperator(b, c) // yank
 		return
 	}
 	m.execOther(b, c)
@@ -209,6 +228,8 @@ func isChange(c cmd) bool {
 // changeActions are the normal-mode commands that modify the buffer.
 var changeActions = map[string]bool{
 	"i": true, "a": true, "I": true, "A": true, "o": true, "O": true,
+	"x": true, "X": true, "<del>": true, "s": true, "S": true, "J": true,
+	"p": true, "P": true, "D": true, "C": true, "~": true, "r": true,
 }
 
 // execChange runs a buffer-modifying command inside an undo group.
@@ -230,11 +251,51 @@ func (m *Machine) execChange(b *buffer.Buffer, c cmd) {
 		m.openLine(b, cur.Line, false)
 	case "O":
 		m.openLine(b, cur.Line, true)
+	case "x", "<del>":
+		m.execOperator(b, cmd{reg: c.reg, count1: c.count(), op: "d", name: "l"})
+	case "X":
+		m.execOperator(b, cmd{reg: c.reg, count1: c.count(), op: "d", name: "h"})
+	case "D":
+		m.execOperator(b, cmd{reg: c.reg, count1: c.count(), op: "d", name: "$"})
+	case "C":
+		m.execOperator(b, cmd{reg: c.reg, count1: c.count(), op: "c", name: "$"})
+	case "S":
+		m.execOperator(b, cmd{reg: c.reg, count1: c.count(), op: "c", name: "c"})
+	case "s":
+		if b.LineLen(cur.Line) == 0 {
+			m.startInsert(b, cur, 1)
+		} else {
+			m.execOperator(b, cmd{reg: c.reg, count1: c.count(), op: "c", name: "l"})
+		}
+	case "r":
+		replaceChars(b, c.arg, c.count())
+	case "J":
+		joinLines(b, cur.Line, c.count())
+	case "~":
+		toggleCase(b, c.count())
+	case "p", "P":
+		if c.reg == "+" {
+			m.eff.NeedClipboard = true
+			m.eff.PasteBefore = c.name == "P"
+			m.pasteCount = c.count()
+			return
+		}
+		m.put(b, m.unnamed, c.name == "P", c.count())
 	}
 }
 
-// execOther runs commands that neither move nor modify.
-func (m *Machine) execOther(b *buffer.Buffer, c cmd) {}
+// execOther runs commands that do not modify the buffer through a change
+// group (yank, undo, redo, focus, mode switches).
+func (m *Machine) execOther(b *buffer.Buffer, c cmd) {
+	switch c.name {
+	case "Y":
+		m.execOperator(b, cmd{reg: c.reg, count1: c.count(), op: "y", name: "y"})
+	case "u":
+		m.undo(b, c.count())
+	case "<c-r>":
+		m.redo(b, c.count())
+	}
+}
 
 // firstNonBlankOrEnd is like firstNonBlank, but returns the end of line on
 // an all-blank line (vim's I on "   " appends).
@@ -267,8 +328,25 @@ func (m *Machine) exitVisual(b *buffer.Buffer) { m.mode = Normal }
 
 func (m *Machine) commandKey(b *buffer.Buffer, k Key) { m.mode = Normal }
 
-// PasteClipboard pastes text the UI read from the system clipboard.
-func (m *Machine) PasteClipboard(b *buffer.Buffer, text string, before bool) {}
+// PasteClipboard pastes text the UI read from the system clipboard after a
+// NeedClipboard effect: at the cursor in insert mode, otherwise like p / P
+// (linewise if text ends with a newline).
+func (m *Machine) PasteClipboard(b *buffer.Buffer, text string, before bool) {
+	defer func() { m.lastPos = b.Cursor() }()
+	if text == "" {
+		return
+	}
+	if m.mode == Insert {
+		m.insertKey(b, Key{Text: text})
+		return
+	}
+	count := max(1, m.pasteCount)
+	m.pasteCount = 0
+	m.beginChange(b)
+	m.put(b, register{text: text, linewise: strings.HasSuffix(text, "\n")}, before, count)
+	m.endChange(b)
+	m.clampNormal(b)
+}
 
 // SetReadOnly toggles read-only mode.
 func (m *Machine) SetReadOnly(ro bool) { m.readOnly = ro }

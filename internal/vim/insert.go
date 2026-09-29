@@ -87,6 +87,8 @@ func (m *Machine) insertApply(b *buffer.Buffer, k Key, tok string) {
 		b.SetCursor(lineEnd(b, cur.Line))
 	case "<space>":
 		b.SetCursor(b.Insert(cur, " "))
+	case "<c-v>":
+		m.eff.NeedClipboard = true
 	default:
 		if !m.insertSpecial(b, tok) && isPrintable(k) {
 			b.SetCursor(b.Insert(cur, k.Text))
@@ -127,7 +129,7 @@ func (m *Machine) leaveInsert(b *buffer.Buffer) {
 	m.endInsertSession(keys)
 	m.insertRepeat = 0
 	m.sessionKeys = nil
-	b.EndGroup()
+	m.endChange(b)
 	m.mode = Normal
 	p := b.Cursor()
 	if p.Col > 0 {

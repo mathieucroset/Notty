@@ -116,10 +116,16 @@ func parseMotion(toks []string, i int) (name, arg string, st parseStatus) {
 // normalActions are the non-motion normal-mode commands of one key.
 var normalActions = map[string]bool{
 	"i": true, "a": true, "I": true, "A": true, "o": true, "O": true,
+	"x": true, "X": true, "<del>": true, "s": true, "S": true, "J": true,
+	"p": true, "P": true, "D": true, "C": true, "Y": true, "~": true,
+	"u": true, "<c-r>": true,
 }
 
 // argActions take one more key as argument.
-var argActions = map[string]bool{}
+var argActions = map[string]bool{"r": true}
+
+// operators take a motion or text object; doubled they act on lines.
+var operators = map[string]bool{"d": true, "c": true, "y": true, ">": true, "<": true}
 
 // parse parses toks as one command. visual selects the visual-mode grammar,
 // where operators apply to the selection and take no motion.
@@ -174,13 +180,25 @@ func parse(toks []string, visual bool) (cmd, parseStatus) {
 }
 
 // Filled in by later features.
-var (
-	operators     = map[string]bool{}
-	visualActions = map[string]bool{}
-)
+var visualActions = map[string]bool{}
 
+// parseOperator parses op [count2] (op | motion | textobject) at toks[i].
 func parseOperator(toks []string, i int, c cmd) (cmd, parseStatus) {
-	return c, parseBad
+	c.op = toks[i]
+	c.count2, i = parseCount(toks, i+1)
+	if i >= len(toks) {
+		return c, parseMore
+	}
+	switch toks[i] {
+	case c.op:
+		c.name = c.op
+		return c, parseOK
+	case "i", "a":
+		return parseTextObject(toks, i, c)
+	}
+	name, arg, st := parseMotion(toks, i)
+	c.name, c.arg = name, arg
+	return c, st
 }
 
 func parseTextObject(toks []string, i int, c cmd) (cmd, parseStatus) {
