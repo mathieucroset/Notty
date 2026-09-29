@@ -1,6 +1,8 @@
 package preview
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -92,6 +94,44 @@ func TestSplitLineRangesAndIndentedContinuations(t *testing.T) {
 func TestSplitInlineCodeImageIsNotAnImage(t *testing.T) {
 	content := "`![a](a.png)`"
 	checkSegments(t, content, []segWant{{kind: Text, start: 0, end: 0}})
+}
+
+func TestSplitCutsLongListsIntoPieces(t *testing.T) {
+	var b strings.Builder
+	for i := range 100 {
+		fmt.Fprintf(&b, "- [ ] item %d\n  continued\n", i)
+	}
+	segs := Split(strings.TrimSuffix(b.String(), "\n"))
+	if len(segs) < 3 {
+		t.Fatalf("%d segments, want the 200-line list cut in pieces", len(segs))
+	}
+	next := 0
+	for i, s := range segs {
+		if s.Kind != Text || s.cont != (i > 0) || s.StartLine != next {
+			t.Fatalf("seg %d: kind=%v cont=%v start=%d, want text cont=%v start=%d", i, s.Kind, s.cont, s.StartLine, i > 0, next)
+		}
+		if !strings.HasPrefix(s.Markdown, "- [ ] item") {
+			t.Fatalf("seg %d does not start at a list item: %q", i, s.Markdown[:20])
+		}
+		next = s.EndLine + 1
+	}
+	if next != 200 {
+		t.Fatalf("pieces end at line %d, want 200", next)
+	}
+}
+
+func TestSplitDoesNotCutOutsideLists(t *testing.T) {
+	long := strings.Repeat("text line\n", 40)
+	cases := map[string]string{
+		"paragraph then item":  long + "- a",
+		"items inside a fence": "```\n" + strings.Repeat("- x\n", 40) + "```",
+		"ordered after text":   long + "2. not a list",
+	}
+	for name, content := range cases {
+		if segs := Split(content); len(segs) != 1 {
+			t.Errorf("%s: %d segments, want 1", name, len(segs))
+		}
+	}
 }
 
 func TestSplitEmpty(t *testing.T) {

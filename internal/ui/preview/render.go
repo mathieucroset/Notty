@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -133,17 +134,13 @@ func (j renderJob) run() tea.Msg {
 		segs:     j.segs,
 		blocks:   make([]block, len(j.segs)),
 	}
-	var tr *glamour.TermRenderer
+	j.renderTexts()
 	ti := 0
 	for i, seg := range j.segs {
 		if seg.Kind == Text {
 			tj := j.texts[ti]
 			ti++
 			if !tj.cached {
-				if tr == nil {
-					tr = newGlamour(j.palette, contentWidth(j.width))
-				}
-				tj.lines = j.glamour(tr, tj.markdown)
 				msg.newTexts[tj.key] = tj.lines
 			}
 			d.blocks[i].text = tj.lines
@@ -160,12 +157,49 @@ func (j renderJob) run() tea.Msg {
 	return msg
 }
 
-func newGlamour(p theme.Palette, wrap int) *glamour.TermRenderer {
-	tr, err := glamour.NewTermRenderer(glamour.WithStyles(theme.GlamourStyle(p)), glamour.WithWordWrap(wrap))
-	if err != nil {
-		return nil
+// renderTexts renders the uncached text segments with Glamour, spread
+// over up to GOMAXPROCS workers, each with its own renderer. Identical
+// segments are rendered once.
+func (j renderJob) renderTexts() {
+	var todo []int
+	first := map[textKey]int{}
+	for i, tj := range j.texts {
+		if tj.cached {
+			continue
+		}
+		if _, dup := first[tj.key]; !dup {
+			first[tj.key] = i
+			todo = append(todo, i)
+		}
 	}
-	return tr
+	if len(todo) > 0 {
+		style := theme.GlamourStyle(j.palette) // registers the chroma style once
+		workers := min(len(todo), runtime.GOMAXPROCS(0))
+		var next atomic.Int64
+		var wg sync.WaitGroup
+		for range workers {
+			wg.Go(func() {
+				tr, err := glamour.NewTermRenderer(glamour.WithStyles(style), glamour.WithWordWrap(contentWidth(j.width)))
+				if err != nil {
+					tr = nil
+				}
+				for {
+					k := int(next.Add(1)) - 1
+					if k >= len(todo) {
+						return
+					}
+					i := todo[k]
+					j.texts[i].lines = j.glamour(tr, j.texts[i].markdown)
+				}
+			})
+		}
+		wg.Wait()
+	}
+	for i, tj := range j.texts {
+		if !tj.cached && first[tj.key] != i {
+			j.texts[i].lines = j.texts[first[tj.key]].lines
+		}
+	}
 }
 
 // glamour renders one text segment and trims the blank lines Glamour puts

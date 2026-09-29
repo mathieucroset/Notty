@@ -2,8 +2,8 @@ package preview
 
 import (
 	"strings"
-
-	"github.com/charmbracelet/x/ansi"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/mathieucroset/notty/internal/tasks"
 )
@@ -55,7 +55,7 @@ func (d *doc) layout() {
 	for si, seg := range d.segs {
 		b := d.blocks[si]
 		if seg.Kind == Text {
-			if len(b.text) > 0 {
+			if len(b.text) > 0 && !seg.cont {
 				sep()
 			}
 			d.segTop[si] = len(d.lines)
@@ -100,59 +100,108 @@ func (d *doc) layout() {
 // (spec §6.1 task mapping): within the task's text segment, the next row
 // showing the task text stripped of markdown; failing that, the next row
 // with a checkbox; failing that, the segment's first row.
+//
+// It runs in linear time: every segment's rows are normalized once, and
+// each task searches a bounded window after the previous task's row.
 func (d *doc) mapTasks() {
 	d.tasks = tasks.Parse(d.content)
 	d.taskRows = make([]int, len(d.tasks))
-	next := map[int]int{} // segment -> first unsearched row within it
+	if len(d.tasks) == 0 {
+		return
+	}
+	lineSeg := make([]int, strings.Count(d.content, "\n")+1)
+	for i := range lineSeg {
+		lineSeg[i] = -1
+	}
+	for si, s := range d.segs {
+		if s.Kind != Text {
+			continue
+		}
+		for l := max(0, s.StartLine); l <= s.EndLine && l < len(lineSeg); l++ {
+			lineSeg[l] = si
+		}
+	}
+	rows := map[int]*segRows{} // segment -> normalized rows, built once
 	for i, t := range d.tasks {
 		d.taskRows[i] = -1
 		si := -1
-		for k, s := range d.segs {
-			if s.Kind == Text && s.StartLine <= t.Line && t.Line <= s.EndLine {
-				si = k
-				break
-			}
+		if t.Line >= 0 && t.Line < len(lineSeg) {
+			si = lineSeg[t.Line]
 		}
 		if si < 0 || d.segHeight[si] == 0 {
 			continue
 		}
-		lines := d.blocks[si].text
-		from := next[si]
-		row := findTaskRow(lines, from, t.Text)
+		sr := rows[si]
+		if sr == nil {
+			sr = newSegRows(d.blocks[si].text)
+			rows[si] = sr
+		}
+		row := sr.find(taskNeedle(t.Text))
 		if row < 0 {
 			row = 0
-		} else {
-			next[si] = row + 1
 		}
 		d.taskRows[i] = d.segTop[si] + row
 	}
 }
 
-func findTaskRow(lines []string, from int, text string) int {
-	needle := taskNeedle(text)
-	norm := make([]string, len(lines))
+// taskWindow bounds how far past the previous task a task's row is
+// searched for: up to the third checkbox row, and at most this many rows.
+const taskWindow = 256
+
+// segRows are a text segment's rendered rows, normalized for matching,
+// with a cursor just past the last task found.
+type segRows struct {
+	norm []string
+	box  []bool // row shows a task checkbox
+	next int
+}
+
+func newSegRows(lines []string) *segRows {
+	sr := &segRows{norm: make([]string, len(lines)), box: make([]bool, len(lines))}
 	for i, l := range lines {
-		norm[i] = normalize(ansi.Strip(l))
+		sr.norm[i] = normalize(l)
+		sr.box[i] = strings.ContainsAny(sr.norm[i], "☐☑")
 	}
-	box := func(s string) bool { return strings.ContainsAny(s, "☐☑") }
+	return sr
+}
+
+// find returns the row of the next task, whose text starts with needle:
+// the first row in the window with a checkbox and the needle, else with
+// the needle, else with a checkbox; -1 when none. The cursor moves past a
+// found row.
+func (sr *segRows) find(needle string) int {
+	from := sr.next
+	end, boxes := from, 0
+	for end < len(sr.norm) && end < from+taskWindow {
+		if sr.box[end] {
+			if boxes++; boxes > 2 {
+				break
+			}
+		}
+		end++
+	}
+	found := -1
 	if needle != "" {
-		for i := from; i < len(norm); i++ {
-			if box(norm[i]) && strings.Contains(norm[i], needle) {
-				return i
+		for i := from; i < end && found < 0; i++ {
+			if sr.box[i] && strings.Contains(sr.norm[i], needle) {
+				found = i
 			}
 		}
-		for i := from; i < len(norm); i++ {
-			if strings.Contains(norm[i], needle) {
-				return i
+		for i := from; i < end && found < 0; i++ {
+			if strings.Contains(sr.norm[i], needle) {
+				found = i
 			}
 		}
 	}
-	for i := from; i < len(norm); i++ {
-		if box(norm[i]) {
-			return i
+	for i := from; i < end && found < 0; i++ {
+		if sr.box[i] {
+			found = i
 		}
 	}
-	return -1
+	if found >= 0 {
+		sr.next = found + 1
+	}
+	return found
 }
 
 // taskNeedle is the start of a task's text, stripped of markdown, short
@@ -210,13 +259,57 @@ func linkEnd(s string, i int) (int, bool) {
 
 // normalize drops emphasis and code markers and collapses whitespace, so
 // source text and rendered rows compare equal.
+// Escape sequences (CSI, OSC and two-byte ones) are skipped.
 func normalize(s string) string {
-	s = strings.Map(func(r rune) rune {
-		switch r {
-		case '*', '_', '`', '~':
-			return -1
+	var b strings.Builder
+	b.Grow(len(s))
+	space := false
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b {
+			i = skipEscape(s, i)
+			continue
 		}
-		return r
-	}, s)
-	return strings.Join(strings.Fields(s), " ")
+		r, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+		switch {
+		case r == '*' || r == '_' || r == '`' || r == '~':
+			continue
+		case unicode.IsSpace(r):
+			space = b.Len() > 0
+			continue
+		}
+		if space {
+			b.WriteByte(' ')
+			space = false
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// skipEscape returns the index just past the escape sequence at s[i].
+func skipEscape(s string, i int) int {
+	if i+1 >= len(s) {
+		return len(s)
+	}
+	switch s[i+1] {
+	case '[': // CSI: parameters, then a final byte in 0x40..0x7e
+		for j := i + 2; j < len(s); j++ {
+			if s[j] >= 0x40 && s[j] <= 0x7e {
+				return j + 1
+			}
+		}
+		return len(s)
+	case ']', 'P', '_': // OSC, DCS, APC: until BEL or ST
+		for j := i + 2; j < len(s); j++ {
+			if s[j] == 0x07 {
+				return j + 1
+			}
+			if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' {
+				return j + 2
+			}
+		}
+		return len(s)
+	}
+	return i + 2
 }
