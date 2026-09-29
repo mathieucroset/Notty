@@ -64,6 +64,8 @@ const (
 	cellQuery    = "\x1b[16t"
 	da1Query     = "\x1b[c"
 	queryTimeout = 100 * time.Millisecond
+	// queryGrace extends the wait once when the deadline cuts a reply.
+	queryGrace = 30 * time.Millisecond
 )
 
 var (
@@ -252,18 +254,56 @@ func queryTTY(tty io.ReadWriter) ttyReplies {
 		return ttyReplies{}
 	}
 	deadline := time.Now().Add(queryTimeout)
+	extended := false
 	var got strings.Builder
 	buf := make([]byte, 256)
-	for time.Now().Before(deadline) {
+	for {
 		n, err := read(buf, deadline)
 		got.Write(buf[:n])
 		if r, done := parseReplies(got.String()); done {
 			return r
 		}
-		if err != nil {
+		timedOut := errors.Is(err, errReadTimeout) || !time.Now().Before(deadline)
+		if timedOut && !extended && incompleteEscape(got.String()) {
+			// A reply was cut by the deadline: give it a moment to finish
+			// rather than leave half a sequence for Bubble Tea to decode.
+			deadline = time.Now().Add(queryGrace)
+			extended = true
+			continue
+		}
+		if err != nil || timedOut {
 			break
 		}
 	}
 	r, _ := parseReplies(got.String())
 	return r
+}
+
+// incompleteEscape reports whether s ends inside an unterminated escape
+// sequence (CSI without its final byte, or APC/DCS/OSC/PM/SOS without ST or
+// BEL).
+func incompleteEscape(s string) bool {
+	i := strings.LastIndexByte(s, 0x1b)
+	if i < 0 {
+		return false
+	}
+	tail := s[i:]
+	if len(tail) < 2 {
+		return true
+	}
+	switch tail[1] {
+	case '\\':
+		// ST. Its ESC is the last one, so whatever it terminates is complete.
+		return false
+	case '[':
+		for j := 2; j < len(tail); j++ {
+			if tail[j] >= 0x40 && tail[j] <= 0x7e {
+				return false
+			}
+		}
+		return true
+	case '_', 'P', ']', '^', 'X':
+		return !strings.ContainsRune(tail, 0x07)
+	}
+	return false
 }
