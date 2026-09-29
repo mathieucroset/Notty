@@ -36,8 +36,9 @@ type Set struct {
 	Info, Warn, Error string
 
 	// Check marks something done or current (a resolved file, the
-	// current theme).
-	Check string
+	// current theme, a finished setup step); Pending marks a step still
+	// to run.
+	Check, Pending string
 
 	// Image precedes an image's name in its chip.
 	Image string
@@ -49,34 +50,35 @@ type Set struct {
 var nerd = Set{
 	Name:             "nerd",
 	Logo:             "\U000F082E", // nf-md-notebook
-	FolderOpen:       "",          // nf-fa-folder_open
-	FolderClosed:     "",          // nf-fa-folder
-	Note:             "",          // nf-fa-file_text_o
-	File:             "",          // nf-fa-file_o
-	Pin:              "",          // nf-oct-pin
-	Tasks:            "",          // nf-fa-tasks
-	Conflicts:        "",          // nf-fa-exclamation_triangle
-	Trash:            "",          // nf-fa-trash_o
-	Dirty:            "",          // nf-fa-circle
-	TaskOpen:         "",          // nf-fa-square_o
-	TaskDone:         "",          // nf-fa-check_square_o
+	FolderOpen:       "\uf07c",          // nf-fa-folder_open
+	FolderClosed:     "\uf07b",          // nf-fa-folder
+	Note:             "\uf0f6",          // nf-fa-file_text_o
+	File:             "\uf016",          // nf-fa-file_o
+	Pin:              "\uf435",          // nf-oct-pin
+	Tasks:            "\uf0ae",          // nf-fa-tasks
+	Conflicts:        "\uf071",          // nf-fa-exclamation_triangle
+	Trash:            "\uf014",          // nf-fa-trash_o
+	Dirty:            "\uf111",          // nf-fa-circle
+	TaskOpen:         "\uf096",          // nf-fa-square_o
+	TaskDone:         "\uf046",          // nf-fa-check_square_o
 	ProgressFull:     "▰",
 	ProgressEmpty:    "▱",
-	Synced:           "",          // nf-fa-check
-	Syncing:          "",          // nf-fa-refresh
+	Synced:           "\uf00c",          // nf-fa-check
+	Syncing:          "\uf021",          // nf-fa-refresh
 	Offline:          "\U000F0164", // nf-md-cloud_off_outline
-	SyncConflict:     "",          // nf-fa-exclamation_triangle
-	SyncError:        "",          // nf-fa-times_circle
-	LocalOnly:        "",          // nf-fa-hdd_o
-	Info:             "",          // nf-fa-info_circle
-	Warn:             "",          // nf-fa-exclamation_triangle
-	Error:            "",          // nf-fa-times_circle
-	Check:            "",          // nf-fa-check
-	Image:            "",          // nf-fa-picture_o
-	KindText:         "",          // nf-fa-file_text_o
-	KindBinary:       "",          // nf-oct-file_binary
-	KindModifyDelete: "",          // nf-oct-diff
-	KindPath:         "",          // nf-oct-arrow_switch
+	SyncConflict:     "\uf071",          // nf-fa-exclamation_triangle
+	SyncError:        "\uf057",          // nf-fa-times_circle
+	LocalOnly:        "\uf0a0",          // nf-fa-hdd_o
+	Info:             "\uf05a",          // nf-fa-info_circle
+	Warn:             "\uf071",          // nf-fa-exclamation_triangle
+	Error:            "\uf057",          // nf-fa-times_circle
+	Check:            "\uf00c",          // nf-fa-check
+	Pending:          "\uf10c",          // nf-fa-circle_o
+	Image:            "\uf03e",          // nf-fa-picture_o
+	KindText:         "\uf0f6",          // nf-fa-file_text_o
+	KindBinary:       "\uf471",          // nf-oct-file_binary
+	KindModifyDelete: "\uf440",          // nf-oct-diff
+	KindPath:         "\uf443",          // nf-oct-arrow_switch
 }
 
 var unicode = Set{
@@ -105,6 +107,7 @@ var unicode = Set{
 	Warn:             "⚠",
 	Error:            "✗",
 	Check:            "✓",
+	Pending:          "○",
 	Image:            "🖼️", // emoji presentation: two columns everywhere
 	KindText:         "≡",
 	KindBinary:       "◆",
@@ -138,6 +141,7 @@ var ascii = Set{
 	Warn:             "!",
 	Error:            "x",
 	Check:            "+",
+	Pending:          "o",
 	Image:            "[img]",
 	KindText:         "=",
 	KindBinary:       "b",
@@ -160,6 +164,15 @@ func Names() []string {
 // Default is the set used when none is configured: unicode, which needs
 // no special font.
 func Default() Set { return unicode }
+
+// Spinner returns the frames of the set's busy spinner: braille dots, or
+// a turning bar for ASCII.
+func (s Set) Spinner() []string {
+	if s.Name == ascii.Name {
+		return []string{"|", "/", "-", "\\"}
+	}
+	return []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+}
 
 // Get returns the named set. An unknown name returns Default and false.
 func Get(name string) (Set, bool) {

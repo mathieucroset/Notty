@@ -78,6 +78,24 @@ func TestGlyphWidths(t *testing.T) {
 	}
 }
 
+func TestSpinner(t *testing.T) {
+	for _, name := range Names() {
+		s, _ := Get(name)
+		frames := s.Spinner()
+		if len(frames) < 2 {
+			t.Errorf("%s: %d spinner frames", name, len(frames))
+		}
+		for _, f := range frames {
+			if ansi.StringWidth(f) != 1 {
+				t.Errorf("%s: spinner frame %q is not one column", name, f)
+			}
+			if name == "ascii" && (len(f) != 1 || f[0] > 0x7e) {
+				t.Errorf("ascii spinner frame %q is not ASCII", f)
+			}
+		}
+	}
+}
+
 func TestASCIISetIsASCII(t *testing.T) {
 	s, _ := Get("ascii")
 	for field, g := range glyphs(s) {

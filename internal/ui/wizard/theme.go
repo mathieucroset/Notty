@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -68,7 +69,7 @@ func (m Model) themeKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 // the same.
 func (m Model) preview(name string) (Model, tea.Cmd) {
 	if p, ok := theme.Get(name); ok {
-		m.styles = theme.NewStyles(p)
+		m.styles = theme.NewStyles(p).WithIcons(m.styles.Icons)
 		m.applyStyles()
 	}
 	return m, emit(ThemePreviewMsg{Name: name})
@@ -84,7 +85,7 @@ func (m Model) themeView(w int) string {
 	if m.run.conflicted {
 		head = append(head, m.wrap(m.styles.Warning, "Your notes and the remote both changed some files. You'll resolve the conflicts right after setup.", w), "")
 	} else {
-		head = append(head, m.styles.Success.Render("✓ ")+m.styles.StatusText.Render("Your vault is ready"), "")
+		head = append(head, m.styles.Success.Render(m.styles.Icons.Check+" ")+m.styles.StatusText.Render("Your vault is ready"), "")
 	}
 	head = append(head, m.styles.StatusText.Render("Pick a theme"), "")
 
@@ -95,7 +96,7 @@ func (m Model) themeView(w int) string {
 	}
 	card := ""
 	if p, ok := theme.Get(name); ok {
-		card = sampleCard(p)
+		card = sampleCard(p, m.styles.Icons)
 	}
 	listW := lipgloss.Width(list)
 	var body string
@@ -115,7 +116,7 @@ func (m Model) themeList() string {
 	for i, n := range m.theme.names {
 		var line string
 		if i == m.theme.idx {
-			line = m.styles.Accent.Render("❯ ") + m.styles.Accent.Bold(true).Render(n)
+			line = m.styles.Accent.Render("› ") + m.styles.Accent.Bold(true).Render(n)
 		} else {
 			line = "  " + m.styles.StatusText.Render(n)
 		}
@@ -129,7 +130,7 @@ func (m Model) themeList() string {
 
 // sampleCard renders a mini note in palette p: a heading, a bullet, an open
 // and a done task, a wiki link and a code line, on the theme's background.
-func sampleCard(p theme.Palette) string {
+func sampleCard(p theme.Palette, set icons.Set) string {
 	bg := lipgloss.NewStyle().Background(p.Base)
 	fg := func(c color.Color) lipgloss.Style { return bg.Foreground(c) }
 	text := fg(p.Text)
@@ -142,8 +143,8 @@ func sampleCard(p theme.Palette) string {
 		{{fg(p.Headings[0]).Bold(true), "# Weekend plans"}},
 		{},
 		{{fg(p.Accent), "• "}, {text, "Farmers market"}},
-		{{fg(p.Accent2), "☐ "}, {text, "Call the bakery"}},
-		{{fg(p.Muted), "☑ "}, {fg(p.Muted).Strikethrough(true), "Water the plants"}},
+		{{fg(p.Accent2), set.TaskOpen + " "}, {text, "Call the bakery"}},
+		{{fg(p.Muted), set.TaskDone + " "}, {fg(p.Muted).Strikethrough(true), "Water the plants"}},
 		{{text, "See "}, {fg(p.Accent).Underline(true), "[[Recipes]]"}},
 		{},
 		{{lipgloss.NewStyle().Background(p.Surface).Foreground(p.Accent2), " git pull "}},
