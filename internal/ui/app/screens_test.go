@@ -45,7 +45,7 @@ func showcaseOptions(t *testing.T) Options {
 func openShowcase(t *testing.T, w, h int) *Model {
 	t.Helper()
 	m := start(t, showcaseOptions(t), w, h)
-	run(t, m, msgs.OpenNoteMsg{Path: "Work/Standup notes.md", Line: 0})
+	run(t, m, msgs.OpenNoteMsg{Path: "Work/Standup notes.md", Line: 10})
 	return m
 }
 
@@ -212,6 +212,49 @@ func TestScreens(t *testing.T) {
 				}
 				assertSize(t, m, w, h)
 				teatest.RequireEqualOutput(t, []byte(ansi.Strip(view)))
+			})
+		}
+	}
+}
+
+// TestScreensIconSets captures the glyph-heavy screens with the nerd and
+// ascii icon sets, so every glyph can be seen to come from the set.
+func TestScreensIconSets(t *testing.T) {
+	cases := []struct {
+		name  string
+		build func(t *testing.T, opts Options) *Model
+	}{
+		{"main", func(t *testing.T, opts Options) *Model {
+			m := start(t, opts, 80, 24)
+			run(t, m, msgs.OpenNoteMsg{Path: "Work/Standup notes.md", Line: 10})
+			typeText(t, m, "A!")
+			run(t, m, msgs.SyncStatusMsg{State: msgs.SyncOffline, Pending: 2})
+			run(t, m, msgs.FocusSidebarMsg{})
+			return m
+		}},
+		{"tasks", func(t *testing.T, opts Options) *Model {
+			writeFile(t, opts.Vault, "Work/Todo.md", todoNote)
+			opts.Config.Tasks.ShowDone = true
+			m := start(t, opts, 80, 24)
+			run(t, m, msgs.ActivateEntryMsg{Entry: msgs.EntryTasks})
+			return m
+		}},
+		{"toasts", func(t *testing.T, opts Options) *Model {
+			m := start(t, opts, 80, 24)
+			run(t, m, msgs.ToastMsg{Level: msgs.ToastInfo, Text: "Saved Standup notes"})
+			run(t, m, msgs.ToastMsg{Level: msgs.ToastWarn, Text: "Could not reach GitHub, will retry"})
+			run(t, m, msgs.ToastMsg{Level: msgs.ToastError, Text: "Disk full: the note was not saved"})
+			return m
+		}},
+	}
+	for _, set := range []string{"nerd", "ascii"} {
+		for _, c := range cases {
+			t.Run(c.name+"-"+set, func(t *testing.T) {
+				opts := showcaseOptions(t)
+				opts.Config.Icons = set
+				m := c.build(t, opts)
+				assertSize(t, m, 80, 24)
+				teatest.RequireEqualOutput(t, []byte(screen(m)))
 			})
 		}
 	}

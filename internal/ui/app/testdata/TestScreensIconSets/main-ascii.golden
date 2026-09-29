@@ -1,19 +1,19 @@
-╭─ ◆ Notty ────────────────╮╭─ Work / Standup notes ───────────────────────────╮
-│  P I N N E D             ││ # Standup notes ▰▰▰▱▱ 1/2                        │
-│  ★ Standup notes         ││                                                  │
+╭─ * Notty ────────────────╮╭─ Work / Standup notes ─────────────────────── * ─╮
+│  P I N N E D             ││ # Standup notes ===-- 1/2                        │
+│  ^ Standup notes *       ││                                                  │
 │                          ││ - shipped **auth** flow                          │
-│  N O T E S               ││ ☐ follow up with #design                         │
-│  ▸ Personal              ││ ☑ review the PR #todo                            │
-│  ▾ Work                  ││                                                  │
-│    • Standup notes       ││ ▎ Keep it short.                                 │
-│  • ideas                 ││                                                  │
+│  N O T E S               ││ [ ] follow up with #design                       │
+│  > Personal              ││ [x] review the PR #todo                          │
+│  v Work                  ││                                                  │
+│    - Standup notes *     ││ ▎ Keep it short.                                 │
+│  - ideas                 ││                                                  │
 │                          ││ ## Next                                          │
 │  T A G S                 ││                                                  │
-│   #design 1   #life 1    ││ Plan the *sprint* demo.                          │
+│   #design 1   #life 1    ││ Plan the *sprint* demo.!                         │
 │   #todo 1                ││                                                  │
 │                          ││                                                  │
-│  ☐ Tasks (1)             ││                                                  │
-│  ⌫ Trash (0)             ││                                                  │
+│  [ ] Tasks (1)           ││                                                  │
+│  x   Trash (0)           ││                                                  │
 │                          ││                                                  │
 │                          ││                                                  │
 │                          ││                                                  │
@@ -21,4 +21,4 @@
 │                          ││                                                  │
 │                          ││                                                  │
 ╰──────────────────────────╯╰──────────────────────────────────────────────────╯
- NORMAL  Work/Standup notes.md · 30 words                               F1 help 
+ INSERT  Work/Standup notes.md · 30 words       - offline (2 pending)   F1 help 

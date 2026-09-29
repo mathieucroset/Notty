@@ -1,19 +1,19 @@
 ╭─ ◆ Notty ────────────────╮╭─ Work / Standup notes ─────────────────── split ─╮
-│  P I N N E D             ││ # Standup notes        │  Standup notes          │
-│  ★ Standup notes         ││                        │                         │
-│                          ││ - shipped **auth**     │ • shipped auth flow     │
-│  N O T E S               ││ flow                   │ ☐ follow up with        │
-│  ▸ Personal              ││ ☐ follow up with       │ #design                 │
-│  ▾ Work                  ││ #design                │ ☑ review the PR #todo   │
-│    • Standup notes       ││ ☑ review the PR #todo  │                         │
-│  • ideas                 ││                        │ │ Keep it short.        │
-│                          ││ ▎ Keep it short.       │                         │
-│  T A G S                 ││                        │ ## Next                 │
-│   #design 1   #life 1    ││ ## Next                │                         │
-│   #todo 1                ││                        │ Plan the sprint demo.   │
-│                          ││ Plan the *sprint*      │                         │
-│  ☐ Tasks (1)             ││ demo.                  │                         │
-│  ⌫ Trash (0)             ││                        │                         │
+│  P I N N E D             ││ # Standup notes ▰▰▰▱▱  │  Standup notes          │
+│  ★ Standup notes         ││ 1/2                    │                         │
+│                          ││                        │ • shipped auth flow     │
+│  N O T E S               ││ - shipped **auth**     │ ☐ follow up with        │
+│  ▸ Personal              ││ flow                   │ #design                 │
+│  ▾ Work                  ││ ☐ follow up with       │ ☑ review the PR #todo   │
+│    • Standup notes       ││ #design                │                         │
+│  • ideas                 ││ ☑ review the PR #todo  │ │ Keep it short.        │
+│                          ││                        │                         │
+│  T A G S                 ││ ▎ Keep it short.       │ ## Next                 │
+│   #design 1   #life 1    ││                        │                         │
+│   #todo 1                ││ ## Next                │ Plan the sprint demo.   │
+│                          ││                        │                         │
+│  ☐ Tasks (1)             ││ Plan the *sprint*      │                         │
+│  ⌫ Trash (0)             ││ demo.                  │                         │
 │                          ││                        │                         │
 │                          ││                        │                         │
 │                          ││                        │                         │
