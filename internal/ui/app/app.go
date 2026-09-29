@@ -319,14 +319,16 @@ func (m *Model) render() string {
 	panes = append(panes, m.renderMain(l))
 	body := lipgloss.JoinHorizontal(lipgloss.Top, panes...)
 
-	m.status.Mode = m.modeLabel()
-	m.status.Path = m.note.path
-	m.status.Words = m.note.words
-	m.status.Sync = m.sync
+	// Fill a copy of the status bar: rendering never changes the model.
+	status := m.status
+	status.Mode = m.modeLabel()
+	status.Path = m.note.path
+	status.Words = m.note.words
+	status.Sync = m.sync
 	if l.Main.H == 0 {
-		return m.status.View()
+		return status.View()
 	}
-	return body + "\n" + m.status.View()
+	return body + "\n" + status.View()
 }
 
 // paneTitle is the main pane title: the note's folders and title, like

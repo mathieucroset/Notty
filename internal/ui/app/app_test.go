@@ -171,6 +171,17 @@ func TestViewShowsShell(t *testing.T) {
 	}
 }
 
+func TestViewDoesNotMutate(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	run(t, m, msgs.OpenNoteMsg{Path: "ideas.md", Line: -1})
+	run(t, m, msgs.SyncStatusMsg{State: msgs.SyncSynced})
+	before := *m
+	_ = m.View()
+	if !reflect.DeepEqual(before, *m) {
+		t.Error("View() changed the model")
+	}
+}
+
 func TestSidebarHiddenWhenNarrowAndToggle(t *testing.T) {
 	m := start(t, testOptions(t), 70, 24)
 	if m.SidebarVisible() {
