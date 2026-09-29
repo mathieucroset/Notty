@@ -26,6 +26,7 @@ func TestClassify(t *testing.T) {
 		{"timed out", []string{"fetch"}, "", "ssh: connect to host github.com port 22: Operation timed out", ErrNetwork},
 		{"could not read without auth", []string{"fetch"}, "", "fatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.", ErrNetwork},
 		{"missing local remote", []string{"fetch", "origin"}, "", "fatal: '/tmp/x/remote.git' does not appear to be a git repository\nfatal: Could not read from remote repository.", ErrNetwork},
+		{"missing local clone source", []string{"clone"}, "", "fatal: repository '/tmp/x/remote.git' does not exist", ErrNetwork},
 		{"unable to access", []string{"fetch"}, "", "fatal: unable to access 'https://example.com/': Failed to connect", ErrNetwork},
 		{"publickey", []string{"fetch"}, "", "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.", ErrAuth},
 		{"auth failed", []string{"push"}, "", "remote: Invalid username or password.\nfatal: Authentication failed for 'https://github.com/x/y.git/'", ErrAuth},

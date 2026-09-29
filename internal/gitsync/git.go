@@ -215,8 +215,10 @@ var (
 		"could not read password",
 		"invalid username or password",
 	}
-	re403           = regexp.MustCompile(`\b403\b`)
-	networkPatterns = []string{
+	re403 = regexp.MustCompile(`\b403\b`)
+	// A local-path remote that was moved or deleted, as reported by clone.
+	reMissingLocalRepo = regexp.MustCompile(`repository '[^']*' does not exist`)
+	networkPatterns    = []string{
 		"could not resolve host",
 		"connection refused",
 		"network is unreachable",
@@ -247,6 +249,9 @@ func classify(args []string, stdout, stderr string) error {
 	}
 	if re403.MatchString(lower) {
 		return ErrAuth
+	}
+	if reMissingLocalRepo.MatchString(lower) {
+		return ErrNetwork
 	}
 	for _, p := range networkPatterns {
 		if strings.Contains(lower, p) {

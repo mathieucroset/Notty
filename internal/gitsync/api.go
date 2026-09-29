@@ -1,0 +1,528 @@
+package gitsync
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+)
+
+// StatusEntry is one entry of `git status --porcelain=v2 -z`.
+type StatusEntry struct {
+	// Kind is the porcelain v2 entry type: '1' ordinary change, '2' rename or
+	// copy, 'u' unmerged, '?' untracked, '!' ignored.
+	Kind byte
+	// XY is the two-letter index/worktree status ("M.", ".M", "R.", "UU", ...);
+	// empty for untracked and ignored entries.
+	XY       string
+	Path     string // slash-separated, relative to the repo root
+	OrigPath string // source path for Kind '2'
+}
+
+// Change is one entry of DiffNameStatus.
+type Change struct {
+	Status  byte   // 'A', 'M', 'D' or 'R'
+	Path    string // the (new) path, relative to the repo root
+	OldPath string // the source path when Status is 'R'
+}
+
+// Init creates dir (and parents) if needed and runs `git init -b <branch>`.
+func Init(dir, branch string) (*Repo, error) {
+	if err := checkArg("branch", branch); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("gitsync: init: %w", err)
+	}
+	r := Open(dir)
+	if _, err := r.git("init", "-q", "-b", branch); err != nil {
+		return nil, fmt.Errorf("gitsync: init %s: %w", dir, err)
+	}
+	return r, nil
+}
+
+// Clone clones url into dir (created with its parents if missing; it must be
+// empty if it exists).
+func Clone(ctx context.Context, url, dir string) (*Repo, error) {
+	if err := checkArg("url", url); err != nil {
+		return nil, err
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("gitsync: clone: %w", err)
+	}
+	parent := filepath.Dir(abs)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return nil, fmt.Errorf("gitsync: clone: %w", err)
+	}
+	if _, err := runGit(ctx, execRunner, parent, true, "clone", "-q", "--", url, abs); err != nil {
+		return nil, fmt.Errorf("gitsync: clone %s: %w", url, err)
+	}
+	return Open(abs), nil
+}
+
+// LsRemote inspects a remote with `git ls-remote --symref <url> HEAD`. An
+// empty remote returns (false, "", nil). If the remote's HEAD points to a
+// branch that does not exist but other branches do, it still reports history
+// and picks main, master or the first branch as the default.
+func LsRemote(ctx context.Context, url string) (hasHistory bool, defaultBranch string, err error) {
+	if err := checkArg("url", url); err != nil {
+		return false, "", err
+	}
+	res, err := runGit(ctx, execRunner, "", true, "ls-remote", "--symref", url, "HEAD")
+	if err != nil {
+		return false, "", fmt.Errorf("gitsync: ls-remote: %w", err)
+	}
+	symref, hasHead := parseLsRemoteHead(string(res.Stdout))
+	if hasHead {
+		return true, symref, nil
+	}
+	res, err = runGit(ctx, execRunner, "", true, "ls-remote", "--heads", url)
+	if err != nil {
+		return false, "", fmt.Errorf("gitsync: ls-remote: %w", err)
+	}
+	var heads []string
+	for line := range strings.SplitSeq(string(res.Stdout), "\n") {
+		if _, ref, ok := strings.Cut(line, "\t"); ok {
+			if name, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+				heads = append(heads, name)
+			}
+		}
+	}
+	if len(heads) == 0 {
+		return false, "", nil
+	}
+	for _, want := range []string{symref, "main", "master"} {
+		for _, h := range heads {
+			if want != "" && h == want {
+				return true, h, nil
+			}
+		}
+	}
+	return true, heads[0], nil
+}
+
+// parseLsRemoteHead returns the branch HEAD points to (if advertised) and
+// whether HEAD resolves to a commit.
+func parseLsRemoteHead(out string) (branch string, hasHead bool) {
+	for line := range strings.SplitSeq(out, "\n") {
+		left, ref, ok := strings.Cut(line, "\t")
+		if !ok || ref != "HEAD" {
+			continue
+		}
+		if target, ok := strings.CutPrefix(left, "ref: "); ok {
+			branch = strings.TrimPrefix(target, "refs/heads/")
+		} else if left != "" {
+			hasHead = true
+		}
+	}
+	return branch, hasHead
+}
+
+// RemoteAdd adds url as the "origin" remote.
+func (r *Repo) RemoteAdd(url string) error {
+	if err := checkArg("url", url); err != nil {
+		return err
+	}
+	if _, err := r.git("remote", "add", remoteName, url); err != nil {
+		return fmt.Errorf("gitsync: remote add: %w", err)
+	}
+	return nil
+}
+
+// HasRemote reports whether the "origin" remote is configured.
+func (r *Repo) HasRemote() bool {
+	_, err := r.git("remote", "get-url", remoteName)
+	return err == nil
+}
+
+// CurrentBranch returns the checked-out branch name (also for an unborn
+// branch). It fails on a detached HEAD.
+func (r *Repo) CurrentBranch() (string, error) {
+	res, err := r.git("symbolic-ref", "--short", "-q", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("gitsync: current branch: %w", err)
+	}
+	return strings.TrimSpace(string(res.Stdout)), nil
+}
+
+// RenameBranch renames the current branch (`git branch -M <name>`).
+func (r *Repo) RenameBranch(name string) error {
+	if err := checkArg("branch", name); err != nil {
+		return err
+	}
+	if _, err := r.git("branch", "-M", name); err != nil {
+		return fmt.Errorf("gitsync: rename branch to %s: %w", name, err)
+	}
+	return nil
+}
+
+// AddAll stages every change (`git add -A`). It refuses while a merge is in
+// progress (spec §7: only the resolver stages files then); the error wraps
+// ErrConflict.
+func (r *Repo) AddAll() error {
+	if r.MergeInProgress() {
+		return fmt.Errorf("gitsync: add all refused during a merge: %w", ErrConflict)
+	}
+	if _, err := r.git("add", "-A"); err != nil {
+		return fmt.Errorf("gitsync: add all: %w", err)
+	}
+	return nil
+}
+
+// Add stages the given paths, including deletions of tracked paths.
+func (r *Repo) Add(paths ...string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if err := checkPaths(paths); err != nil {
+		return err
+	}
+	args := append([]string{"add", "-A", "--"}, paths...)
+	if _, err := r.git(args...); err != nil {
+		return fmt.Errorf("gitsync: add: %w", err)
+	}
+	return nil
+}
+
+// Remove removes paths from the index (all stages, so an unmerged path is
+// resolved as deleted) and deletes the working files if present. Paths that
+// are neither tracked nor present are ignored.
+func (r *Repo) Remove(paths ...string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if err := checkPaths(paths); err != nil {
+		return err
+	}
+	args := append([]string{"rm", "-q", "--cached", "-f", "--ignore-unmatch", "--"}, paths...)
+	if _, err := r.git(args...); err != nil {
+		return fmt.Errorf("gitsync: remove: %w", err)
+	}
+	for _, p := range paths {
+		if err := os.Remove(filepath.Join(r.Dir, filepath.FromSlash(p))); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("gitsync: remove %s: %w", p, err)
+		}
+	}
+	return nil
+}
+
+// Commit commits what is staged. It returns (false, nil) when nothing is
+// staged. It refuses while a merge is in progress (use CommitMerge); the error
+// wraps ErrConflict.
+func (r *Repo) Commit(msg string) (committed bool, err error) {
+	if r.MergeInProgress() {
+		return false, fmt.Errorf("gitsync: commit refused during a merge: %w", ErrConflict)
+	}
+	if _, err := r.git("diff", "--cached", "--quiet", "--no-ext-diff"); err == nil {
+		return false, nil
+	} else if exitCode(err) != 1 {
+		return false, fmt.Errorf("gitsync: commit: %w", err)
+	}
+	if _, err := r.git("commit", "-q", "-m", msg); err != nil {
+		return false, fmt.Errorf("gitsync: commit: %w", err)
+	}
+	return true, nil
+}
+
+// Status returns the parsed `git status --porcelain=v2 -z` entries, listing
+// untracked files individually.
+func (r *Repo) Status() ([]StatusEntry, error) {
+	res, err := r.git("status", "--porcelain=v2", "-z", "--untracked-files=all")
+	if err != nil {
+		return nil, fmt.Errorf("gitsync: status: %w", err)
+	}
+	entries, err := parseStatus(string(res.Stdout))
+	if err != nil {
+		return nil, fmt.Errorf("gitsync: status: %w", err)
+	}
+	return entries, nil
+}
+
+func parseStatus(out string) ([]StatusEntry, error) {
+	var entries []StatusEntry
+	recs := strings.Split(out, "\x00")
+	for i := 0; i < len(recs); i++ {
+		rec := recs[i]
+		if rec == "" {
+			continue
+		}
+		switch rec[0] {
+		case '1', '2', 'u':
+			// Fields before the path: 1 -> 8, 2 -> 9, u -> 10.
+			n := map[byte]int{'1': 8, '2': 9, 'u': 10}[rec[0]]
+			f := strings.SplitN(rec, " ", n+1)
+			if len(f) != n+1 {
+				return nil, fmt.Errorf("malformed status record %q", rec)
+			}
+			e := StatusEntry{Kind: rec[0], XY: f[1], Path: f[n]}
+			if rec[0] == '2' {
+				i++
+				if i >= len(recs) {
+					return nil, fmt.Errorf("rename record without source: %q", rec)
+				}
+				e.OrigPath = recs[i]
+			}
+			entries = append(entries, e)
+		case '?', '!':
+			if len(rec) < 3 {
+				return nil, fmt.Errorf("malformed status record %q", rec)
+			}
+			entries = append(entries, StatusEntry{Kind: rec[0], Path: rec[2:]})
+		case '#':
+			// header lines (only with --branch)
+		default:
+			return nil, fmt.Errorf("unknown status record %q", rec)
+		}
+	}
+	return entries, nil
+}
+
+// Fetch fetches origin. It returns ErrNoRemote without a remote.
+func (r *Repo) Fetch(ctx context.Context) error {
+	if !r.HasRemote() {
+		return fmt.Errorf("gitsync: fetch: %w", ErrNoRemote)
+	}
+	if _, err := r.gitNet(ctx, "fetch", "-q", remoteName); err != nil {
+		return fmt.Errorf("gitsync: fetch: %w", err)
+	}
+	return nil
+}
+
+// Push pushes the current branch to origin; setUpstream adds -u. It returns
+// ErrNoRemote without a remote.
+func (r *Repo) Push(ctx context.Context, setUpstream bool) error {
+	if !r.HasRemote() {
+		return fmt.Errorf("gitsync: push: %w", ErrNoRemote)
+	}
+	branch, err := r.CurrentBranch()
+	if err != nil {
+		return fmt.Errorf("gitsync: push: %w", err)
+	}
+	args := []string{"push", "-q"}
+	if setUpstream {
+		args = append(args, "-u")
+	}
+	args = append(args, remoteName, "refs/heads/"+branch+":refs/heads/"+branch)
+	if _, err := r.gitNet(ctx, args...); err != nil {
+		return fmt.Errorf("gitsync: push: %w", err)
+	}
+	return nil
+}
+
+// HasUpstream reports whether the current branch has an upstream configured.
+func (r *Repo) HasUpstream() bool {
+	_, err := r.git("rev-parse", "-q", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	return err == nil
+}
+
+// AheadBehind counts commits between HEAD and origin/<branch>. When that
+// remote-tracking branch does not exist (no remote, or never pushed), ahead is
+// the number of local commits and behind is 0. An unborn branch is (0, 0).
+func (r *Repo) AheadBehind() (ahead, behind int, err error) {
+	if !r.hasCommit("HEAD") {
+		return 0, 0, nil
+	}
+	branch, err := r.CurrentBranch()
+	if err != nil {
+		return 0, 0, fmt.Errorf("gitsync: ahead/behind: %w", err)
+	}
+	tracking := "refs/remotes/" + remoteName + "/" + branch
+	if !r.hasCommit(tracking) {
+		res, err := r.git("rev-list", "--count", "HEAD")
+		if err != nil {
+			return 0, 0, fmt.Errorf("gitsync: ahead/behind: %w", err)
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(string(res.Stdout)))
+		if err != nil {
+			return 0, 0, fmt.Errorf("gitsync: ahead/behind: parse count: %w", err)
+		}
+		return n, 0, nil
+	}
+	res, err := r.git("rev-list", "--left-right", "--count", "HEAD..."+tracking)
+	if err != nil {
+		return 0, 0, fmt.Errorf("gitsync: ahead/behind: %w", err)
+	}
+	f := strings.Fields(string(res.Stdout))
+	if len(f) != 2 {
+		return 0, 0, fmt.Errorf("gitsync: ahead/behind: unexpected output %q", res.Stdout)
+	}
+	if ahead, err = strconv.Atoi(f[0]); err == nil {
+		behind, err = strconv.Atoi(f[1])
+	}
+	if err != nil {
+		return 0, 0, fmt.Errorf("gitsync: ahead/behind: parse counts: %w", err)
+	}
+	return ahead, behind, nil
+}
+
+func (r *Repo) hasCommit(rev string) bool {
+	_, err := r.git("rev-parse", "-q", "--verify", rev+"^{commit}")
+	return err == nil
+}
+
+// Merge merges ref into the current branch without opening an editor.
+// Fast-forwards are allowed and rename detection is always on. It returns an
+// error wrapping ErrConflict when the merge stopped with conflicts (the merge
+// stays in progress) or ErrLocalChanges when git refused to start because
+// uncommitted changes would be overwritten.
+func (r *Repo) Merge(ref string, allowUnrelated bool) error {
+	if err := checkArg("ref", ref); err != nil {
+		return err
+	}
+	args := []string{"merge", "--no-edit", "--ff", "--no-autostash", "-Xfind-renames"}
+	if allowUnrelated {
+		args = append(args, "--allow-unrelated-histories")
+	}
+	args = append(args, ref)
+	if _, err := r.git(args...); err != nil {
+		return fmt.Errorf("gitsync: merge %s: %w", ref, err)
+	}
+	return nil
+}
+
+// MergeInProgress reports whether MERGE_HEAD exists.
+func (r *Repo) MergeInProgress() bool {
+	_, err := r.git("rev-parse", "-q", "--verify", "MERGE_HEAD")
+	return err == nil
+}
+
+// CommitMerge concludes the merge in progress with msg. It fails if no merge
+// is in progress or unresolved conflicts remain.
+func (r *Repo) CommitMerge(msg string) error {
+	if !r.MergeInProgress() {
+		return errors.New("gitsync: commit merge: no merge in progress")
+	}
+	if _, err := r.git("commit", "-q", "-m", msg); err != nil {
+		return fmt.Errorf("gitsync: commit merge: %w", err)
+	}
+	return nil
+}
+
+// AbortMerge runs `git merge --abort`.
+func (r *Repo) AbortMerge() error {
+	if _, err := r.git("merge", "--abort"); err != nil {
+		return fmt.Errorf("gitsync: abort merge: %w", err)
+	}
+	return nil
+}
+
+// DiffNameStatus lists the files that differ between from and to, with
+// rename detection. An empty to compares from with the working tree (tracked
+// files only). Type changes and unmerged entries are reported as 'M', copies
+// as 'A'.
+func (r *Repo) DiffNameStatus(from, to string) ([]Change, error) {
+	if err := checkArg("rev", from); err != nil {
+		return nil, err
+	}
+	args := []string{"diff", "--name-status", "-z", "-M", "--no-ext-diff", "--no-color", from}
+	if to != "" {
+		if err := checkArg("rev", to); err != nil {
+			return nil, err
+		}
+		args = append(args, to)
+	}
+	args = append(args, "--")
+	res, err := r.git(args...)
+	if err != nil {
+		return nil, fmt.Errorf("gitsync: diff %s %s: %w", from, to, err)
+	}
+	changes, err := parseNameStatus(string(res.Stdout))
+	if err != nil {
+		return nil, fmt.Errorf("gitsync: diff %s %s: %w", from, to, err)
+	}
+	return changes, nil
+}
+
+func parseNameStatus(out string) ([]Change, error) {
+	var changes []Change
+	tok := strings.Split(out, "\x00")
+	for i := 0; i < len(tok); i++ {
+		st := tok[i]
+		if st == "" {
+			continue
+		}
+		next := func() (string, error) {
+			i++
+			if i >= len(tok) || tok[i] == "" {
+				return "", fmt.Errorf("truncated name-status output after %q", st)
+			}
+			return tok[i], nil
+		}
+		switch st[0] {
+		case 'R', 'C':
+			old, err := next()
+			if err != nil {
+				return nil, err
+			}
+			nw, err := next()
+			if err != nil {
+				return nil, err
+			}
+			if st[0] == 'R' {
+				changes = append(changes, Change{Status: 'R', Path: nw, OldPath: old})
+			} else {
+				changes = append(changes, Change{Status: 'A', Path: nw})
+			}
+		case 'A', 'M', 'D', 'T', 'U', 'X':
+			p, err := next()
+			if err != nil {
+				return nil, err
+			}
+			s := st[0]
+			if s != 'A' && s != 'D' {
+				s = 'M'
+			}
+			changes = append(changes, Change{Status: s, Path: p})
+		default:
+			return nil, fmt.Errorf("unknown name-status %q", st)
+		}
+	}
+	return changes, nil
+}
+
+// MergeBase returns the best common ancestor of a and b.
+func (r *Repo) MergeBase(a, b string) (string, error) {
+	if err := checkArg("rev", a); err != nil {
+		return "", err
+	}
+	if err := checkArg("rev", b); err != nil {
+		return "", err
+	}
+	res, err := r.git("merge-base", a, b)
+	if err != nil {
+		return "", fmt.Errorf("gitsync: merge-base %s %s: %w", a, b, err)
+	}
+	return strings.TrimSpace(string(res.Stdout)), nil
+}
+
+// checkArg rejects empty values and values that git would parse as options.
+func checkArg(name, v string) error {
+	if v == "" || strings.HasPrefix(v, "-") {
+		return fmt.Errorf("gitsync: invalid %s %q", name, v)
+	}
+	return nil
+}
+
+// checkPaths rejects paths that are absolute or escape the repository.
+func checkPaths(paths []string) error {
+	for _, p := range paths {
+		if !filepath.IsLocal(filepath.FromSlash(p)) {
+			return fmt.Errorf("gitsync: path %q is outside the repository", p)
+		}
+	}
+	return nil
+}
+
+// exitCode returns the process exit code wrapped in err, or -1.
+func exitCode(err error) int {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
+}
