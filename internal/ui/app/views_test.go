@@ -156,7 +156,7 @@ func TestReadyTicks(t *testing.T) {
 	m := New(testOptions(t))
 	run(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
 	var ticks []readyTickMsg
-	for _, msg := range execCmd(m.Init()) {
+	for _, msg := range execCmd(t, m, m.Init()) {
 		if r, ok := msg.(readyTickMsg); ok {
 			ticks = append(ticks, r)
 		}

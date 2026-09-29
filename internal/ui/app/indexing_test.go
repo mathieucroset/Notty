@@ -45,7 +45,7 @@ func TestIndexBuiltAtStartup(t *testing.T) {
 	if !strings.Contains(screen(m), "indexing…") {
 		t.Errorf("status bar does not show indexing:\n%s", screen(m))
 	}
-	for _, msg := range execCmd(cmd) {
+	for _, msg := range execCmd(t, m, cmd) {
 		run(t, m, msg)
 	}
 	s := screen(m)
@@ -67,7 +67,7 @@ func TestChangesDuringIndexBuildReplayed(t *testing.T) {
 	opts := testOptions(t)
 	m := New(opts)
 	run(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
-	startup := execCmd(m.Init()) // the build has read the vault
+	startup := execCmd(t, m, m.Init()) // the build has read the vault
 
 	writeFile(t, opts.Vault, "external.md", "# External\n")
 	run(t, m, watchEventMsg{paths: []string{"external.md"}})
