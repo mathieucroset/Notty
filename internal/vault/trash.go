@@ -258,7 +258,7 @@ func readMeta(abs string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	b, err := io.ReadAll(io.LimitReader(f, maxMetaSize+1))
 	if err != nil {
 		return nil, err

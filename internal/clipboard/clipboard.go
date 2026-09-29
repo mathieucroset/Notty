@@ -137,7 +137,7 @@ func (c *Clipboard) readImageWayland() ([]byte, error) {
 		// A non-zero exit here typically means the clipboard is empty, but
 		// wrap the underlying error so a genuine wl-paste failure is still
 		// debuggable via errors.Unwrap.
-		return nil, fmt.Errorf("%w: %v", ErrNoImage, err)
+		return nil, fmt.Errorf("%w: %w", ErrNoImage, err)
 	}
 	if !hasMIMEType(types, "image/png") {
 		return nil, ErrNoImage
@@ -145,7 +145,7 @@ func (c *Clipboard) readImageWayland() ([]byte, error) {
 
 	data, err := c.Run("wl-paste", "--type", "image/png")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrNoImage, err)
+		return nil, fmt.Errorf("%w: %w", ErrNoImage, err)
 	}
 	if !isPNG(data) {
 		return nil, ErrNoImage
@@ -163,7 +163,7 @@ func (c *Clipboard) readImageX11() ([]byte, error) {
 		// A non-zero exit here typically means the clipboard is empty, but
 		// wrap the underlying error so a genuine xclip failure is still
 		// debuggable via errors.Unwrap.
-		return nil, fmt.Errorf("%w: %v", ErrNoImage, err)
+		return nil, fmt.Errorf("%w: %w", ErrNoImage, err)
 	}
 	if !hasMIMEType(targets, "image/png") {
 		return nil, ErrNoImage
@@ -171,7 +171,7 @@ func (c *Clipboard) readImageX11() ([]byte, error) {
 
 	data, err := c.Run("xclip", "-selection", "clipboard", "-t", "image/png", "-o")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrNoImage, err)
+		return nil, fmt.Errorf("%w: %w", ErrNoImage, err)
 	}
 	if !isPNG(data) {
 		return nil, ErrNoImage
@@ -202,7 +202,7 @@ func (c *Clipboard) readImageDarwin() ([]byte, error) {
 	_ = c.Remove(tmpPath)
 	if err != nil {
 		if runErr != nil {
-			return nil, fmt.Errorf("%w: %v", ErrNoImage, runErr)
+			return nil, fmt.Errorf("%w: %w", ErrNoImage, runErr)
 		}
 		return nil, ErrNoImage
 	}
@@ -237,7 +237,7 @@ func (c *Clipboard) readImageWindows() ([]byte, error) {
 	_ = c.Remove(tmpPath)
 	if err != nil {
 		if runErr != nil {
-			return nil, fmt.Errorf("%w: %v", ErrNoImage, runErr)
+			return nil, fmt.Errorf("%w: %w", ErrNoImage, runErr)
 		}
 		return nil, ErrNoImage
 	}

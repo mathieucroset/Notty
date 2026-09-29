@@ -202,7 +202,7 @@ func checkBlockInvariants(t *testing.T, base, ours, theirs []string, bs []Block)
 		t.Fatalf("blocks do not reconstruct inputs: %s", ctx())
 	}
 	for i, b := range bs {
-		ok := true
+		var ok bool
 		switch b.Kind {
 		case Stable:
 			ok = len(b.Base) > 0 && eq(b.Base, b.Ours) && eq(b.Base, b.Theirs)

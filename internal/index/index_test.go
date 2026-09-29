@@ -61,10 +61,10 @@ func TestBuild(t *testing.T) {
 	var want []string
 	for i := range 50 {
 		rel := fmt.Sprintf("n%02d.md", i)
-		switch {
-		case i%3 == 1:
+		switch i % 3 {
+		case 1:
 			rel = fmt.Sprintf("Work/n%02d.md", i)
-		case i%3 == 2:
+		case 2:
 			rel = fmt.Sprintf("Work/Client/Deep/n%02d.md", i)
 		}
 		files[rel] = fmt.Sprintf("# Note %d\n\nbody #tag%d\n- [ ] task %d\n", i, i%5, i)
