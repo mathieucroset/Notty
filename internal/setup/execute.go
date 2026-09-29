@@ -32,8 +32,31 @@ func (e *StepError) Unwrap() error { return e.Err }
 // configured with a different URL.
 var ErrRemoteExists = errors.New("setup: the vault already has a different origin remote")
 
+// ErrNoIdentity means git has no user.name/user.email to commit with; the
+// wizard asks for them and calls SetIdentity.
+var ErrNoIdentity = gitsync.ErrNoIdentity
+
+// CheckIdentity returns an error wrapping ErrNoIdentity when git cannot
+// commit in the vault dir (its own config if it is a repository, else the
+// global config).
+func CheckIdentity(ctx context.Context, dir string) error {
+	if err := gitsync.CheckIdentity(ctx, dir); err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+	return nil
+}
+
+// SetIdentity sets the global git user.name and user.email.
+func SetIdentity(ctx context.Context, name, email string) error {
+	if err := gitsync.SetGlobalIdentity(ctx, name, email); err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+	return nil
+}
+
 // Execute runs steps (from Plan) in the vault folder req.Vault, which is
-// created if missing. It stops at the first failing step and returns a
+// created if missing. It first checks the git identity (CheckIdentity), so a
+// missing one fails with ErrNoIdentity before anything changes. It stops at the first failing step and returns a
 // *StepError. conflicted is true when the MergeUnrelated step stopped with
 // conflicts: the merge stays in progress and the remaining steps are skipped,
 // so the caller starts the syncer, which enters Conflict. Re-running the same
@@ -48,6 +71,12 @@ func Execute(ctx context.Context, req Request, steps []Step, gh GH, progress Pro
 // ExecuteRepo is Execute on an existing Repo value (its Dir is the vault
 // folder). It is what Job runs on the syncer's queue.
 func ExecuteRepo(ctx context.Context, repo *gitsync.Repo, steps []Step, gh GH, progress Progress) (conflicted bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return false, fmt.Errorf("setup: %w", err)
+	}
+	if err := CheckIdentity(ctx, repo.Dir); err != nil {
+		return false, err
+	}
 	for i, s := range steps {
 		if err := ctx.Err(); err != nil {
 			return false, &StepError{Index: i, Step: s, Err: err}

@@ -698,6 +698,36 @@ func TestExecuteProgressAndNetworkError(t *testing.T) {
 	}
 }
 
+func TestExecuteNeedsIdentity(t *testing.T) {
+	gittest.Isolate(t)
+	t.Setenv("EMAIL", "")
+	os.Unsetenv("EMAIL")
+	gittest.Git(t, "", "config", "--global", "user.useConfigOnly", "true")
+	vault := filepath.Join(t.TempDir(), "Notes")
+	req := setup.Request{Vault: vault, Choice: setup.LocalOnly, Host: "box"}
+	steps, err := setup.Plan(req, setup.Missing, setup.RemoteState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := setup.CheckIdentity(ctx, vault); !errors.Is(err, setup.ErrNoIdentity) {
+		t.Fatalf("CheckIdentity err = %v, want ErrNoIdentity", err)
+	}
+	if _, err := setup.Execute(ctx, req, steps, nil, nil); !errors.Is(err, setup.ErrNoIdentity) {
+		t.Fatalf("Execute err = %v, want ErrNoIdentity", err)
+	}
+	if _, err := os.Stat(vault); err == nil {
+		t.Error("vault created although the identity check failed")
+	}
+	if err := setup.SetIdentity(ctx, "Me", "me@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	mustRunSteps(t, req, steps, nil)
+	if a := gittest.Git(t, vault, "log", "-1", "--format=%an <%ae>"); a != "Me <me@example.com>" {
+		t.Errorf("author = %q", a)
+	}
+}
+
 func TestExecuteCanceled(t *testing.T) {
 	gittest.Isolate(t)
 	identity(t)
