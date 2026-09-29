@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -234,53 +236,286 @@ var validConfigKeys = map[string]bool{
 // SetKey rewrites exactly one key in the local config file at localPath,
 // creating the file (and its parent directory) if it doesn't exist. key is
 // either a bare top-level key ("theme") or a dotted key into a table
-// ("sync.enabled"). Every other key already present in the file is left
-// untouched. key must be one of the known config keys; anything else
-// returns an error.
+// ("sync.enabled"). It is a targeted text edit: every other line in the
+// file (comments, key order, other keys) is preserved byte-for-byte. key
+// must be one of the known config keys; anything else returns an error and
+// leaves the file untouched.
 func SetKey(localPath string, key string, value any) error {
 	if !validConfigKeys[key] {
 		return fmt.Errorf("config: unknown key %q", key)
 	}
 
-	tree, err := readTOMLTree(localPath)
+	encoded, err := encodeTOMLValue(value)
+	if err != nil {
+		return fmt.Errorf("config: encoding value for %q: %w", key, err)
+	}
+
+	lines, err := readConfigLines(localPath)
 	if err != nil {
 		return err
 	}
 
-	parts := strings.Split(key, ".")
-	node := tree
-	for _, p := range parts[:len(parts)-1] {
-		child, ok := node[p].(map[string]any)
-		if !ok {
-			child = map[string]any{}
-			node[p] = child
-		}
-		node = child
+	parts := strings.SplitN(key, ".", 2)
+	var newLines []string
+	if len(parts) == 1 {
+		newLines = setTopLevelKey(lines, parts[0], encoded)
+	} else {
+		newLines = setTableKey(lines, parts[0], parts[1], encoded)
 	}
-	node[parts[len(parts)-1]] = value
 
-	return writeTOMLTree(localPath, tree)
+	content := strings.Join(newLines, "\n")
+	if len(newLines) > 0 {
+		content += "\n"
+	}
+
+	return writeConfigFile(localPath, content)
 }
 
-func readTOMLTree(path string) (map[string]any, error) {
-	tree := map[string]any{}
+// readConfigLines reads path and splits it into lines with any line
+// endings stripped. A missing file yields no lines.
+func readConfigLines(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return tree, nil
+			return nil, nil
 		}
 		return nil, fmt.Errorf("reading config %s: %w", path, err)
 	}
-	if err := toml.Unmarshal(data, &tree); err != nil {
-		return nil, fmt.Errorf("parsing config %s: %w", path, err)
+	if len(data) == 0 {
+		return nil, nil
 	}
-	return tree, nil
+	s := strings.TrimSuffix(string(data), "\n")
+	if s == "" {
+		return nil, nil
+	}
+	return strings.Split(s, "\n"), nil
 }
 
-// writeTOMLTree writes tree to path atomically: it encodes into a temp
-// file created in the same directory, then renames it into place, so a
-// crash or concurrent read never observes a partially written config file.
-func writeTOMLTree(path string, tree map[string]any) error {
+// tomlHeaderLineRe matches any table header line ("[sync]", "[[foo]]",
+// possibly indented or with a trailing comment), used to find section
+// boundaries.
+var tomlHeaderLineRe = regexp.MustCompile(`^\s*\[`)
+
+// tableHeaderRe returns a regexp matching the exact header line for a
+// single top-level table, e.g. "[sync]" (not "[[sync]]" or "[sync.sub]").
+func tableHeaderRe(table string) *regexp.Regexp {
+	return regexp.MustCompile(`^\s*\[\s*` + regexp.QuoteMeta(table) + `\s*\]\s*(#.*)?$`)
+}
+
+// fieldLineRe returns a regexp matching a "field = value" assignment line
+// for the exact bare key field, capturing the leading indent, the
+// whitespace-and-equals separator, and the remainder of the line (value
+// plus any trailing comment).
+func fieldLineRe(field string) *regexp.Regexp {
+	return regexp.MustCompile(`^(\s*)` + regexp.QuoteMeta(field) + `(\s*=\s*)(.*)$`)
+}
+
+// setTopLevelKey replaces or inserts a bare top-level key. The search (and
+// insertion point, when the key is absent) is restricted to the lines
+// before the first table header, per spec §8.
+func setTopLevelKey(lines []string, field, encoded string) []string {
+	boundary := len(lines)
+	for i, l := range lines {
+		if tomlHeaderLineRe.MatchString(l) {
+			boundary = i
+			break
+		}
+	}
+
+	re := fieldLineRe(field)
+	for i := 0; i < boundary; i++ {
+		if m := re.FindStringSubmatch(lines[i]); m != nil {
+			lines[i] = replaceFieldValue(m, field, encoded)
+			return lines
+		}
+	}
+
+	insertAt := trimTrailingBlank(lines, 0, boundary)
+	result := make([]string, 0, len(lines)+1)
+	result = append(result, lines[:insertAt]...)
+	result = append(result, field+" = "+encoded)
+	result = append(result, lines[insertAt:]...)
+	return result
+}
+
+// trimTrailingBlank returns end reduced past any blank lines immediately
+// preceding it (down to start), so an insertion lands right after the last
+// non-blank line of a section rather than after its trailing blank
+// separator line.
+func trimTrailingBlank(lines []string, start, end int) int {
+	for end > start && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	return end
+}
+
+// setTableKey replaces or inserts field inside [table], creating the table
+// at the end of the file if it doesn't exist yet.
+func setTableKey(lines []string, table, field, encoded string) []string {
+	hdrRe := tableHeaderRe(table)
+	start := -1
+	for i, l := range lines {
+		if hdrRe.MatchString(l) {
+			start = i
+			break
+		}
+	}
+
+	if start == -1 {
+		result := make([]string, len(lines), len(lines)+3)
+		copy(result, lines)
+		if len(result) > 0 {
+			result = append(result, "")
+		}
+		result = append(result, "["+table+"]")
+		result = append(result, field+" = "+encoded)
+		return result
+	}
+
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if tomlHeaderLineRe.MatchString(lines[i]) {
+			end = i
+			break
+		}
+	}
+
+	re := fieldLineRe(field)
+	for i := start + 1; i < end; i++ {
+		if m := re.FindStringSubmatch(lines[i]); m != nil {
+			lines[i] = replaceFieldValue(m, field, encoded)
+			return lines
+		}
+	}
+
+	insertAt := trimTrailingBlank(lines, start+1, end)
+	result := make([]string, 0, len(lines)+1)
+	result = append(result, lines[:insertAt]...)
+	result = append(result, field+" = "+encoded)
+	result = append(result, lines[insertAt:]...)
+	return result
+}
+
+// replaceFieldValue rebuilds a matched "field = value  # comment" line with
+// a new value, keeping the original indent, spacing around "=", and any
+// trailing comment untouched.
+func replaceFieldValue(m []string, field, encoded string) string {
+	_, suffix := splitValueAndComment(m[3])
+	return m[1] + field + m[2] + encoded + suffix
+}
+
+// splitValueAndComment splits the remainder of an assignment line (after
+// "field =") into the value and a trailing suffix holding any whitespace
+// and "# comment", tracking basic and literal TOML string quoting so a '#'
+// inside a quoted value isn't mistaken for a comment. When there is no
+// comment, the value has its trailing whitespace trimmed and the suffix is
+// empty.
+func splitValueAndComment(s string) (value, suffix string) {
+	inDouble, inSingle, escaped := false, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inDouble {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inDouble = false
+			}
+			continue
+		}
+		if inSingle {
+			if c == '\'' {
+				inSingle = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inDouble = true
+		case '\'':
+			inSingle = true
+		case '#':
+			j := i
+			for j > 0 && (s[j-1] == ' ' || s[j-1] == '\t') {
+				j--
+			}
+			return s[:j], s[j:]
+		}
+	}
+	return strings.TrimRight(s, " \t"), ""
+}
+
+// dblQuotedReplacer mirrors BurntSushi/toml's basic-string escaping
+// (encode.go's dblQuotedReplacer) so values SetKey writes are
+// indistinguishable from what the library's own encoder would produce.
+var dblQuotedReplacer = strings.NewReplacer(
+	"\"", "\\\"",
+	"\\", "\\\\",
+	"\x00", `\u0000`,
+	"\x01", `\u0001`,
+	"\x02", `\u0002`,
+	"\x03", `\u0003`,
+	"\x04", `\u0004`,
+	"\x05", `\u0005`,
+	"\x06", `\u0006`,
+	"\x07", `\u0007`,
+	"\b", `\b`,
+	"\t", `\t`,
+	"\n", `\n`,
+	"\x0b", `\u000b`,
+	"\f", `\f`,
+	"\r", `\r`,
+	"\x0e", `\u000e`,
+	"\x0f", `\u000f`,
+	"\x10", `\u0010`,
+	"\x11", `\u0011`,
+	"\x12", `\u0012`,
+	"\x13", `\u0013`,
+	"\x14", `\u0014`,
+	"\x15", `\u0015`,
+	"\x16", `\u0016`,
+	"\x17", `\u0017`,
+	"\x18", `\u0018`,
+	"\x19", `\u0019`,
+	"\x1a", `\u001a`,
+	"\x1b", `\u001b`,
+	"\x1c", `\u001c`,
+	"\x1d", `\u001d`,
+	"\x1e", `\u001e`,
+	"\x1f", `\u001f`,
+	"\x7f", `\u007f`,
+)
+
+// encodeTOMLValue encodes value using BurntSushi/toml semantics: quoted
+// and escaped for strings, and plain literals for bools and ints.
+func encodeTOMLValue(value any) (string, error) {
+	switch v := value.(type) {
+	case string:
+		return `"` + dblQuotedReplacer.Replace(v) + `"`, nil
+	case bool:
+		return strconv.FormatBool(v), nil
+	case int:
+		return strconv.FormatInt(int64(v), 10), nil
+	case int8:
+		return strconv.FormatInt(int64(v), 10), nil
+	case int16:
+		return strconv.FormatInt(int64(v), 10), nil
+	case int32:
+		return strconv.FormatInt(int64(v), 10), nil
+	case int64:
+		return strconv.FormatInt(v, 10), nil
+	default:
+		return "", fmt.Errorf("unsupported value type %T", value)
+	}
+}
+
+// writeConfigFile writes content to path atomically: it encodes into a
+// temp file created in the same directory, then renames it into place, so
+// a crash or concurrent read never observes a partially written config
+// file.
+func writeConfigFile(path string, content string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating config directory %s: %w", dir, err)
@@ -293,7 +528,7 @@ func writeTOMLTree(path string, tree map[string]any) error {
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath) // no-op once the rename below succeeds
 
-	if err := toml.NewEncoder(tmp).Encode(tree); err != nil {
+	if _, err := tmp.WriteString(content); err != nil {
 		tmp.Close()
 		return fmt.Errorf("writing config %s: %w", path, err)
 	}

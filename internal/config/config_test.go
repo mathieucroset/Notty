@@ -410,6 +410,222 @@ enabled = true
 		}
 	})
 
+	t.Run("preserves comments and key order for an untouched top-level key", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		original := `# personal config
+vim = false   # I like vim off
+theme = "solarized"
+
+[sync]
+enabled = true
+`
+		writeFile(t, local, original)
+		if err := SetKey(local, "vim", true); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		got, err := os.ReadFile(local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `# personal config
+vim = true   # I like vim off
+theme = "solarized"
+
+[sync]
+enabled = true
+`
+		if string(got) != want {
+			t.Errorf("file =\n%s\nwant\n%s", got, want)
+		}
+		c, err := Load(local, "")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !c.Vim {
+			t.Error("Vim = false, want true")
+		}
+	})
+
+	t.Run("preserves trailing comment on a replaced dotted key line", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		writeFile(t, local, `[trash]
+retention_days = 30 # days to keep deleted notes
+`)
+		if err := SetKey(local, "trash.retention_days", 7); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		got, err := os.ReadFile(local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `[trash]
+retention_days = 7 # days to keep deleted notes
+`
+		if string(got) != want {
+			t.Errorf("file =\n%s\nwant\n%s", got, want)
+		}
+	})
+
+	t.Run("inserts a new key into an existing table without disturbing siblings", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		writeFile(t, local, `[tasks]
+show_done = true
+
+[images]
+protocol = "auto"
+`)
+		if err := SetKey(local, "tasks.due_soon_days", 3); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		got, err := os.ReadFile(local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `[tasks]
+show_done = true
+due_soon_days = 3
+
+[images]
+protocol = "auto"
+`
+		if string(got) != want {
+			t.Errorf("file =\n%s\nwant\n%s", got, want)
+		}
+	})
+
+	t.Run("creates a missing table at the end of the file", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		writeFile(t, local, `theme = "dracula"
+`)
+		if err := SetKey(local, "images.max_import_mb", 10); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		got, err := os.ReadFile(local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `theme = "dracula"
+
+[images]
+max_import_mb = 10
+`
+		if string(got) != want {
+			t.Errorf("file =\n%s\nwant\n%s", got, want)
+		}
+	})
+
+	t.Run("inserts a new top-level key before the first table header", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		writeFile(t, local, `# leading comment
+vim = false
+
+[sync]
+enabled = true
+`)
+		if err := SetKey(local, "theme", "nord"); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		got, err := os.ReadFile(local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `# leading comment
+vim = false
+theme = "nord"
+
+[sync]
+enabled = true
+`
+		if string(got) != want {
+			t.Errorf("file =\n%s\nwant\n%s", got, want)
+		}
+	})
+
+	t.Run("string values are quoted and escaped", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		if err := SetKey(local, "editor", `vim "with quotes" and \backslash\`+"\tand tab"); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		got, err := os.ReadFile(local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "editor = \"vim \\\"with quotes\\\" and \\\\backslash\\\\\\tand tab\"\n"
+		if string(got) != want {
+			t.Errorf("file =\n%q\nwant\n%q", got, want)
+		}
+		c, err := Load(local, "")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if want := `vim "with quotes" and \backslash\` + "\tand tab"; c.Editor != want {
+			t.Errorf("Editor = %q, want %q", c.Editor, want)
+		}
+	})
+
+	t.Run("file still parses after repeated edits", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "config.toml")
+		writeFile(t, local, `# config
+theme = "dracula" # was set via palette
+vim = true
+
+[sync]
+enabled = true
+commit_delay_s = 5
+
+[tasks]
+show_done = false
+`)
+		if err := SetKey(local, "theme", "nord"); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		if err := SetKey(local, "sync.enabled", false); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		if err := SetKey(local, "tasks.due_soon_days", 14); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		if err := SetKey(local, "images.protocol", "kitty"); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		c, err := Load(local, "")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if c.Theme != "nord" {
+			t.Errorf("Theme = %q, want nord", c.Theme)
+		}
+		if c.Sync.Enabled {
+			t.Error("Sync.Enabled = true, want false")
+		}
+		if c.Sync.CommitDelayS != 5 {
+			t.Errorf("Sync.CommitDelayS = %d, want 5 (preserved)", c.Sync.CommitDelayS)
+		}
+		if c.Tasks.DueSoonDays != 14 {
+			t.Errorf("Tasks.DueSoonDays = %d, want 14", c.Tasks.DueSoonDays)
+		}
+		if c.Tasks.ShowDone {
+			t.Error("Tasks.ShowDone = true, want false (preserved)")
+		}
+		if c.Images.Protocol != "kitty" {
+			t.Errorf("Images.Protocol = %q, want kitty", c.Images.Protocol)
+		}
+		got, err := os.ReadFile(local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), `theme = "nord" # was set via palette`) {
+			t.Errorf("expected theme's trailing comment to survive the value replacement, got:\n%s", got)
+		}
+	})
+
 	t.Run("writes atomically, leaving no temp file behind", func(t *testing.T) {
 		dir := t.TempDir()
 		local := filepath.Join(dir, "config.toml")
