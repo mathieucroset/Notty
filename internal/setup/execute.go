@@ -254,9 +254,12 @@ func addAllExceptJunk(ctx context.Context, repo *gitsync.Repo) (err error) {
 }
 
 // cloneInto clones url into dir. dir may be missing, empty, or hold only a
-// .notty/ directory (plan A1): that directory is moved aside for the clone,
-// then its entries that the clone does not have are moved back; for entries
-// in both, the remote's version wins.
+// .notty/ directory (plan A1). That directory is moved aside for the clone
+// and merged back afterwards: entries the clone lacks are moved back, and a
+// local file that differs from the clone's copy is kept under
+// .notty/recovery/setup-<timestamp>/ (the remote's copy stays in place), so
+// no local file is ever lost. If anything is left over, the error names the
+// directory holding it.
 func cloneInto(ctx context.Context, url, branch, dir string) (*gitsync.Repo, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) || (err == nil && len(entries) == 0) {
@@ -291,17 +294,21 @@ func cloneInto(ctx context.Context, url, branch, dir string) (*gitsync.Repo, err
 		_ = os.Remove(aside)
 		return nil, cerr
 	}
-	if err := mergeBack(saved, local); err != nil {
-		return nil, fmt.Errorf("restore .notty (kept in %s): %w", aside, err)
+	rescue := filepath.Join(local, "recovery", "setup-"+time.Now().Format("20060102-150405"))
+	if err := mergeBack(saved, local, rescue); err != nil {
+		return nil, fmt.Errorf("restore .notty (local files kept in %s): %w", aside, err)
 	}
-	if err := os.RemoveAll(aside); err != nil {
-		return nil, fmt.Errorf("remove %s: %w", aside, err)
+	if err := os.Remove(aside); err != nil {
+		return nil, fmt.Errorf("restore .notty (local files kept in %s): %w", aside, err)
 	}
 	return repo, nil
 }
 
-// mergeBack moves the entries of src that dst lacks into dst.
-func mergeBack(src, dst string) error {
+// mergeBack moves everything under src into dst. Directories present on
+// both sides are merged recursively. A file present on both sides keeps
+// dst's version; src's is dropped when identical, else moved to the same
+// relative path under rescue. src and its emptied subdirectories are removed.
+func mergeBack(src, dst, rescue string) error {
 	if _, err := os.Lstat(dst); errors.Is(err, os.ErrNotExist) {
 		return os.Rename(src, dst)
 	}
@@ -310,15 +317,46 @@ func mergeBack(src, dst string) error {
 		return err
 	}
 	for _, e := range entries {
-		to := filepath.Join(dst, e.Name())
-		if _, err := os.Lstat(to); err == nil {
-			continue
+		from, to := filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())
+		fi, err := os.Lstat(to)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			err = os.Rename(from, to)
+		case err != nil:
+		case e.IsDir() && fi.IsDir():
+			err = mergeBack(from, to, filepath.Join(rescue, e.Name()))
+		case e.Type().IsRegular() && fi.Mode().IsRegular() && sameContent(from, to):
+			err = os.Remove(from)
+		default:
+			err = moveUnique(from, filepath.Join(rescue, e.Name()))
 		}
-		if err := os.Rename(filepath.Join(src, e.Name()), to); err != nil {
+		if err != nil {
 			return err
 		}
 	}
-	return nil
+	return os.Remove(src)
+}
+
+func sameContent(a, b string) bool {
+	x, err1 := os.ReadFile(a)
+	y, err2 := os.ReadFile(b)
+	return err1 == nil && err2 == nil && string(x) == string(y)
+}
+
+// moveUnique renames from to to (creating parents), adding a numeric suffix
+// if to already exists.
+func moveUnique(from, to string) error {
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	target := to
+	for i := 2; ; i++ {
+		if _, err := os.Lstat(target); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		target = fmt.Sprintf("%s.%d", to, i)
+	}
+	return os.Rename(from, target)
 }
 
 // localGit runs a read-only local git command that gitsync has no API for

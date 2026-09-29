@@ -213,26 +213,73 @@ func TestExecuteCloneKeepsGitignoreWhenComplete(t *testing.T) {
 
 func TestExecuteCloneIntoNottyOnlyFolder(t *testing.T) {
 	gittest.Isolate(t)
-	remote := newRemote(t, "main", map[string]string{"a.md": "a\n", ".notty/state.json": "remote\n"})
+	remote := newRemote(t, "main", map[string]string{
+		"a.md":                   "a\n",
+		".notty/state.json":      "remote\n",
+		".notty/settings.toml":   "same\n",
+		".notty/recovery/old.md": "remote old\n",
+		".notty/recovery/dup.md": "remote dup\n",
+	})
 	identity(t)
 	vault := filepath.Join(t.TempDir(), "Notes")
 	writeFiles(t, vault, map[string]string{
 		".notty/recovery/draft.md": "draft\n",
+		".notty/recovery/dup.md":   "PRECIOUS\n",
 		".notty/state.json":        "local\n",
+		".notty/settings.toml":     "same\n",
+		".notty/lock":              "1",
 	})
 
 	mustRun(t, setup.Request{Vault: vault, Choice: setup.ExistingURL, URL: remote, Host: "box"}, nil)
 
-	if got := readFile(t, vault, "a.md"); got != "a\n" {
-		t.Errorf("a.md = %q", got)
+	want := map[string]string{
+		"a.md":                     "a\n",
+		".notty/state.json":        "remote\n",
+		".notty/settings.toml":     "same\n",
+		".notty/recovery/old.md":   "remote old\n",
+		".notty/recovery/dup.md":   "remote dup\n",
+		".notty/recovery/draft.md": "draft\n",
+		".notty/lock":              "1",
 	}
-	if got := readFile(t, vault, ".notty/state.json"); got != "remote\n" {
-		t.Errorf("state.json = %q, want the remote's", got)
+	for p, c := range want {
+		if got := readFile(t, vault, p); got != c {
+			t.Errorf("%s = %q, want %q", p, got, c)
+		}
 	}
-	if got := readFile(t, vault, ".notty/recovery/draft.md"); got != "draft\n" {
-		t.Errorf("recovery file = %q, want it kept", got)
+	// Differing local copies are rescued; identical ones are dropped.
+	rescued, _ := filepath.Glob(filepath.Join(vault, ".notty", "recovery", "setup-*"))
+	if len(rescued) != 1 {
+		t.Fatalf("rescue dirs = %v, want one", rescued)
 	}
-	assertClean(t, vault) // recovery is ignored
+	for p, c := range map[string]string{"state.json": "local\n", "recovery/dup.md": "PRECIOUS\n"} {
+		if got := readFile(t, rescued[0], p); got != c {
+			t.Errorf("rescued %s = %q, want %q", p, got, c)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(rescued[0], "settings.toml")); err == nil {
+		t.Error("identical settings.toml was rescued")
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(vault)); len(entries) != 1 {
+		t.Errorf("leftover entries next to the vault: %v", entries)
+	}
+}
+
+func TestExecuteCloneFailureRestoresNotty(t *testing.T) {
+	gittest.Isolate(t)
+	identity(t)
+	vault := filepath.Join(t.TempDir(), "Notes")
+	writeFiles(t, vault, map[string]string{".notty/recovery/d.md": "d\n"})
+	req := setup.Request{Vault: vault, Choice: setup.ExistingURL, URL: filepath.Join(t.TempDir(), "gone.git"), Host: "box"}
+	steps, err := setup.Plan(req, setup.Empty, setup.RemoteState{HasHistory: true, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setup.Execute(context.Background(), req, steps, nil, nil); !errors.Is(err, gitsync.ErrNetwork) {
+		t.Fatalf("err = %v, want ErrNetwork", err)
+	}
+	if got := readFile(t, vault, ".notty/recovery/d.md"); got != "d\n" {
+		t.Errorf("d.md = %q", got)
+	}
 	if entries, _ := os.ReadDir(filepath.Dir(vault)); len(entries) != 1 {
 		t.Errorf("leftover entries next to the vault: %v", entries)
 	}
