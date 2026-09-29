@@ -183,7 +183,7 @@ func (p *inline) emphasisN(i, n, hi int) ([]Span, int, bool) {
 	if i+n >= hi || isSpaceAt(line, i+n) || (c == '_' && i > 0 && isAlnumBefore(line, i)) {
 		return nil, 0, false
 	}
-	closeAt, fallback := -1, -1
+	closeAt, fallback, fallbackLen := -1, -1, 0
 	for j := i + n; j < hi && closeAt < 0; {
 		switch line[j] {
 		case '\\':
@@ -205,7 +205,7 @@ func (p *inline) emphasisN(i, n, hi int) ([]Span, int, bool) {
 				if m == n {
 					closeAt = j
 				} else if m > n && fallback < 0 && c != '~' {
-					fallback = j + m - n
+					fallback, fallbackLen = j, m
 				}
 			}
 			j += m
@@ -213,8 +213,16 @@ func (p *inline) emphasisN(i, n, hi int) ([]Span, int, bool) {
 		}
 		j++
 	}
-	if closeAt < 0 {
-		closeAt = fallback
+	if closeAt < 0 && fallback >= 0 {
+		// A longer closing run: its first n chars close this emphasis and the
+		// rest is literal ("**bold***"), unless the content has an unclosed
+		// opener that the extra chars close ("**a *b***").
+		extra := fallbackLen - n
+		if p.hasUnclosedOpener(i+n, fallback, c, extra) {
+			closeAt = fallback + extra
+		} else {
+			closeAt = fallback
+		}
 	}
 	if closeAt < 0 {
 		return nil, 0, false
@@ -227,6 +235,46 @@ func (p *inline) emphasisN(i, n, hi int) ([]Span, int, bool) {
 	spans = append(spans, p.parse(i+n, closeAt, content)...)
 	spans = append(spans, Span{Start: closeAt, End: closeAt + n, Kind: Markup})
 	return spans, closeAt + n, true
+}
+
+// hasUnclosedOpener reports whether line[lo:hi] contains a run of exactly k
+// c delimiters that can open emphasis and is not closed by a later run of k
+// within the range. Code spans are skipped.
+func (p *inline) hasUnclosedOpener(lo, hi int, c byte, k int) bool {
+	line := p.line
+	open := 0
+	for j := lo; j < hi; {
+		switch line[j] {
+		case '\\':
+			j += 2
+			continue
+		case '`':
+			m := runLenTo(line, j, hi, '`')
+			if cl := findRun(line, j+m, hi, '`', m); cl >= 0 {
+				j = cl + m
+			} else {
+				j += m
+			}
+			continue
+		case c:
+			m := runLenTo(line, j, hi, c)
+			if m == k {
+				canClose := j > lo && !isSpaceBefore(line, j)
+				canOpen := j+m < hi && !isSpaceAt(line, j+m) &&
+					(c != '_' || j == 0 || !isAlnumBefore(line, j))
+				switch {
+				case canClose && open > 0:
+					open--
+				case canOpen:
+					open++
+				}
+			}
+			j += m
+			continue
+		}
+		j++
+	}
+	return open > 0
 }
 
 // runLenTo counts consecutive c bytes starting at i, stopping at hi.

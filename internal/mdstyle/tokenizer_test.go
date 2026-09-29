@@ -61,6 +61,8 @@ func TestTokenizeLine(t *testing.T) {
 		{"italic inside bold", "**a *b* c**", []sp{{"**", Markup}, {"a ", Bold}, {"*", Markup}, {"b", Italic}, {"*", Markup}, {" c", Bold}, {"**", Markup}}},
 		{"bold inside italic sharing opener", "***a** b*", []sp{{"*", Markup}, {"**", Markup}, {"a", Bold}, {"**", Markup}, {" b", Italic}, {"*", Markup}}},
 		{"bold closing with italic", "**a *b***", []sp{{"**", Markup}, {"a ", Bold}, {"*", Markup}, {"b", Italic}, {"*", Markup}, {"**", Markup}}},
+		{"longer closer: first n chars close", "**bold***", []sp{{"**", Markup}, {"bold", Bold}, {"**", Markup}}},
+		{"longer closer for italic", "*it** x", []sp{{"*", Markup}, {"it", Italic}, {"*", Markup}}},
 		{"unclosed bold", "**nope", nil},
 		{"spaced star not emphasis", "a * b * c", nil},
 		{"code", "use `x := 1` here", []sp{{"`", Markup}, {"x := 1", Code}, {"`", Markup}}},
