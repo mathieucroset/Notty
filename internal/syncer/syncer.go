@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -690,7 +691,7 @@ func (s *Syncer) fetchTick() {
 		s.fail(err)
 		return
 	}
-	_, behind, err := s.repo.AheadBehind()
+	_, behind, err := s.aheadBehind()
 	if err != nil {
 		s.fail(err)
 		return
@@ -713,7 +714,7 @@ func (s *Syncer) afterFetch() { s.mergeAndPush(true) }
 // another reason than the network or authentication (the remote moved since
 // the fetch) is retried once after fetching and merging again.
 func (s *Syncer) mergeAndPush(mayRetry bool) {
-	_, behind, err := s.repo.AheadBehind()
+	_, behind, err := s.aheadBehind()
 	if err != nil {
 		s.fail(err)
 		return
@@ -755,7 +756,7 @@ func (s *Syncer) mergeAndPush(mayRetry bool) {
 // needsPush reports whether local commits are not on the remote yet, or the
 // branch has commits but no upstream.
 func (s *Syncer) needsPush() bool {
-	ahead, _, err := s.repo.AheadBehind()
+	ahead, _, err := s.aheadBehind()
 	if err != nil {
 		return false
 	}
@@ -766,6 +767,24 @@ func (s *Syncer) needsPush() bool {
 }
 
 func (s *Syncer) headExists() bool { return revID(s.repo, "HEAD") != "" }
+
+// aheadBehind is AheadBehind, except that an unborn branch counts as behind
+// when the remote-tracking branch has history, so a fresh vault takes the
+// remote's notes.
+func (s *Syncer) aheadBehind() (ahead, behind int, err error) {
+	ahead, behind, err = s.repo.AheadBehind()
+	if err != nil || ahead != 0 || behind != 0 || s.headExists() {
+		return ahead, behind, err
+	}
+	if branch, berr := s.repo.CurrentBranch(); berr == nil && revID(s.repo, "origin/"+branch) != "" {
+		behind = 1
+	}
+	return ahead, behind, nil
+}
+
+// emptyTree is git's empty tree object: the "before" of a merge into an
+// unborn branch.
+const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 // mergeOutcome is how the locked merge section ended.
 type mergeOutcome int
@@ -781,24 +800,34 @@ const (
 // emits the merge result.
 func (s *Syncer) mergeSection() (mergeOutcome, error) {
 	s.setState(Merging)
-	outcome, u, err := s.lockedMerge()
-	if err != nil || outcome != merged {
-		return outcome, err
+	res, err := s.lockedMerge()
+	if err != nil || res.outcome != merged {
+		return res.outcome, err
 	}
-	// Warnings are best effort: a failed check must not fail the sync.
-	u.TrashWarnings, _ = detectTrashWarnings(s.repo, s.dir, "ORIG_HEAD", s.hostname)
+	u := res.update
+	if res.origHead != "" {
+		// Best effort: a failed check must not fail the sync.
+		u.TrashWarnings, _ = detectTrashWarnings(s.repo, s.dir, res.origHead, s.hostname)
+	}
 	u.Status = s.Status()
 	s.emit(u)
 	return merged, nil
 }
 
+// mergeResult is what lockedMerge hands back after unlocking.
+type mergeResult struct {
+	outcome  mergeOutcome
+	update   Update // Reindex and Reload of a clean merge
+	origHead string // the commit merged into ("" for an unborn branch)
+}
+
 // lockedMerge is the locked part: lock, pause the watcher, flush, commit,
-// merge, auto-resolve, then resume and unlock with the conflicted set. On a
-// clean merge it returns the Reindex/Reload update for the caller to emit.
-func (s *Syncer) lockedMerge() (outcome mergeOutcome, u Update, err error) {
+// merge, auto-resolve, then resume and unlock with the conflicted set.
+func (s *Syncer) lockedMerge() (res mergeResult, err error) {
+	var u Update
 	branch, err := s.repo.CurrentBranch()
 	if err != nil {
-		return merged, u, fmt.Errorf("syncer: merge: %w", err)
+		return res, fmt.Errorf("syncer: merge: %w", err)
 	}
 	ref := "origin/" + branch
 
@@ -823,24 +852,27 @@ func (s *Syncer) lockedMerge() (outcome mergeOutcome, u Update, err error) {
 	// must not rewrite a file under it (spec §7).
 	if s.deferIfEditing() {
 		s.setState(Idle)
-		return mergeDeferred, u, nil
+		return mergeResult{outcome: mergeDeferred}, nil
 	}
 	_ = s.host.Flush()
 	if err := s.commitAll(); err != nil {
-		return merged, u, err
+		return res, err
 	}
+	// The commit merged into (ORIG_HEAD after the merge); "" when unborn.
+	origHead := revID(s.repo, "HEAD")
 	err = s.repo.Merge(ref, false)
 	if errors.Is(err, gitsync.ErrLocalChanges) {
 		// Another program changed a file in the same instant: commit and
 		// retry once.
 		if cerr := s.commitAll(); cerr != nil {
-			return merged, u, cerr
+			return res, cerr
 		}
+		origHead = revID(s.repo, "HEAD")
 		err = s.repo.Merge(ref, false)
 	}
 	stopped := errors.Is(err, gitsync.ErrConflict) && s.repo.MergeInProgress()
 	if err != nil && !stopped {
-		return merged, u, fmt.Errorf("syncer: merge: %w", err)
+		return res, fmt.Errorf("syncer: merge: %w", err)
 	}
 	// Once the merge has stopped with conflicts, nothing may return before
 	// the conflicted set is known: the UI must learn which notes to protect.
@@ -854,27 +886,32 @@ func (s *Syncer) lockedMerge() (outcome mergeOutcome, u Update, err error) {
 		paths, lerr = s.conflictedPaths()
 		listFailed = lerr != nil
 	}
-	u.Reindex, u.Reload = s.reindex()
+	from := origHead
+	if from == "" {
+		from = emptyTree
+	}
+	u.Reindex, u.Reload = s.reindex(from)
 	if len(paths) > 0 || listFailed {
 		for _, p := range paths {
 			conflictSet[p] = true
 		}
 		s.enterConflict(u, paths)
-		return mergeConflicted, Update{}, nil
+		return mergeResult{outcome: mergeConflicted}, nil
 	}
 	if stopped {
 		// Nothing is left unmerged: conclude the merge.
 		if err := s.repo.CommitMerge("Merge · " + s.hostname); err != nil {
-			return merged, Update{}, fmt.Errorf("syncer: merge: %w", err)
+			return res, fmt.Errorf("syncer: merge: %w", err)
 		}
 	}
-	return merged, u, nil
+	return mergeResult{outcome: merged, update: u, origHead: origHead}, nil
 }
 
 // reindex returns the paths changed by the last merge (spec §7: every file in
-// DiffNameStatus(ORIG_HEAD, "")) and those of them that still exist.
-func (s *Syncer) reindex() (reindex, reload []string) {
-	changes, err := s.repo.DiffNameStatus("ORIG_HEAD", "")
+// DiffNameStatus(ORIG_HEAD, ""), from being the pre-merge commit) and those
+// of them that still exist.
+func (s *Syncer) reindex(from string) (reindex, reload []string) {
+	changes, err := s.repo.DiffNameStatus(from, "")
 	if err != nil {
 		return nil, nil
 	}
@@ -961,6 +998,10 @@ func (s *Syncer) fail(err error) {
 		s.disarm(&s.retryTimer)
 		s.mu.Unlock()
 		s.setStatus(Status{State: Error, Err: err, Detail: "auth"})
+	case strings.Contains(err.Error(), "unrelated histories"):
+		// The vault and the remote share no history (the wizard decides how
+		// to combine them); automatic merging refuses.
+		s.setStatus(Status{State: Error, Err: err, Detail: "unrelated histories"})
 	default:
 		s.setStatus(Status{State: Error, Err: err})
 	}

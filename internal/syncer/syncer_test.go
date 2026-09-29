@@ -358,6 +358,60 @@ func TestFirstPushSetsUpstream(t *testing.T) {
 	}
 }
 
+func TestUnbornBranchTakesRemoteHistory(t *testing.T) {
+	env := gittest.New(t)
+	repo, err := gitsync.Init(filepath.Join(t.TempDir(), "fresh"), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.Host = "fresh"
+	gittest.SetUser(t, repo, "Fresh User", "fresh@example.com")
+	if err := repo.RemoteAdd(env.Remote); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t, repo)
+	h.start()
+
+	h.wantState(Synced)
+	if got := gittest.Read(t, repo, "README.md"); got != "# Notes\n" {
+		t.Fatalf("README.md = %q, want the remote's history", got)
+	}
+	if got := h.rec.reindexed(); !slices.Equal(got, []string{"README.md"}) {
+		t.Fatalf("Reindex = %v, want [README.md]", got)
+	}
+	if !repo.HasUpstream() {
+		t.Fatalf("upstream not set")
+	}
+	gittest.Write(t, repo, "mine.md", "x\n")
+	h.s.NoteChanged("mine.md")
+	h.advance(5 * time.Second)
+	h.wantState(Synced)
+	if !remoteHas(t, env, "mine.md") {
+		t.Fatalf("remote misses mine.md")
+	}
+}
+
+func TestUnrelatedHistoriesError(t *testing.T) {
+	env := gittest.New(t)
+	repo, err := gitsync.Init(filepath.Join(t.TempDir(), "other"), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.Host = "other"
+	gittest.SetUser(t, repo, "Other User", "other@example.com")
+	gittest.Write(t, repo, "mine.md", "x\n")
+	gittest.CommitAll(t, repo, "Create mine.md · other")
+	if err := repo.RemoteAdd(env.Remote); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t, repo)
+	h.start()
+	st := h.s.Status()
+	if st.State != Error || st.Detail != "unrelated histories" {
+		t.Fatalf("Status() = %+v, want Error with Detail \"unrelated histories\"", st)
+	}
+}
+
 func TestQuitFlushesCommitsAndPushes(t *testing.T) {
 	for _, skip := range []bool{false, true} {
 		t.Run(map[bool]string{false: "flush", true: "skipFlush"}[skip], func(t *testing.T) {
