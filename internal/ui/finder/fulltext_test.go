@@ -174,6 +174,34 @@ func TestFullTextEmptyQueryClearsHitsWithoutDebounce(t *testing.T) {
 	}
 }
 
+// TestEnterCancelsInFlightSearch checks that choosing a result (enter)
+// cancels any in-flight full-text search context, the same as esc does, so
+// an abandoned search never keeps running after the overlay session ends.
+func TestEnterCancelsInFlightSearch(t *testing.T) {
+	m := New(FullText, testNotes(), nil, testStyles(t), testPalette(t))
+	m = m.SetSize(100, 40)
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "auth"})
+	dm := cmd().(debounceMsg)
+	m, searchCmd := m.Update(dm)
+	res := searchCmd().(ftResultMsg)
+	m, _ = m.Update(res)
+	if len(m.hits) == 0 {
+		t.Fatal("expected at least one hit for \"auth\"")
+	}
+	if m.cancel == nil {
+		t.Fatal("expected an in-flight search context after a completed search (handleDebounce always sets one)")
+	}
+
+	cancelled := false
+	m.cancel = func() { cancelled = true }
+
+	m, _ = send(m, "enter")
+	if !cancelled {
+		t.Error("enter did not cancel the in-flight search context")
+	}
+}
+
 // TestFullTextHitRowsShowContext checks spec §8: each full-text hit shows
 // one line of context (hit.Context, dimmed) in addition to its location and
 // matching text, so each item occupies 3 rows.

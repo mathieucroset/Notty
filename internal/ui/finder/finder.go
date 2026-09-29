@@ -192,14 +192,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, tea.Batch(cmd, previewCmd)
 }
 
+// cancelSearch cancels any in-flight full-text search context. It is
+// called at both ends of an overlay session — esc (closing the overlay) and
+// enter (opening the chosen note) — so an abandoned search never keeps
+// running in the background.
+func (m *Model) cancelSearch() {
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
+}
+
 func (m Model) handleKey(k tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch k.String() {
 	case "esc":
-		if m.cancel != nil {
-			m.cancel()
-		}
+		m.cancelSearch()
 		return m, emit(CloseMsg{})
 	case "enter":
+		m.cancelSearch()
 		return m, m.choose()
 	case "up", "ctrl+k":
 		m.move(-1)

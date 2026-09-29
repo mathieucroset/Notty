@@ -65,6 +65,7 @@ func (m Model) handleDebounce(msg debounceMsg) (Model, tea.Cmd) {
 	notes := m.notes
 	seq := msg.seq
 	return m, func() tea.Msg {
+		defer cancel() // release ctx's resources once the search completes on its own
 		hits := search.FullText(ctx, q, notes, fullTextLimit)
 		return ftResultMsg{seq: seq, hits: hits}
 	}
