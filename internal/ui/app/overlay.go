@@ -25,8 +25,9 @@ const (
 	overlayLog
 )
 
-// overlayState is the one overlay open over the screen. Opening another
-// overlay replaces it, so at most one is ever active.
+// overlayState is one overlay in the stack over the screen. Opening an
+// overlay replaces the stack, except help, which stacks on top so closing
+// it returns to what was open.
 type overlayState struct {
 	kind overlayKind
 
@@ -35,53 +36,103 @@ type overlayState struct {
 	pending pendingOp
 
 	palette palette.Model
-	help    help.Model
-	log     toast.LogView
+	// paletteTheme is the theme when the palette opened, restored if the
+	// palette is dropped mid-preview.
+	paletteTheme string
+	help         help.Model
+	log          toast.LogView
 }
 
 // toastTimer wraps the expiry command of an info or warning toast. Tests
 // replace it to keep the 4s ticks out of their synchronous command loop.
 var toastTimer = func(c tea.Cmd) tea.Cmd { return c }
 
+// topOverlay returns the overlay on top of the stack, or nil.
+func (m *Model) topOverlay() *overlayState {
+	if len(m.overlays) == 0 {
+		return nil
+	}
+	return m.overlays[len(m.overlays)-1]
+}
+
 // overlayOpen reports whether an overlay is open.
-func (m *Model) overlayOpen() bool { return m.overlay != nil }
+func (m *Model) overlayOpen() bool { return len(m.overlays) > 0 }
+
+// openOverlay shows s as the only overlay, dropping any others. Help is
+// the one overlay that stacks on top instead (pushOverlay).
+func (m *Model) openOverlay(s *overlayState) {
+	for i := len(m.overlays) - 1; i >= 0; i-- {
+		m.leaveOverlay(m.overlays[i])
+	}
+	m.overlays = []*overlayState{s}
+}
+
+// pushOverlay shows s on top of the open overlays; closing it reveals
+// them again.
+func (m *Model) pushOverlay(s *overlayState) { m.overlays = append(m.overlays, s) }
+
+// leaveOverlay cleans up after an overlay dropped without closing itself:
+// a palette previewing a theme cancels the preview, exactly as its own
+// ThemeCancelMsg would.
+func (m *Model) leaveOverlay(s *overlayState) {
+	if s.kind == overlayPalette && m.opts.Palette.Name != s.paletteTheme {
+		m.applyTheme(s.paletteTheme)
+	}
+}
 
 // openDialog shows d as the active overlay; its result is handled by op.
 func (m *Model) openDialog(d dialog.Model, op pendingOp) {
-	m.overlay = &overlayState{kind: overlayDialog, dialog: d, pending: op}
+	m.openOverlay(&overlayState{kind: overlayDialog, dialog: d, pending: op})
 }
 
-// closeOverlay closes the active overlay.
-func (m *Model) closeOverlay() { m.overlay = nil }
+// closeOverlay closes the overlay on top.
+func (m *Model) closeOverlay() {
+	if len(m.overlays) > 0 {
+		m.overlays = m.overlays[:len(m.overlays)-1]
+	}
+}
 
-// updateOverlay routes a key press to the active overlay.
+// closeOverlayKind closes the topmost overlay of kind k: an overlay's own
+// close request. A request from an overlay that was since replaced finds
+// nothing to close.
+func (m *Model) closeOverlayKind(k overlayKind) {
+	for i := len(m.overlays) - 1; i >= 0; i-- {
+		if m.overlays[i].kind == k {
+			m.overlays = append(m.overlays[:i:i], m.overlays[i+1:]...)
+			return
+		}
+	}
+}
+
+// updateOverlay routes a key press to the overlay on top.
 func (m *Model) updateOverlay(k tea.KeyPressMsg) tea.Cmd {
 	var cmd tea.Cmd
-	switch m.overlay.kind {
+	o := m.topOverlay()
+	switch o.kind {
 	case overlayDialog:
-		m.overlay.dialog, cmd = m.overlay.dialog.Update(k)
+		o.dialog, cmd = o.dialog.Update(k)
 	case overlayPalette:
-		m.overlay.palette, cmd = m.overlay.palette.Update(k)
+		o.palette, cmd = o.palette.Update(k)
 	case overlayHelp:
-		m.overlay.help, cmd = m.overlay.help.Update(k)
+		o.help, cmd = o.help.Update(k)
 	case overlayLog:
-		m.overlay.log, cmd = m.overlay.log.Update(k)
+		o.log, cmd = o.log.Update(k)
 	}
 	return cmd
 }
 
 // handleDialogResult closes the dialog that produced res and acts on it.
-// A result from a dialog that is no longer open is dropped.
+// A result from a dialog that is no longer on top is dropped.
 func (m *Model) handleDialogResult(res dialog.ResultMsg) tea.Cmd {
-	if m.overlay == nil || m.overlay.kind != overlayDialog || m.overlay.dialog.ID() != res.ID {
+	o := m.topOverlay()
+	if o == nil || o.kind != overlayDialog || o.dialog.ID() != res.ID {
 		return nil
 	}
-	op := m.overlay.pending
 	m.closeOverlay()
 	if !res.OK {
 		return nil
 	}
-	return m.runPending(op, res)
+	return m.runPending(o.pending, res)
 }
 
 // pushToast shows a toast and logs it.
@@ -106,30 +157,30 @@ func (m *Model) dismissToast() bool {
 	return true
 }
 
-// overlayBox renders the active overlay's box.
-func (m *Model) overlayBox() string {
-	switch m.overlay.kind {
+// overlayBox renders an overlay's box.
+func (m *Model) overlayBox(o *overlayState) string {
+	switch o.kind {
 	case overlayDialog:
-		return m.overlay.dialog.View()
+		return o.dialog.View()
 	case overlayPalette:
-		return m.overlay.palette.View()
+		return o.palette.View()
 	case overlayHelp:
-		return m.overlay.help.View()
+		return o.help.View()
 	case overlayLog:
-		return m.logBox()
+		return m.logBox(o)
 	}
 	return ""
 }
 
-// withOverlay composes the active overlay, centered, over the dimmed
-// screen.
+// withOverlay composes the open overlays, bottom first, each centered over
+// the dimmed screen below it.
 func (m *Model) withOverlay(screen string) string {
-	if m.overlay == nil {
-		return screen
-	}
 	muted := m.opts.Palette.Muted
 	dim := func(s string) string { return dialog.DimANSI(s, muted) }
-	return dialog.Overlay(screen, m.overlayBox(), m.width, m.height, dim)
+	for _, o := range m.overlays {
+		screen = dialog.Overlay(screen, m.overlayBox(o), m.width, m.height, dim)
+	}
+	return screen
 }
 
 // toastMaxWidth is the widest a toast box may be.

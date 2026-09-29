@@ -27,7 +27,7 @@ var downKey = tea.KeyPressMsg{Code: tea.KeyDown}
 func TestPaletteRunsCommand(t *testing.T) {
 	m := start(t, testOptions(t), 120, 30)
 	run(t, m, keyMsg("ctrl+k"))
-	if m.overlay == nil || m.overlay.kind != overlayPalette {
+	if m.topOverlay() == nil || m.topOverlay().kind != overlayPalette {
 		t.Fatal("ctrl+k did not open the palette")
 	}
 	if got := m.keyContext(); got != keys.Overlay {
@@ -58,11 +58,11 @@ func TestPaletteNewNoteOpensDialog(t *testing.T) {
 	run(t, m, keyMsg("enter"))
 	// The palette's close request must not close the dialog that replaced
 	// it.
-	if m.overlay == nil || m.overlay.kind != overlayDialog || m.overlay.pending.kind != opNewNote {
-		t.Fatalf("new note dialog not open: %+v", m.overlay)
+	if m.topOverlay() == nil || m.topOverlay().kind != overlayDialog || m.topOverlay().pending.kind != opNewNote {
+		t.Fatalf("new note dialog not open: %+v", m.topOverlay())
 	}
-	if m.overlay.pending.path != "" {
-		t.Errorf("palette new note targets %q, want the vault root", m.overlay.pending.path)
+	if m.topOverlay().pending.path != "" {
+		t.Errorf("palette new note targets %q, want the vault root", m.topOverlay().pending.path)
 	}
 }
 
@@ -157,7 +157,7 @@ func TestToggleVimAndLineNumbersPersist(t *testing.T) {
 func TestHelpOpensAndCloses(t *testing.T) {
 	m := start(t, testOptions(t), 120, 30)
 	run(t, m, keyMsg("f1"))
-	if m.overlay == nil || m.overlay.kind != overlayHelp {
+	if m.topOverlay() == nil || m.topOverlay().kind != overlayHelp {
 		t.Fatal("F1 did not open help")
 	}
 	if s := screen(m); !strings.Contains(s, "ctrl+p") || !strings.Contains(s, "fuzzy finder") {
@@ -175,8 +175,64 @@ func TestHelpOpensAndCloses(t *testing.T) {
 	}
 	// ? in the sidebar opens it too.
 	run(t, m, keyMsg("?"))
-	if m.overlay == nil || m.overlay.kind != overlayHelp {
+	if m.topOverlay() == nil || m.topOverlay().kind != overlayHelp {
 		t.Error("? did not open help")
+	}
+}
+
+func TestHelpStacksOverDialogAndPalette(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	run(t, m, msgs.RequestRename{Path: "ideas.md"})
+	run(t, m, keyMsg("f1"))
+	if len(m.overlays) != 2 || m.topOverlay().kind != overlayHelp {
+		t.Fatalf("F1 over a dialog: overlays = %d, top = %+v", len(m.overlays), m.topOverlay())
+	}
+	if !strings.Contains(screen(m), "fuzzy finder") {
+		t.Errorf("help not drawn on top:\n%s", screen(m))
+	}
+	assertSize(t, m, 120, 30)
+	run(t, m, keyMsg("esc"))
+	if o := m.topOverlay(); o == nil || o.kind != overlayDialog || o.dialog.ID() != dlgRename {
+		t.Fatalf("closing help did not return to the dialog: %+v", o)
+	}
+	run(t, m, keyMsg("esc"))
+
+	run(t, m, keyMsg("ctrl+k"))
+	run(t, m, keyMsg("f1"))
+	run(t, m, keyMsg("f1")) // F1 again closes help
+	if o := m.topOverlay(); o == nil || o.kind != overlayPalette || len(m.overlays) != 1 {
+		t.Fatalf("closing help did not return to the palette: %+v", o)
+	}
+}
+
+func TestPaletteHelpCommandReplacesPalette(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	run(t, m, keyMsg("ctrl+k"))
+	typeText(t, m, "help")
+	run(t, m, keyMsg("enter"))
+	if len(m.overlays) != 1 || m.topOverlay().kind != overlayHelp {
+		t.Fatalf("overlays = %d, top = %+v; want help alone", len(m.overlays), m.topOverlay())
+	}
+	run(t, m, keyMsg("esc"))
+	if m.overlayOpen() {
+		t.Error("the palette came back after closing help")
+	}
+}
+
+func TestReplacingPreviewingPaletteCancelsTheme(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	openThemePicker(t, m)
+	run(t, m, downKey)
+	if m.opts.Palette.Name == "catppuccin-mocha" {
+		t.Fatal("no preview")
+	}
+	// A dialog arriving from an earlier command replaces the palette.
+	run(t, m, unusedAttachmentsMsg{files: []string{"attachments/a.png"}})
+	if o := m.topOverlay(); o == nil || o.kind != overlayDialog || len(m.overlays) != 1 {
+		t.Fatalf("dialog did not replace the palette: %+v", o)
+	}
+	if m.opts.Palette.Name != "catppuccin-mocha" {
+		t.Errorf("palette = %q, want the preview cancelled", m.opts.Palette.Name)
 	}
 }
 
@@ -184,7 +240,7 @@ func TestErrorLogOverlay(t *testing.T) {
 	m := start(t, testOptions(t), 120, 30)
 	run(t, m, msgs.ToastMsg{Level: msgs.ToastError, Text: "Disk on fire"})
 	run(t, m, keyMsg("!"))
-	if m.overlay == nil || m.overlay.kind != overlayLog {
+	if m.topOverlay() == nil || m.topOverlay().kind != overlayLog {
 		t.Fatal("! did not open the error log")
 	}
 	s := screen(m)

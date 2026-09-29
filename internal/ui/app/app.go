@@ -115,8 +115,8 @@ type Model struct {
 	toast   toast.Model
 	// stickyErrors counts the error toasts still shown (they never expire).
 	stickyErrors int
-	// overlay is the open overlay, or nil.
-	overlay *overlayState
+	// overlays is the overlay stack, top last.
+	overlays []*overlayState
 
 	// ix is the note index, nil until the startup build finishes.
 	ix       *index.Index

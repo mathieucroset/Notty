@@ -43,18 +43,18 @@ func (m *Model) openPalette() {
 	p := palette.New(palette.DefaultCommands(), m.opts.Styles).
 		WithCurrentTheme(m.opts.Palette.Name).
 		SetSize(m.width, m.height)
-	m.overlay = &overlayState{kind: overlayPalette, palette: p}
+	m.openOverlay(&overlayState{kind: overlayPalette, palette: p, paletteTheme: m.opts.Palette.Name})
 }
 
 // toggleHelp opens the help overlay, or closes it when it is open (F1
 // passes through overlays).
 func (m *Model) toggleHelp() {
-	if m.overlay != nil && m.overlay.kind == overlayHelp {
+	if o := m.topOverlay(); o != nil && o.kind == overlayHelp {
 		m.closeOverlay()
 		return
 	}
 	h := help.New(m.opts.Styles).SetSize(m.width, m.height)
-	m.overlay = &overlayState{kind: overlayHelp, help: h}
+	m.pushOverlay(&overlayState{kind: overlayHelp, help: h})
 }
 
 // openErrorLog opens the error log overlay.
@@ -62,7 +62,7 @@ func (m *Model) openErrorLog() {
 	lv := toast.NewLogView(m.toast.Log(), m.opts.Styles)
 	w, h := m.logSize()
 	lv.SetSize(w, h)
-	m.overlay = &overlayState{kind: overlayLog, log: lv}
+	m.openOverlay(&overlayState{kind: overlayLog, log: lv})
 }
 
 // logBoxSize is the error log box's outer size.
@@ -80,35 +80,26 @@ func (m *Model) logSize() (int, int) {
 }
 
 // logBox renders the error log overlay box.
-func (m *Model) logBox() string {
+func (m *Model) logBox(o *overlayState) string {
 	bw, _ := m.logBoxSize()
 	w, h := m.logSize()
 	st := m.opts.Styles
 	title := st.DialogTitle.Render("Error log") + "  " + st.Muted.Render("j/k scroll · esc close")
-	return st.Dialog.Width(bw).Render(title + "\n\n" + m.overlay.log.View(w, h))
+	return st.Dialog.Width(bw).Render(title + "\n\n" + o.log.View(w, h))
 }
 
 // resizeOverlay fits the open overlay to a new terminal size.
 func (m *Model) resizeOverlay() {
-	if m.overlay == nil {
-		return
-	}
-	switch m.overlay.kind {
-	case overlayPalette:
-		m.overlay.palette = m.overlay.palette.SetSize(m.width, m.height)
-	case overlayHelp:
-		m.overlay.help = m.overlay.help.SetSize(m.width, m.height)
-	case overlayLog:
-		w, h := m.logSize()
-		m.overlay.log.SetSize(w, h)
-	}
-}
-
-// closeOverlayKind closes the open overlay if it is of kind k. A close
-// request from an overlay that another one has since replaced is dropped.
-func (m *Model) closeOverlayKind(k overlayKind) {
-	if m.overlay != nil && m.overlay.kind == k {
-		m.closeOverlay()
+	for _, o := range m.overlays {
+		switch o.kind {
+		case overlayPalette:
+			o.palette = o.palette.SetSize(m.width, m.height)
+		case overlayHelp:
+			o.help = o.help.SetSize(m.width, m.height)
+		case overlayLog:
+			w, h := m.logSize()
+			o.log.SetSize(w, h)
+		}
 	}
 }
 
@@ -126,8 +117,10 @@ func (m *Model) applyTheme(name string) {
 	m.toast = m.toast.SetStyles(st)
 	m.tasks = m.tasks.SetStyles(st)
 	m.trash = m.trash.SetTheme(st, p)
-	if m.overlay != nil && m.overlay.kind == overlayPalette {
-		m.overlay.palette = m.overlay.palette.SetStyles(st)
+	for _, o := range m.overlays {
+		if o.kind == overlayPalette {
+			o.palette = o.palette.SetStyles(st)
+		}
 	}
 	m.relayout()
 }

@@ -100,8 +100,8 @@ func TestNewFolderSelected(t *testing.T) {
 	}
 	// The new folder is selected: n now targets it.
 	run(t, m, keyMsg("n"))
-	if m.overlay == nil || m.overlay.pending.path != "Work/Clients" {
-		t.Errorf("n after N targets %+v, want Work/Clients", m.overlay)
+	if m.topOverlay() == nil || m.topOverlay().pending.path != "Work/Clients" {
+		t.Errorf("n after N targets %+v, want Work/Clients", m.topOverlay())
 	}
 }
 
@@ -112,7 +112,7 @@ func TestRenameUpdatesEverything(t *testing.T) {
 	run(t, m, msgs.OpenNoteMsg{Path: "ideas.md", Line: -1})
 
 	run(t, m, msgs.RequestRename{Path: "ideas.md"})
-	if m.overlay == nil || !strings.Contains(m.overlay.dialog.View(), "ideas") {
+	if m.topOverlay() == nil || !strings.Contains(m.topOverlay().dialog.View(), "ideas") {
 		t.Fatalf("rename dialog not prefilled with the current name")
 	}
 	run(t, m, dialog.ResultMsg{ID: dlgRename, OK: true, Value: "Thoughts"})
@@ -147,8 +147,8 @@ func TestMoveWithFolderSuggestions(t *testing.T) {
 	m := start(t, opts, 120, 30)
 	run(t, m, msgs.RequestMove{Path: "ideas.md"})
 	run(t, m, keyMsg("W"))
-	if !strings.Contains(m.overlay.dialog.View(), "Work") {
-		t.Fatalf("folder suggestion missing:\n%s", m.overlay.dialog.View())
+	if !strings.Contains(m.topOverlay().dialog.View(), "Work") {
+		t.Fatalf("folder suggestion missing:\n%s", m.topOverlay().dialog.View())
 	}
 	run(t, m, keyMsg("enter")) // takes the highlighted suggestion
 
