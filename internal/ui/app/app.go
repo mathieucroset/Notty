@@ -3,6 +3,7 @@
 package app
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path"
@@ -89,6 +90,13 @@ type Options struct {
 	// Snapshot is kept holding the open buffer, for main to save after a
 	// panic (spec §9); nil keeps none.
 	Snapshot *recovery.Snapshot
+	// Catalog lists and resolves the built-in and user themes (user themes
+	// spec §1). Its Dir is <ConfigDir>/themes; an empty Dir means built-ins
+	// only.
+	Catalog theme.Catalog
+	// StartupWarnings are shown once as warning toasts when the app starts,
+	// e.g. a configured theme that could not be loaded.
+	StartupWarnings []string
 }
 
 // Focus is the pane with keyboard focus.
@@ -133,6 +141,11 @@ type note struct {
 // Model is the root model.
 type Model struct {
 	opts Options
+	// themeName is the theme the user wants: Config.Theme at start, then
+	// each theme saved from the picker or the wizard. It can differ from
+	// the displayed palette's Name after a startup fallback or during a
+	// picker preview (user themes spec §1).
+	themeName string
 
 	width, height  int
 	sidebarVisible bool
@@ -276,6 +289,7 @@ func New(opts Options) *Model {
 	opts.Styles = opts.Styles.WithIcons(set)
 	m := &Model{
 		opts:           opts,
+		themeName:      cmp.Or(opts.Config.Theme, opts.Palette.Name),
 		sidebarVisible: true,
 		focus:          FocusSidebar,
 		sidebar:        sidebar.New(opts.Styles),
@@ -325,16 +339,28 @@ func (m *Model) NotePath() string { return m.note.path }
 
 // Init loads the vault tree and builds the index.
 func (m *Model) Init() tea.Cmd {
+	warnings := m.startupWarningsCmd()
 	if m.wizard != nil {
-		return m.wizard.Init()
+		return tea.Batch(m.wizard.Init(), warnings)
 	}
 	if m.opts.WizardNeeded || m.opts.Vault == nil {
-		return nil
+		return warnings
 	}
 	m.indexing = true
 	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault), m.startupTrashCmd(),
 		listenWatcherCmd(m.opts.Watcher), m.reopenLastNoteCmd(), m.readyTickCmd(), m.startSyncCmds(),
-		listRecoveredCmd(m.opts.Vault))
+		listRecoveredCmd(m.opts.Vault), warnings)
+}
+
+// startupWarningsCmd shows each of Options.StartupWarnings as a warning
+// toast, once: the warnings are dropped once handed out.
+func (m *Model) startupWarningsCmd() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.opts.StartupWarnings))
+	for _, w := range m.opts.StartupWarnings {
+		cmds = append(cmds, emit(msgs.ToastMsg{Level: msgs.ToastWarn, Text: w}))
+	}
+	m.opts.StartupWarnings = nil
+	return tea.Batch(cmds...)
 }
 
 // reopenLastNoteCmd reopens the note open when the app last quit, at its

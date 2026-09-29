@@ -233,11 +233,85 @@ func TestUnknownThemeFallsBack(t *testing.T) {
 	if code := run([]string{"--vault", f.vaultDir}, f.env()); code != 0 {
 		t.Fatalf("exit code %d", code)
 	}
-	if f.got.Palette.Name != "catppuccin-mocha" {
-		t.Errorf("palette = %q, want catppuccin-mocha", f.got.Palette.Name)
+	if f.got.Palette.Name != fallbackTheme {
+		t.Errorf("palette = %q, want %s", f.got.Palette.Name, fallbackTheme)
 	}
-	if got := f.stderr.String(); !strings.Contains(got, `unknown theme "no-such-theme"`) {
-		t.Errorf("stderr = %q, want an unknown-theme warning", got)
+	if w := f.got.StartupWarnings; len(w) != 1 || !strings.Contains(w[0], "no-such-theme") {
+		t.Errorf("StartupWarnings = %q, want one naming no-such-theme", w)
+	}
+	if got := f.stderr.String(); got != "" {
+		t.Errorf("stderr = %q, want nothing", got)
+	}
+}
+
+// userTheme is a valid user theme file.
+const userTheme = `base = "#141318"
+surface = "#201f24"
+overlay = "#36343a"
+text = "#e6e1e9"
+subtext = "#cac4cf"
+muted = "#948f99"
+accent = "#cfbcff"
+accent2 = "#f2b7c2"
+error = "#ffb4ab"
+`
+
+func TestUserThemeAtStartup(t *testing.T) {
+	tests := []struct {
+		name        string
+		file        string // themes/mine.toml content; "" = absent
+		wizard      bool
+		wantPalette string
+		wantWarning bool
+	}{
+		{"present", userTheme, false, "mine", false},
+		{"absent", "", false, fallbackTheme, true},
+		{"invalid", "base = 1\n", false, fallbackTheme, true},
+		{"present, wizard", userTheme, true, "mine", false},
+		{"absent, wizard", "", true, fallbackTheme, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			if !tt.wizard {
+				f.makeRepo(t)
+			}
+			f.writeConfig(t, "theme = \"mine\"\n")
+			themes := filepath.Join(filepath.Dir(f.configPath), "themes")
+			if tt.file != "" {
+				if err := os.MkdirAll(themes, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(themes, "mine.toml"), []byte(tt.file), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if code := run([]string{"--vault", f.vaultDir}, f.env()); code != 0 {
+				t.Fatalf("exit code %d, stderr %q", code, f.stderr.String())
+			}
+			o := f.got
+			if o.WizardNeeded != tt.wizard {
+				t.Fatalf("WizardNeeded = %v, want %v", o.WizardNeeded, tt.wizard)
+			}
+			if o.Palette.Name != tt.wantPalette {
+				t.Errorf("palette = %q, want %q", o.Palette.Name, tt.wantPalette)
+			}
+			if o.Config.Theme != "mine" {
+				t.Errorf("Config.Theme = %q, want mine (the wanted theme is kept)", o.Config.Theme)
+			}
+			if o.Catalog.Dir != themes {
+				t.Errorf("Catalog.Dir = %q, want %q", o.Catalog.Dir, themes)
+			}
+			switch w := o.StartupWarnings; {
+			case tt.wantWarning && (len(w) != 1 || !strings.Contains(w[0], "mine")):
+				t.Errorf("StartupWarnings = %q, want one naming mine", w)
+			case !tt.wantWarning && len(w) != 0:
+				t.Errorf("StartupWarnings = %q, want none", w)
+			}
+			if got := f.stderr.String(); got != "" {
+				t.Errorf("stderr = %q, want nothing", got)
+			}
+		})
 	}
 }
 

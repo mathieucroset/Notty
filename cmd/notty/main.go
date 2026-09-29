@@ -216,20 +216,29 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 	// 2. Image capabilities, while the terminal is still ours to query.
 	caps := e.detectCaps(cfg.Images.Protocol)
 
-	p, ok := theme.Get(cfg.Theme)
-	if !ok {
-		_, _ = fmt.Fprintf(e.stderr, "notty: unknown theme %q, using %s\n", cfg.Theme, fallbackTheme)
+	// The theme: built-in or <ConfigDir>/themes/<name>.toml (user themes
+	// spec §1). A theme that does not load falls back, with a warning toast
+	// once the app runs; Config.Theme keeps the wanted name.
+	cat := theme.Catalog{Dir: filepath.Join(filepath.Dir(e.configPath), "themes")}
+	var warnings []string
+	p, err := cat.Resolve(cfg.Theme)
+	if err != nil {
+		slog.Warn("theme not loaded", "theme", cfg.Theme, "err", err, "fallback", fallbackTheme)
+		// Resolve's errors name the theme ("theme mine.toml: ...").
+		warnings = append(warnings, fmt.Sprintf("Could not load %v — using %s", err, fallbackTheme))
 		p, _ = theme.Get(fallbackTheme)
 	}
 	opts := app.Options{
-		Config:       cfg,
-		ConfigPath:   e.configPath,
-		Styles:       theme.NewStyles(p),
-		Palette:      p,
-		Caps:         caps,
-		WizardNeeded: wizard,
-		StateDir:     e.stateDir,
-		LockWait:     e.lockWait,
+		Config:          cfg,
+		ConfigPath:      e.configPath,
+		Styles:          theme.NewStyles(p),
+		Palette:         p,
+		Caps:            caps,
+		WizardNeeded:    wizard,
+		StateDir:        e.stateDir,
+		LockWait:        e.lockWait,
+		Catalog:         cat,
+		StartupWarnings: warnings,
 	}
 	// Sync and history need git (spec §7): without it the app says so once.
 	if _, err := e.lookPath("git"); err != nil {
