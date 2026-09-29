@@ -175,10 +175,17 @@ func (m Model) CommandLine() string {
 	return ""
 }
 
-// MarkSaved marks the buffer saved if its version still equals version. A
-// save that raced with typing leaves the buffer dirty.
-func (m Model) MarkSaved(version uint64) Model {
-	if m.buf.Version() == version {
+// Snapshot returns what to save: the note path, the text and the version
+// to pass back to MarkSaved once the write succeeded.
+func (m Model) Snapshot() (path, content string, version uint64) {
+	return m.path, m.buf.String(), m.buf.Version()
+}
+
+// MarkSaved marks the buffer saved if it still holds the note at path at
+// version. A save that raced with typing, or that finished after another
+// note was loaded, leaves the buffer dirty.
+func (m Model) MarkSaved(path string, version uint64) Model {
+	if m.path == path && m.buf.Version() == version {
 		m.buf.MarkSaved()
 	}
 	return m

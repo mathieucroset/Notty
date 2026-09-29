@@ -134,7 +134,7 @@ func TestAutosave(t *testing.T) {
 		t.Error("stale tick requested a save")
 	}
 	// A clean buffer is not saved.
-	clean := m.MarkSaved(m.Version())
+	clean := m.MarkSaved(m.Path(), m.Version())
 	if _, cmd := clean.Update(tick); cmd != nil {
 		t.Error("clean buffer saved")
 	}
@@ -152,11 +152,19 @@ func TestMarkSaved(t *testing.T) {
 	m, _ = typeKeys(m, "x")
 	v := m.Version()
 	m, _ = typeKeys(m, "x") // typed while the save was running
-	m = m.MarkSaved(v)
+	m = m.MarkSaved(m.Path(), v)
 	if !m.Dirty() {
 		t.Error("stale MarkSaved cleaned the buffer")
 	}
-	m = m.MarkSaved(m.Version())
+	m = m.MarkSaved("other.md", m.Version())
+	if !m.Dirty() {
+		t.Error("MarkSaved for another note cleaned the buffer")
+	}
+	path, content, version := m.Snapshot()
+	if path != "notes/test.md" || content != "xt" || version != m.Version() {
+		t.Errorf("Snapshot = %q %q %d", path, content, version)
+	}
+	m = m.MarkSaved(path, version)
 	if m.Dirty() {
 		t.Error("MarkSaved with the current version left the buffer dirty")
 	}
@@ -276,7 +284,7 @@ func TestReloadKeepsModeAndUndo(t *testing.T) {
 	t.Run("undo does not merge the reload with typing", func(t *testing.T) {
 		m := newModel(t, testOptions(t), "alpha\nbeta\n", buffer.Pos{Line: 1}, 40, 10)
 		m, _ = typeKeys(m, "i", "h", "i")
-		m = m.MarkSaved(m.Version())
+		m = m.MarkSaved(m.Path(), m.Version())
 		m = m.Reload("alpha\nhibeta\ngamma\n")
 		m, _ = typeKeys(m, "!", "esc", "u")
 		if got := m.Content(); got != "alpha\nhibeta\ngamma\n" {
