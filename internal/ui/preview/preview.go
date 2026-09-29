@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mathieucroset/notty/internal/imgrender"
+	"github.com/mathieucroset/notty/internal/links"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -264,11 +265,16 @@ func (m Model) startRender() tea.Cmd {
 		m.sh.imgCache = imgrender.NewCache(m.sh.cacheCap)
 	}
 	cw := contentWidth(m.width)
-	for _, s := range segs {
+	defs := collectDefs(m.content, m.notePath)
+	for i, s := range segs {
 		if s.Kind != Text {
 			continue
 		}
-		md := prepareText(s.Markdown)
+		var imgs []links.ImageLink
+		if i+1 < len(segs) && segs[i+1].Kind == Image && segs[i+1].StartLine >= s.StartLine && segs[i+1].EndLine <= s.EndLine {
+			imgs = segs[i+1].Images
+		}
+		md := prepareText(s, imgs, m.notePath, defs)
 		key := textKey{hash: hashString(md), width: cw, palette: m.palette.Name}
 		lines, ok := m.sh.textCache[key]
 		job.texts = append(job.texts, textJob{key: key, markdown: md, lines: lines, cached: ok})

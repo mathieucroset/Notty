@@ -355,14 +355,71 @@ func TestImagesOffRenderPlainChips(t *testing.T) {
 	}
 }
 
-func TestInlineImageKeepsGlamourChipAndAddsBlock(t *testing.T) {
+func TestInlineImageBecomesChipAndBlock(t *testing.T) {
 	vault := t.TempDir()
-	writePNG(t, filepath.Join(vault, "pic.png"), 32, 32)
+	writePNG(t, filepath.Join(vault, "notes", "pic.png"), 32, 32)
 	m := newTest(t, imgrender.ProtoHalfBlocks, vault)
-	m, _ = setContent(t, m, "n.md", "look ![alt](pic.png) here")
+	m, _ = setContent(t, m, "notes/n.md", "look ![alt](pic.png) and ![](pic.png) here")
 	v := m.View()
-	if !strings.Contains(ansi.Strip(v), "look") || !strings.Contains(v, "▀") {
-		t.Fatalf("view:\n%s", ansi.Strip(v))
+	text := strings.Split(ansi.Strip(v), "\n")[0]
+	for _, want := range []string{"look", "🖼 alt", "🖼 pic.png", "here"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text row %q misses %q", text, want)
+		}
+	}
+	if strings.Contains(text, "Image:") || strings.Contains(text, "/pic.png") {
+		t.Fatalf("text row still shows the image link: %q", text)
+	}
+	if !strings.Contains(v, "▀") {
+		t.Fatalf("no image block:\n%s", ansi.Strip(v))
+	}
+}
+
+func TestLinksShowVaultRootTargets(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	content := "[sib](b.md) [up](../top.md) [root](/r.md) [web](https://x.org/p) [anchor](#h) `[code](c.md)`"
+	m, _ = setContent(t, m, "notes/n.md", content)
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"/notes/b.md", "/top.md", "/r.md", "https://x.org/p", "[code](c.md)"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("view misses %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, " /b.md") {
+		t.Fatalf("note-relative link shown as root-relative:\n%s", v)
+	}
+}
+
+func TestReferenceLinksRender(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	content := "See [ref][R] and [other].\n\n[r]: http://example.com\n[other]: sub/o.md \"title\"\n\n```\n[x]: nope\n```"
+	m, _ = setContent(t, m, "notes/n.md", content)
+	v := ansi.Strip(m.View())
+	first := strings.Split(v, "\n")[0]
+	if strings.Contains(first, "[ref]") || !strings.Contains(first, "http://example.com") || !strings.Contains(v, "/notes/sub/o.md") {
+		t.Fatalf("reference links not resolved:\n%s", v)
+	}
+}
+
+func TestCodeSpans(t *testing.T) {
+	cases := map[string][][2]int{
+		"a `b` c":       {{2, 5}},
+		"``x ` y`` z":   {{0, 9}},
+		"`open only":    nil,
+		"`a` and `b`":   {{0, 3}, {8, 11}},
+		"``` not ``` x": {{0, 11}},
+	}
+	for in, want := range cases {
+		got := codeSpans(in)
+		if len(got) != len(want) {
+			t.Errorf("codeSpans(%q) = %v, want %v", in, got, want)
+			continue
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("codeSpans(%q) = %v, want %v", in, got, want)
+			}
+		}
 	}
 }
 
