@@ -134,8 +134,10 @@ func (c *Clipboard) readImageWayland() ([]byte, error) {
 
 	types, err := c.Run("wl-paste", "--list-types")
 	if err != nil {
-		// A non-zero exit here typically means the clipboard is empty.
-		return nil, ErrNoImage
+		// A non-zero exit here typically means the clipboard is empty, but
+		// wrap the underlying error so a genuine wl-paste failure is still
+		// debuggable via errors.Unwrap.
+		return nil, fmt.Errorf("%w: %v", ErrNoImage, err)
 	}
 	if !hasMIMEType(types, "image/png") {
 		return nil, ErrNoImage
@@ -143,7 +145,7 @@ func (c *Clipboard) readImageWayland() ([]byte, error) {
 
 	data, err := c.Run("wl-paste", "--type", "image/png")
 	if err != nil {
-		return nil, ErrNoImage
+		return nil, fmt.Errorf("%w: %v", ErrNoImage, err)
 	}
 	if !isPNG(data) {
 		return nil, ErrNoImage
@@ -158,8 +160,10 @@ func (c *Clipboard) readImageX11() ([]byte, error) {
 
 	targets, err := c.Run("xclip", "-selection", "clipboard", "-t", "TARGETS", "-o")
 	if err != nil {
-		// A non-zero exit here typically means the clipboard is empty.
-		return nil, ErrNoImage
+		// A non-zero exit here typically means the clipboard is empty, but
+		// wrap the underlying error so a genuine xclip failure is still
+		// debuggable via errors.Unwrap.
+		return nil, fmt.Errorf("%w: %v", ErrNoImage, err)
 	}
 	if !hasMIMEType(targets, "image/png") {
 		return nil, ErrNoImage
@@ -167,7 +171,7 @@ func (c *Clipboard) readImageX11() ([]byte, error) {
 
 	data, err := c.Run("xclip", "-selection", "clipboard", "-t", "image/png", "-o")
 	if err != nil {
-		return nil, ErrNoImage
+		return nil, fmt.Errorf("%w: %v", ErrNoImage, err)
 	}
 	if !isPNG(data) {
 		return nil, ErrNoImage
@@ -187,15 +191,19 @@ func (c *Clipboard) readImageDarwin() ([]byte, error) {
 	_ = c.Remove(tmpPath)
 
 	script := `write (the clipboard as «class PNGf») to (open for access POSIX file "` + escapeAppleScriptString(tmpPath) + `" with write permission)`
-	if _, err := c.Run("osascript", "-e", script); err != nil {
-		// osascript fails with "Can't make ... into type PNGf" (or any
-		// other non-zero exit) when the clipboard holds no image.
-		return nil, ErrNoImage
-	}
+	// osascript fails with "Can't make ... into type PNGf" (or any other
+	// non-zero exit) when the clipboard holds no image. Don't return early
+	// on that error: fall through to the ReadFile check below, and only
+	// surface it (wrapped) if the file really is missing, so a genuine
+	// osascript failure is still debuggable via errors.Unwrap.
+	_, runErr := c.Run("osascript", "-e", script)
 
 	data, err := c.ReadFile(tmpPath)
 	_ = c.Remove(tmpPath)
 	if err != nil {
+		if runErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrNoImage, runErr)
+		}
 		return nil, ErrNoImage
 	}
 	if !isPNG(data) {
@@ -219,13 +227,18 @@ func (c *Clipboard) readImageWindows() ([]byte, error) {
 	script := `Add-Type -AssemblyName System.Windows.Forms, System.Drawing; ` +
 		`$i=[Windows.Forms.Clipboard]::GetImage(); ` +
 		`if($i){$i.Save('` + escapePowerShellString(tmpPath) + `',[System.Drawing.Imaging.ImageFormat]::Png)}`
-	// Ignore the exit status: the file's presence is the source of truth
-	// for whether the clipboard held an image.
-	_, _ = c.Run("powershell", "-NoProfile", "-Command", script)
+	// The file's presence is the source of truth for whether the clipboard
+	// held an image, so a non-zero exit here doesn't return early either;
+	// it's only surfaced (wrapped) if the file really is missing below, so
+	// a genuine powershell failure is still debuggable via errors.Unwrap.
+	_, runErr := c.Run("powershell", "-NoProfile", "-Command", script)
 
 	data, err := c.ReadFile(tmpPath)
 	_ = c.Remove(tmpPath)
 	if err != nil {
+		if runErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrNoImage, runErr)
+		}
 		return nil, ErrNoImage
 	}
 	if !isPNG(data) {

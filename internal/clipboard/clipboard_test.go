@@ -94,6 +94,35 @@ func TestReadImage_Linux_Wayland_NoPNGType(t *testing.T) {
 	}
 }
 
+// TestReadImage_Linux_Wayland_ListTypesFailureIsWrapped ensures a genuine
+// wl-paste failure (as opposed to "clipboard is simply empty") is still
+// debuggable: errors.Is must still match ErrNoImage, but the underlying
+// error text must not be discarded.
+func TestReadImage_Linux_Wayland_ListTypesFailureIsWrapped(t *testing.T) {
+	var calls []runCall
+	c := fakeClipboard(&calls)
+	c.GOOS = "linux"
+	c.Env = func(k string) string {
+		if k == "WAYLAND_DISPLAY" {
+			return "wayland-0"
+		}
+		return ""
+	}
+	underlying := errors.New("wl-paste: no compositor running")
+	c.Run = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, runCall{name: name, args: args})
+		return nil, underlying
+	}
+
+	_, err := c.ReadImage()
+	if !errors.Is(err, ErrNoImage) {
+		t.Fatalf("ReadImage() error = %v, want it to satisfy errors.Is(err, ErrNoImage)", err)
+	}
+	if !strings.Contains(err.Error(), underlying.Error()) {
+		t.Fatalf("ReadImage() error = %q, want it to contain underlying error %q", err.Error(), underlying.Error())
+	}
+}
+
 func TestReadImage_Linux_Wayland_MissingTool(t *testing.T) {
 	var calls []runCall
 	c := fakeClipboard(&calls)
@@ -176,6 +205,35 @@ func TestReadImage_Linux_X11_NoPNGType(t *testing.T) {
 	_, err := c.ReadImage()
 	if !errors.Is(err, ErrNoImage) {
 		t.Fatalf("ReadImage() error = %v, want ErrNoImage", err)
+	}
+}
+
+// TestReadImage_Linux_X11_TargetsFailureIsWrapped ensures a genuine xclip
+// failure (as opposed to "clipboard is simply empty") is still debuggable:
+// errors.Is must still match ErrNoImage, but the underlying error text
+// must not be discarded.
+func TestReadImage_Linux_X11_TargetsFailureIsWrapped(t *testing.T) {
+	var calls []runCall
+	c := fakeClipboard(&calls)
+	c.GOOS = "linux"
+	c.Env = func(k string) string {
+		if k == "DISPLAY" {
+			return ":0"
+		}
+		return ""
+	}
+	underlying := errors.New("xclip: Error: target STRING not available")
+	c.Run = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, runCall{name: name, args: args})
+		return nil, underlying
+	}
+
+	_, err := c.ReadImage()
+	if !errors.Is(err, ErrNoImage) {
+		t.Fatalf("ReadImage() error = %v, want it to satisfy errors.Is(err, ErrNoImage)", err)
+	}
+	if !strings.Contains(err.Error(), underlying.Error()) {
+		t.Fatalf("ReadImage() error = %q, want it to contain underlying error %q", err.Error(), underlying.Error())
 	}
 }
 
@@ -298,14 +356,19 @@ func TestReadImage_Darwin_OsascriptCantMake(t *testing.T) {
 	var calls []runCall
 	c := fakeClipboard(&calls)
 	c.GOOS = "darwin"
+	underlying := errors.New("execution error: Can't make «class PNGf» into type... (-1700)")
 	c.Run = func(name string, args ...string) ([]byte, error) {
 		calls = append(calls, runCall{name: name, args: args})
-		return nil, errors.New("execution error: Can't make «class PNGf» into type... (-1700)")
+		return nil, underlying
 	}
 
 	_, err := c.ReadImage()
 	if !errors.Is(err, ErrNoImage) {
-		t.Fatalf("ReadImage() error = %v, want ErrNoImage", err)
+		t.Fatalf("ReadImage() error = %v, want it to satisfy errors.Is(err, ErrNoImage)", err)
+	}
+	// The underlying osascript failure must still be visible for debugging.
+	if !strings.Contains(err.Error(), underlying.Error()) {
+		t.Fatalf("ReadImage() error = %q, want it to contain underlying error %q", err.Error(), underlying.Error())
 	}
 }
 
@@ -504,6 +567,30 @@ func TestReadImage_Windows_FileNotCreated(t *testing.T) {
 	_, err := c.ReadImage()
 	if !errors.Is(err, ErrNoImage) {
 		t.Fatalf("ReadImage() error = %v, want ErrNoImage", err)
+	}
+}
+
+// TestReadImage_Windows_PowershellFailureIsWrapped ensures a genuine
+// powershell failure (as opposed to "clipboard simply had no image") is
+// still debuggable: errors.Is must still match ErrNoImage, but the
+// underlying error text must not be discarded.
+func TestReadImage_Windows_PowershellFailureIsWrapped(t *testing.T) {
+	var calls []runCall
+	c := fakeClipboard(&calls)
+	c.GOOS = "windows"
+	underlying := errors.New("powershell: script execution is disabled on this system")
+	c.Run = func(name string, args ...string) ([]byte, error) {
+		calls = append(calls, runCall{name: name, args: args})
+		return nil, underlying
+	}
+	c.ReadFile = func(string) ([]byte, error) { return nil, errors.New("file does not exist") }
+
+	_, err := c.ReadImage()
+	if !errors.Is(err, ErrNoImage) {
+		t.Fatalf("ReadImage() error = %v, want it to satisfy errors.Is(err, ErrNoImage)", err)
+	}
+	if !strings.Contains(err.Error(), underlying.Error()) {
+		t.Fatalf("ReadImage() error = %q, want it to contain underlying error %q", err.Error(), underlying.Error())
 	}
 }
 
