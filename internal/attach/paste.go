@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -12,11 +13,19 @@ import (
 // (spec §6.2 "Pasted path"). It trims surrounding whitespace, strips
 // surrounding single or double quotes, strips a "file://" prefix and
 // URL-decodes what follows, unescapes backslash-escaped characters (shell
-// escaping such as "\ " -> " " and "\(" -> "("), and expands a leading
-// "~/" to the user's home directory. It reports ok=false unless the result
-// is a single line, has a supported image extension (case-insensitive), and
-// exists(path) is true.
+// escaping such as "\ " -> " " and "\(" -> "(") on non-Windows platforms,
+// and expands a leading "~/" to the user's home directory. It reports
+// ok=false unless the result is a single line, has a supported image
+// extension (case-insensitive), and exists(path) is true.
 func ParsePastedPath(paste string, exists func(string) bool) (string, bool) {
+	return parsePastedPath(paste, exists, runtime.GOOS)
+}
+
+// parsePastedPath is ParsePastedPath with the OS injectable for tests: on
+// "windows", backslashes are path separators (as in "C:\Users\me\pic.png"
+// or "\\server\share\pic.png"), never shell escapes, so unescapeShell must
+// not run there.
+func parsePastedPath(paste string, exists func(string) bool, goos string) (string, bool) {
 	s := strings.Trim(paste, " \t\r\n")
 	if s == "" || strings.ContainsAny(s, "\r\n") {
 		return "", false
@@ -32,7 +41,9 @@ func ParsePastedPath(paste string, exists func(string) bool) (string, bool) {
 		}
 	}
 
-	s = unescapeShell(s)
+	if goos != "windows" {
+		s = unescapeShell(s)
+	}
 
 	if rest, ok := strings.CutPrefix(s, "~/"); ok {
 		if home, err := os.UserHomeDir(); err == nil {
