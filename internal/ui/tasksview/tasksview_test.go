@@ -473,3 +473,88 @@ func TestDoneRowStrikethroughHiddenByDefault(t *testing.T) {
 		t.Errorf("expected done glyph in view:\n%s", view)
 	}
 }
+
+// TestDateOnlyLocalCalendarDate confirms dateOnly reads "today" as a local
+// calendar date even when it is passed in another location (e.g. UTC),
+// matching how tasks.DueDate always parses due dates in time.Local.
+func TestDateOnlyLocalCalendarDate(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("timezone database not available:", err)
+	}
+	orig := time.Local
+	time.Local = loc
+	defer func() { time.Local = orig }()
+
+	// 2026-09-29 02:00 UTC is 2026-09-28 22:00 EDT (America/New_York,
+	// UTC-4 in September): a UTC timestamp just after local midnight,
+	// which is still the previous local calendar day.
+	utcToday := time.Date(2026, 9, 29, 2, 0, 0, 0, time.UTC)
+	got := dateOnly(utcToday)
+	want := time.Date(2026, 9, 28, 0, 0, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Errorf("dateOnly(%v) = %v, want %v", utcToday, got, want)
+	}
+
+	// End-to-end: a task due "today" (local) must land in Due soon, not
+	// Overdue or Note, even though "today" arrives in UTC.
+	refs := []index.TaskRef{
+		ref("a.md", "A", 0, false, "due local today @2026-09-28"),
+	}
+	m := newTest(t)
+	m = m.SetTasks(refs, utcToday)
+	var got2 groupKind
+	for _, it := range m.items {
+		if it.kind == kindTask {
+			got2 = it.group
+		}
+	}
+	if got2 != groupDueSoon {
+		t.Errorf("group = %v, want groupDueSoon (task due local 'today')", got2)
+	}
+}
+
+// TestSelIDClearedWhenSelectionVanishes checks that once no task remains
+// selectable, the stored selection id is cleared rather than left pointing
+// at a task that no longer exists.
+func TestSelIDClearedWhenSelectionVanishes(t *testing.T) {
+	refs := []index.TaskRef{
+		ref("a.md", "A", 0, false, "only task"),
+	}
+	m := newTest(t)
+	m = m.SetTasks(refs, testToday())
+	if selectedID(m) == "" {
+		t.Fatal("expected an initial selection")
+	}
+
+	m = m.SetTasks(nil, testToday())
+	if _, ok := m.selected(); ok {
+		t.Fatal("expected no selection once the task list is empty")
+	}
+	if m.selID != "" {
+		t.Errorf("selID = %q, want empty after the selection vanished", m.selID)
+	}
+
+	// A task reappearing afterwards must not be treated as "still
+	// selected" just because selID happens to be empty already.
+	m = m.SetTasks(refs, testToday())
+	if got := selectedID(m); got == "" {
+		t.Error("expected a fresh selection once a task reappears")
+	}
+}
+
+func TestDisplayPathGuardsShortPaths(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"Work/admin.md", "Work/admin"},
+		{"Work/admin.MD", "Work/admin"},
+		{".md", ".md"},
+		{"md", "md"},
+		{"", ""},
+		{"a.md", "a"},
+	}
+	for _, tt := range tests {
+		if got := displayPath(tt.in); got != tt.want {
+			t.Errorf("displayPath(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

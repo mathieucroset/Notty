@@ -141,10 +141,14 @@ func (m Model) Title() string {
 	return fmt.Sprintf("Tasks · %d open", m.openCount)
 }
 
-// dateOnly truncates t to midnight in its own location, so only its
-// calendar date matters for comparisons.
+// dateOnly converts t to local time and truncates it to midnight, so only
+// its calendar date matters for comparisons. Both today and due dates
+// (themselves parsed in time.Local by tasks.DueDate) go through this, so
+// "today" is always read as a local calendar date even when the caller
+// passes it in another location (e.g. UTC).
 func dateOnly(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	t = t.In(time.Local)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
 }
 
 // classify returns which group an open task with due date due belongs to.
@@ -172,10 +176,12 @@ func noteHeader(p, title string) string {
 }
 
 // displayPath renders a vault-relative note path for display, dropping a
-// trailing ".md" (any case).
+// trailing ".md" (any case). Paths no longer than the extension itself
+// (e.g. ".md") are left untouched rather than being truncated to "".
 func displayPath(p string) string {
-	if strings.HasSuffix(strings.ToLower(p), ".md") {
-		return p[:len(p)-3]
+	const ext = ".md"
+	if len(p) > len(ext) && strings.HasSuffix(strings.ToLower(p), ext) {
+		return p[:len(p)-len(ext)]
 	}
 	return p
 }
@@ -317,6 +323,8 @@ func (m *Model) rebuild() {
 	}
 	if m.cursor >= 0 {
 		m.selID = m.items[m.cursor].id()
+	} else {
+		m.selID = ""
 	}
 	m.ensureVisible()
 }
@@ -639,9 +647,6 @@ func (m Model) View() string {
 	}
 	for len(out) < h {
 		out = append(out, strings.Repeat(" ", m.width))
-	}
-	if len(out) > h {
-		out = out[len(out)-h:]
 	}
 	return strings.Join(out, "\n")
 }
