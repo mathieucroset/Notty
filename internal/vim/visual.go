@@ -84,7 +84,14 @@ func (m *Machine) execVisual(b *buffer.Buffer, c cmd) {
 	if m.execVisualSpecial(b, c) {
 		return
 	}
-	if visualActions[c.name] {
+	isEdit, known := visualActions[c.name]
+	if c.name == "r" {
+		isEdit, known = true, tokenChar(c.arg) != ""
+	}
+	if !known {
+		return // e.g. <c-w>: ignored, the selection stays
+	}
+	if isEdit {
 		if m.readOnly {
 			m.eff.Blocked = true
 			return
@@ -137,6 +144,21 @@ func (m *Machine) visualOp(b *buffer.Buffer, c cmd) {
 			r = all
 		}
 		b.Replace(r, mapCase(b.TextIn(r), c.name))
+		b.SetCursor(r.Start)
+	case "r":
+		if lw {
+			r = all
+		}
+		ch := tokenChar(c.arg)
+		var sb strings.Builder
+		for _, g := range buffer.Graphemes(b.TextIn(r)) {
+			if g == "\n" {
+				sb.WriteString(g)
+			} else {
+				sb.WriteString(ch)
+			}
+		}
+		b.Replace(r, sb.String())
 		b.SetCursor(r.Start)
 	}
 }

@@ -52,6 +52,15 @@ func TestVisualOps(t *testing.T) {
 		{"visual gg", "a\nb\n|c", "vggd", "|", "", Normal},
 		{"p multiline charwise", "|a\nb", "vjy$p", "a|a\nb\nb", "a\nb", Normal},
 		{"visual undo is one step", "a|bcd", "vlldu", "a|bcd", "", Normal},
+		{"vr replaces each char", "a|bcd", "vllrx", "a|xxx", "", Normal},
+		{"vr across lines keeps breaks", "a|b\ncd", "vjrx", "a|x\nxx", "", Normal},
+		{"Vr replaces whole lines", "a|b\ncd\nef", "Vjr-", "|--\n--\nef", "", Normal},
+		{"vr unicode", "|日本", "vlr*", "|**", "", Normal},
+		{"vr undo", "a|bcd", "vllrxu", "a|bcd", "", Normal},
+		{"vr dot repeat", "|abcdef", "vlrxll.", "xx|xxef", "", Normal},
+		{"vr esc cancels", "a|bcd", "vlr<esc>", "ab|cd", "", Visual},
+		{"v c-w ignored", "a|bcd", "vl<c-w>h", "ab|cd", "", Visual},
+		{"v c-w keeps selection", "a|bcd", "vl<c-w>ld", "a|d", "bc", Normal},
 	})
 }
 

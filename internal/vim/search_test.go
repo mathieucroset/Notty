@@ -157,6 +157,7 @@ func TestReadOnly(t *testing.T) {
 		{"dot blocked", "|a", ".", "|a", true},
 		{"visual d blocked", "|abc", "vld", "a|bc", true},
 		{"visual > blocked", "|abc", "V>", "|abc", true},
+		{"visual r blocked", "|abc", "vlrx", "a|bc", true},
 		{"tab ok", "|abc", "<tab>", "|abc", false},
 		{"ex ok", "|abc", ":w<cr>", "|abc", false},
 		{"count then blocked", "|abc", "2x", "|abc", true},
