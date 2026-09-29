@@ -49,6 +49,11 @@ func TestLogViewRendersEntries(t *testing.T) {
 
 func TestLogViewScrolling(t *testing.T) {
 	v := NewLogView(testEntries(5), testStyles(t))
+	// SetSize establishes the viewport Update scrolls and clamps against
+	// (see the LogView doc comment) — each entry here renders as exactly
+	// one line, so this exercises the same one-line-per-step behavior as
+	// entry-level scrolling used to.
+	v.SetSize(60, 1)
 
 	// Scroll down twice: entry A and B should fall out of view when the
 	// viewport is short.
@@ -76,6 +81,52 @@ func TestLogViewScrolling(t *testing.T) {
 	got = strip(v.View(60, 1))
 	if !strings.Contains(got, "entry E") {
 		t.Fatalf("expected clamped scrolling to land on the last entry, got:\n%s", got)
+	}
+}
+
+// TestLogViewScrollsByRenderedLine verifies the fix for the "scrolls by
+// entry" bug: a single long entry that wraps into several lines must be
+// readable one rendered line at a time, not skipped over by j/k that only
+// step whole entries.
+func TestLogViewScrollsByRenderedLine(t *testing.T) {
+	long := Entry{
+		Time:  time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC),
+		Level: msgs.ToastError,
+		Text:  "one two three four five six seven eight nine ten",
+	}
+	entries := []Entry{long, {Time: long.Time, Level: msgs.ToastInfo, Text: "next entry"}}
+
+	v := NewLogView(entries, testStyles(t))
+	const width = 20
+	v.SetSize(width, 1)
+
+	if len(v.lines) < 3 {
+		t.Fatalf("expected the long entry to wrap into several rendered lines, got %d total lines", len(v.lines))
+	}
+
+	// Step down one rendered line at a time and confirm we see each of the
+	// long entry's wrapped words in turn, in order, before "next entry"
+	// appears — i.e. scrolling tracks lines, not entries.
+	sawNext := false
+	var seen []string
+	for range len(v.lines) {
+		got := strip(v.View(width, 1))
+		seen = append(seen, strings.TrimSpace(got))
+		if strings.Contains(got, "next") {
+			sawNext = true
+		}
+		v, _ = v.Update(key("j"))
+	}
+	if len(seen) < 3 {
+		t.Fatalf("expected at least 3 distinct scroll steps, got %d: %q", len(seen), seen)
+	}
+	if !sawNext {
+		t.Fatalf("expected scrolling far enough to eventually reach the next entry, saw (%d steps): %q", len(seen), seen)
+	}
+	// The very first step must show a word from the long entry, not have
+	// jumped straight past it.
+	if !strings.Contains(seen[0], "one") {
+		t.Fatalf("expected the first visible line to start on the long entry, got %q", seen[0])
 	}
 }
 
