@@ -67,7 +67,7 @@ func (p *Plain) Handle(b *buffer.Buffer, k Key) Effect {
 	}
 	defer func() { p.lastPos = b.Cursor() }()
 
-	tok := keyToken(k)
+	tok := specialToken(k)
 	insertion := tok == "<space>" || (isPrintable(k) && k.Name == "")
 	if !insertion {
 		p.endTyping(b)

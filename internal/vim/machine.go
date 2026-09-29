@@ -162,17 +162,31 @@ func (m *Machine) Handle(b *buffer.Buffer, k Key) Effect {
 	}
 	toks := keyTokens(k)
 	for i, tok := range toks {
-		if m.mode == Insert {
+		switch m.mode {
+		case Insert:
 			// A multi-grapheme key entered insert mode part way (e.g. a
 			// paste of "ifoo" in normal mode): the rest is typed text.
-			rest := strings.Join(toks[i:], "")
-			rest = strings.ReplaceAll(rest, "<space>", " ")
-			m.insertKey(b, Key{Text: rest})
-			break
+			m.insertKey(b, Key{Text: tokensText(toks[i:])})
+			return m.eff
+		case Command:
+			m.cmdText += tokensText(toks[i:])
+			return m.eff
 		}
 		m.normalToken(b, tok)
 	}
 	return m.eff
+}
+
+// tokensText turns single-grapheme tokens back into text.
+func tokensText(toks []string) string {
+	var sb strings.Builder
+	for _, t := range toks {
+		if t == "<space>" {
+			t = " "
+		}
+		sb.WriteString(t)
+	}
+	return sb.String()
 }
 
 // normalToken handles one token in normal or visual mode.
@@ -232,6 +246,7 @@ func (m *Machine) exec(b *buffer.Buffer, c cmd) {
 		}
 		if m.mode != Insert {
 			m.endChange(b)
+			m.recording = false
 		}
 		return
 	}
@@ -407,6 +422,9 @@ func (m *Machine) PasteClipboard(b *buffer.Buffer, text string, before bool) {
 	if m.mode == Insert {
 		m.insertKey(b, Key{Text: text})
 		return
+	}
+	if m.isVisual() {
+		m.mode = Normal
 	}
 	count := max(1, m.pasteCount)
 	m.pasteCount = 0

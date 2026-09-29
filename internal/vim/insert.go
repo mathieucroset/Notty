@@ -35,7 +35,7 @@ func (m *Machine) openLine(b *buffer.Buffer, l int, above bool) {
 
 // insertKey handles a key in insert mode.
 func (m *Machine) insertKey(b *buffer.Buffer, k Key) {
-	tok := keyToken(k)
+	tok := specialToken(k)
 	if tok == "<esc>" || tok == "<c-c>" {
 		m.leaveInsert(b)
 		return
@@ -128,7 +128,7 @@ func (m *Machine) leaveInsert(b *buffer.Buffer) {
 	keys := m.sessionKeys
 	for i := 1; i < m.insertRepeat; i++ {
 		for _, k := range keys {
-			m.insertApply(b, k, keyToken(k))
+			m.insertApply(b, k, specialToken(k))
 		}
 	}
 	m.endInsertSession(keys)

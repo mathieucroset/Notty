@@ -39,7 +39,7 @@ func (m *Machine) CommandLine() string {
 
 // commandKey handles a key while typing a ":" command or a search.
 func (m *Machine) commandKey(b *buffer.Buffer, k Key) {
-	switch tok := keyToken(k); tok {
+	switch tok := specialToken(k); tok {
 	case "<esc>", "<c-c>":
 		m.leaveCmdline()
 	case "<cr>":

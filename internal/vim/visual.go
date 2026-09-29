@@ -113,6 +113,7 @@ func (m *Machine) execVisual(b *buffer.Buffer, c cmd) {
 		m.visualOp(b, c)
 		if m.mode != Insert {
 			m.endChange(b)
+			m.recording = false
 		}
 		return
 	}

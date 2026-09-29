@@ -104,6 +104,16 @@ func keyTokens(k Key) []string {
 	return gs
 }
 
+// specialToken is keyToken for the modes that type text (insert, command
+// line, plain): typed text yields "" (except a lone space, "<space>"), so a
+// pasted "<esc>" is never mistaken for the key.
+func specialToken(k Key) string {
+	if isPrintable(k) && k.Name == "" && k.Text != " " {
+		return ""
+	}
+	return keyToken(k)
+}
+
 // isPrintable reports whether k carries text to insert.
 func isPrintable(k Key) bool {
 	return k.Text != "" && !k.Ctrl && !k.Alt
