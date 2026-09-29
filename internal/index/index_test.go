@@ -296,6 +296,35 @@ func TestUpdateVanishedPathRemovesSubtree(t *testing.T) {
 	}
 }
 
+func TestUpdateSkipsStaleRead(t *testing.T) {
+	tests := []struct {
+		name      string
+		fileAge   time.Duration // file mtime relative to the buffer update
+		wantTitle string
+	}{
+		{"older file ignored", -time.Hour, "Buffer"},
+		{"newer file wins", time.Hour, "Disk"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := newVault(t, map[string]string{"a.md": "# Disk\n"})
+			ix := New()
+			ix.UpdateContent("a.md", "# Buffer\n")
+			n, _ := ix.Get("a.md")
+			mt := n.ModTime.Add(tt.fileAge)
+			if err := os.Chtimes(v.Abs("a.md"), mt, mt); err != nil {
+				t.Fatal(err)
+			}
+			if err := ix.Update(v, "a.md"); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			if n, _ := ix.Get("a.md"); n.Title != tt.wantTitle {
+				t.Errorf("Title = %q, want %q", n.Title, tt.wantTitle)
+			}
+		})
+	}
+}
+
 func TestUpdateReplacesNotMutates(t *testing.T) {
 	v := newVault(t, map[string]string{"a.md": "# A\n"})
 	ix := build(t, v)

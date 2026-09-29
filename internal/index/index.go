@@ -157,6 +157,12 @@ func newNote(rel, content string, mod time.Time) *Note {
 // location, only an entry with that exact path is dropped, never children.
 // Other read errors are returned (and recorded in Problems), leaving any
 // existing entry untouched. Updating the vault root is a no-op.
+//
+// A read whose file ModTime is older than the indexed entry's (for example
+// an UpdateContent from the editor buffer that happened after the file was
+// written) does not overwrite the entry. This guards against stale reads
+// that overlap, but filesystems with coarse timestamps can defeat it, so
+// callers should still serialize Update/UpdateContent calls per path.
 func (ix *Index) Update(v *vault.Vault, rel string) error {
 	rel = clean(rel)
 	if rel == "" {
@@ -185,6 +191,9 @@ func (ix *Index) Update(v *vault.Vault, rel string) error {
 	case n == nil:
 		ix.problems[rel] = err
 		return err
+	}
+	if old, ok := ix.notes[rel]; ok && old.ModTime.After(n.ModTime) {
+		return nil // stale read: the indexed version is newer
 	}
 	ix.notes[rel] = n
 	if err != nil {
