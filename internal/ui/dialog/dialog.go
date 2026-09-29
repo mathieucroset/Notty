@@ -94,6 +94,11 @@ func NewInput(id, title, placeholder, initial string, validate func(string) erro
 	ti := textinput.New()
 	ti.Placeholder = placeholder
 	ti.SetVirtualCursor(false)
+	// Focus's returned tea.Cmd only starts the virtual cursor's blink
+	// ticker; since virtual cursor rendering is off (renderInputLine draws
+	// a static reverse-video cursor instead), there's no blink to start and
+	// discarding it is safe. Focus itself still matters: it's what makes
+	// the underlying textinput.Model accept key input at all.
 	ti.Focus()
 	ti.SetValue(initial)
 
