@@ -13,6 +13,7 @@ import (
 
 	"github.com/mathieucroset/notty/internal/config"
 	"github.com/mathieucroset/notty/internal/imgrender"
+	"github.com/mathieucroset/notty/internal/index"
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
 	"github.com/mathieucroset/notty/internal/ui/dialog"
@@ -103,6 +104,12 @@ type Model struct {
 	stickyErrors int
 	// overlay is the open overlay, or nil.
 	overlay *overlayState
+
+	// ix is the note index, nil until the startup build finishes.
+	ix       *index.Index
+	indexing bool
+	// filterTag is the tag the sidebar tree is filtered by, or "".
+	filterTag string
 	note    note
 	openSeq int // number of the latest open request
 	sync    msgs.SyncStatusMsg
@@ -145,12 +152,13 @@ func (m *Model) NoteView() NoteView { return m.noteView }
 // NotePath returns the vault-relative path of the open note, or "".
 func (m *Model) NotePath() string { return m.note.path }
 
-// Init loads the vault tree.
+// Init loads the vault tree and builds the index.
 func (m *Model) Init() tea.Cmd {
 	if m.opts.WizardNeeded || m.opts.Vault == nil {
 		return nil
 	}
-	return loadTreeCmd(m.opts.Vault)
+	m.indexing = true
+	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault))
 }
 
 // Update handles a message.
@@ -220,6 +228,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sync = msg
 	case msgs.ToastMsg:
 		return m, m.pushToast(msg.Level, msg.Text)
+	case indexBuiltMsg:
+		return m, m.handleIndexBuilt(msg)
+	case indexChangedMsg:
+		m.refreshIndexViews()
+	case msgs.FilterTagMsg:
+		m.filterTag = msg.Tag
+		m.applyFilter()
+	case msgs.ClearFilterMsg:
+		m.filterTag = ""
+		m.applyFilter()
+	case msgs.TogglePinMsg:
+		return m, m.togglePin(msg.Path)
 	case dialog.ResultMsg:
 		return m, m.handleDialogResult(msg)
 	default:
@@ -343,6 +363,9 @@ func (m *Model) render() string {
 	status := m.status
 	status.Mode = m.modeLabel()
 	status.Path = m.note.path
+	if m.indexing {
+		status.Path = strings.TrimPrefix(m.note.path+" · indexing…", " · ")
+	}
 	status.Words = m.note.words
 	status.Sync = m.sync
 	screen := status.View()
