@@ -369,7 +369,8 @@ func (w *Watcher) run() {
 // queued before it has been handled. If the sentinel cannot be created, req is
 // closed at once.
 func (w *Watcher) startBarrier(req chan struct{}) {
-	if err := os.MkdirAll(w.abs(nottyDir), 0o755); err != nil {
+	// Mkdir, not MkdirAll: never recreate a vault root that has been removed.
+	if err := os.Mkdir(w.abs(nottyDir), 0o755); w.rootGone || (err != nil && !errors.Is(err, fs.ErrExist)) {
 		close(req)
 		return
 	}

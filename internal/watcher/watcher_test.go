@@ -800,6 +800,21 @@ func TestOverflowDeliveredWhenErrorBufferFullAndWatchesResynced(t *testing.T) {
 	}
 }
 
+func TestPauseDoesNotRecreateRemovedRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "vault")
+	mkdir(t, root, "")
+	w := newTestWatcher(t, root)
+
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatalf("remove root: %v", err)
+	}
+	w.Pause()
+	w.Resume()
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("vault root recreated (stat err = %v)", err)
+	}
+}
+
 func TestNewFailsOnMissingRoot(t *testing.T) {
 	if _, err := New(filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("expected error for missing root")
