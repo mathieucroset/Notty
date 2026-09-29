@@ -36,6 +36,7 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/ui/toast"
 	"github.com/mathieucroset/notty/internal/ui/trash"
+	"github.com/mathieucroset/notty/internal/ui/wizard"
 	"github.com/mathieucroset/notty/internal/vault"
 	"github.com/mathieucroset/notty/internal/watcher"
 )
@@ -80,6 +81,9 @@ type Options struct {
 	// LockWait is how long the wizard's vault opening waits for a lock held
 	// by another process (spec §9: 10s).
 	LockWait time.Duration
+	// WizardEnv replaces the wizard's environment (tests); nil uses
+	// wizard.DefaultEnv.
+	WizardEnv *wizard.Env
 }
 
 // Focus is the pane with keyboard focus.
@@ -239,6 +243,10 @@ type Model struct {
 	// conflictFiles are its files by path.
 	resolver      *resolver.Model
 	conflictFiles map[string]resolver.File
+
+	// wizard is the first-run wizard or the "Set up sync" wizard, full
+	// screen, or nil.
+	wizard *wizard.Model
 }
 
 // New builds the root model.
@@ -266,6 +274,9 @@ func New(opts Options) *Model {
 	m.editor = newEditor(opts, m.mapEditorMsg)
 	m.host = newSyncHost(opts.Watcher)
 	m.attachSyncer()
+	if opts.WizardNeeded {
+		m.wizard = m.newFirstRunWizard()
+	}
 	m.sidebar.SetExpanded(opts.Local.Expanded)
 	m.sidebar.SetPins(opts.Pins.Pins)
 	m.sidebar.SetFocused(true)
@@ -297,6 +308,9 @@ func (m *Model) NotePath() string { return m.note.path }
 
 // Init loads the vault tree and builds the index.
 func (m *Model) Init() tea.Cmd {
+	if m.wizard != nil {
+		return m.wizard.Init()
+	}
 	if m.opts.WizardNeeded || m.opts.Vault == nil {
 		return nil
 	}
@@ -510,6 +524,15 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd, ok := m.updateResolverMsg(msg); ok {
 			return m, cmd
 		}
+		if cmd, ok := m.updateWizardMsg(msg); ok {
+			return m, cmd
+		}
+		if m.wizard != nil {
+			// The wizard's own checks, runs and spinner.
+			var toastCmd tea.Cmd
+			m.toast, toastCmd = m.toast.Update(msg)
+			return m, tea.Batch(m.updateWizard(msg), toastCmd)
+		}
 		if cmd, ok := m.updateCommandMsg(msg); ok {
 			return m, cmd
 		}
@@ -532,6 +555,16 @@ type quitSavedMsg struct{ saved savedMsg }
 func (m *Model) quit() tea.Cmd {
 	if m.quitting {
 		return tea.Quit // a second ctrl+q while syncing before exit
+	}
+	if m.wizard != nil {
+		// Stop the wizard's checks and steps (they are safe to rerun).
+		w := m.wizard.Cancel()
+		m.wizard = &w
+		if m.opts.WizardNeeded {
+			m.quitting = true
+			return tea.Quit
+		}
+		m.wizard = nil
 	}
 	if !m.discardOnQuit && m.note.path != "" && m.editor.Dirty() {
 		if save := m.saveEditorCmd(); save != nil {
@@ -662,6 +695,10 @@ func (m *Model) relayout() {
 		r := m.resolver.SetSize(m.width, m.height)
 		m.resolver = &r
 	}
+	if m.wizard != nil {
+		w := m.wizard.SetSize(m.width, m.height)
+		m.wizard = &w
+	}
 	m.sizeNoteViews(l.Content.W, l.Content.H)
 	m.resizeOverlay()
 	m.status.SetSize(l.Status.W)
@@ -702,10 +739,11 @@ func (m *Model) render() string {
 		return ""
 	}
 	st := m.opts.Styles
+	if m.wizard != nil {
+		return m.withToasts(m.wizard.View())
+	}
 	if m.opts.WizardNeeded {
-		msg := st.DialogTitle.Render("Setup wizard coming soon") + "\n\n" +
-			st.Muted.Render("ctrl+q to quit")
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, st.Muted.Render("Opening the vault…"))
 	}
 
 	if m.resolver != nil {

@@ -509,25 +509,3 @@ func TestZenLayoutCentersPlaceholder(t *testing.T) {
 		t.Fatalf("placeholder missing:\n%s", s)
 	}
 }
-
-func TestWizardPlaceholder(t *testing.T) {
-	opts := testOptions(t)
-	opts.WizardNeeded = true
-	opts.Vault = nil
-	m := start(t, opts, 100, 30)
-	s := screen(m)
-	if !strings.Contains(s, "Setup wizard coming soon") {
-		t.Errorf("wizard placeholder missing:\n%s", s)
-	}
-	if strings.Contains(s, "◆ Notty ─") {
-		t.Errorf("main screen drawn in wizard mode:\n%s", s)
-	}
-	for _, k := range []string{"q", "ctrl+g", "f1", "ctrl+b"} {
-		if got := run(t, m, keyMsg(k)); len(got) != 0 {
-			t.Errorf("wizard: %s produced %#v, want nothing", k, got)
-		}
-	}
-	if !hasQuit(run(t, m, keyMsg("ctrl+q"))) {
-		t.Error("wizard: ctrl+q did not quit")
-	}
-}

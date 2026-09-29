@@ -269,6 +269,9 @@ func (m *Model) handleEditorKey(k tea.KeyPressMsg) tea.Cmd {
 
 // handlePaste sends a bracketed paste to the editor when it has focus.
 func (m *Model) handlePaste(msg tea.PasteMsg) tea.Cmd {
+	if m.wizard != nil {
+		return m.updateWizard(msg)
+	}
 	if m.resolver != nil && !m.overlayOpen() {
 		return m.updateResolver(msg)
 	}

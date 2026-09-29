@@ -9,6 +9,9 @@ import (
 
 // keyContext returns the context that receives non-global keys.
 func (m *Model) keyContext() keys.Context {
+	if m.wizard != nil {
+		return m.wizard.KeyContext()
+	}
 	if m.opts.WizardNeeded {
 		return keys.Wizard
 	}
@@ -52,8 +55,11 @@ func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	if a, global := keys.Route(m.keyContext(), m.overlayOpen(), k); global {
 		return m.handleAction(a)
 	}
+	if m.wizard != nil {
+		return m.updateWizard(k)
+	}
 	if m.opts.WizardNeeded {
-		return nil // TODO(Task 33): route keys to the wizard.
+		return nil // the vault is being opened
 	}
 	if k.String() == "R" && m.trashWarningNewest() && restoreKeyContext(m.keyContext()) {
 		return m.restoreDeletedRemotely()

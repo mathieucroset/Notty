@@ -291,7 +291,7 @@ func TestPlaceholderCommands(t *testing.T) {
 		want string
 	}{
 		{palette.SyncNowMsg{}, "Sync is not available: this vault is not a git repository"},
-		{palette.SetupSyncMsg{}, "Sync is not set up yet"},
+		{palette.SetupSyncMsg{}, "Sync is not available: this vault is not a git repository"},
 		{msgs.OpenResolverMsg{}, "No conflicts to resolve"},
 		{palette.CleanAttachmentsMsg{}, "No unused attachments"},
 	}

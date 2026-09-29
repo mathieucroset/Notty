@@ -213,12 +213,6 @@ func (m *Model) toggleLineNumbers() tea.Cmd {
 		m.pushToast(msgs.ToastInfo, "Line numbers "+onOff(m.opts.Config.LineNumbers)))
 }
 
-// setupSync opens the sync setup wizard.
-// TODO(wizard pass, Task 33): open the wizard in "set up sync" mode.
-func (m *Model) setupSync() tea.Cmd {
-	return m.pushToast(msgs.ToastInfo, "Sync is not set up yet")
-}
-
 // openConfig opens config.toml in $EDITOR.
 func (m *Model) openConfig() tea.Cmd {
 	m.beginExec()
