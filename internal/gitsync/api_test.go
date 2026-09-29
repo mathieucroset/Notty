@@ -486,6 +486,31 @@ func TestClone(t *testing.T) {
 	}
 }
 
+func TestHelperEnv(t *testing.T) {
+	gittest.Isolate(t)
+	get := func(env []string, name string) (string, bool) {
+		var v string
+		var ok bool
+		for _, kv := range env {
+			if n, val, _ := strings.Cut(kv, "="); n == name {
+				v, ok = val, true // last one wins, as in exec
+			}
+		}
+		return v, ok
+	}
+	env := gitsync.HelperEnv("")
+	if v, _ := get(env, "GIT_TERMINAL_PROMPT"); v != "0" {
+		t.Errorf("GIT_TERMINAL_PROMPT = %q", v)
+	}
+	if v, _ := get(env, "GIT_SSH_COMMAND"); !strings.Contains(v, "BatchMode=yes") {
+		t.Errorf("GIT_SSH_COMMAND = %q, want batch mode", v)
+	}
+	t.Setenv("GIT_SSH_COMMAND", "my-ssh")
+	if v, _ := get(gitsync.HelperEnv(""), "GIT_SSH_COMMAND"); v != "my-ssh" {
+		t.Errorf("user GIT_SSH_COMMAND = %q, want it kept", v)
+	}
+}
+
 // noIdentity makes git refuse to guess an identity from the environment.
 func noIdentity(t *testing.T) {
 	t.Helper()

@@ -173,6 +173,20 @@ func shortHost(h string) string {
 	return h
 }
 
+// HelperEnv returns the environment for another program that runs git on
+// our behalf in dir (such as gh): the same non-interactive environment
+// gitsync gives git, including its SSH rule (a user's GIT_SSH or
+// GIT_SSH_COMMAND is kept, otherwise core.sshCommand or ssh runs with
+// -o BatchMode=yes).
+func HelperEnv(dir string) []string {
+	return gitEnv(os.Environ(), configuredSSHCommand(dir))
+}
+
+// KillGroupOnCancel makes cmd run in its own process group, killed as a
+// whole when cmd's context is done, so helpers it spawned (git, ssh) die with
+// it. Where process groups are unavailable only cmd itself is killed.
+func KillGroupOnCancel(cmd *exec.Cmd) { killGroupOnCancel(cmd) }
+
 // IsRepo reports whether Dir is the top level of a git working tree. A
 // directory nested inside some other repository is not a repo for Notty.
 func (r *Repo) IsRepo() bool {
