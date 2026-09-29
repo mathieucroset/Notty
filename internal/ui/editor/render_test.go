@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/mathieucroset/notty/internal/buffer"
+	"github.com/mathieucroset/notty/internal/mdstyle"
 )
 
 func writePNG(t *testing.T, path string, w, h int) {
@@ -43,6 +44,8 @@ func TestRenderSnapshots(t *testing.T) {
 		"![](/attachments/cat.png)", // 7
 		"![](nope.png)",             // 8
 		"plain **bold**",            // 9
+		"> - [ ] quoted task",       // 10
+		"> - [x] quoted done",       // 11
 	}, "\n")
 	tests := []struct {
 		name string
@@ -50,7 +53,7 @@ func TestRenderSnapshots(t *testing.T) {
 		row  int
 		want string
 	}{
-		{"heading progress", 1, 0, "# Title ▰▰▰▱▱▱▱▱▱▱ 1/3"},
+		{"heading progress", 1, 0, "# Title ▰▰▱▱▱ 1/3"},
 		{"heading raw on cursor line", 0, 0, "# Title"},
 		{"open task glyph", 1, 2, "☐ open task"},
 		{"done task glyph", 1, 3, "☑ done task"},
@@ -61,22 +64,24 @@ func TestRenderSnapshots(t *testing.T) {
 		{"quote raw", 5, 5, "> quoted text"},
 		{"rule", 1, 6, strings.Repeat("─", 38)},
 		{"rule raw", 6, 6, "---"},
-		{"image chip", 1, 7, "🖼 cat.png  64×32"},
-		{"missing chip", 1, 8, "🖼 nope.png  missing"},
+		{"image chip", 1, 7, "🖼️ cat.png  64×32"},
+		{"missing chip", 1, 8, "🖼️ nope.png  missing"},
 		{"chip raw on cursor line", 7, 7, "![](/attachments/cat.png)"},
 		{"markup kept", 1, 9, "plain **bold**"},
+		{"task in quote", 1, 10, "▎ ☐ quoted task"},
+		{"done task in quote", 1, 11, "▎ ☑ quoted done"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := testOptions(t)
 			opts.VaultRoot = vault
-			m := newModel(t, opts, doc, buffer.Pos{Line: tt.cur}, 40, 12)
+			m := newModel(t, opts, doc, buffer.Pos{Line: tt.cur}, 40, 14)
 			rows := plainView(m)
 			// Gutter is one space of padding.
 			if got := strings.TrimSpace(rows[tt.row]); got != tt.want {
 				t.Errorf("row %d = %q, want %q", tt.row, got, tt.want)
 			}
-			checkSize(t, m, 40, 12)
+			checkSize(t, m, 40, 14)
 		})
 	}
 }
@@ -227,5 +232,24 @@ func TestLongLineLaidOutOncePerKey(t *testing.T) {
 		if n := m.aux.builds - before; n != 1 {
 			t.Fatalf("the long line was laid out %d times for one key", n)
 		}
+	}
+}
+
+func TestRuleSelection(t *testing.T) {
+	// A selection starting in the middle of a rule still covers the drawn
+	// line, whose units stand for the whole source line.
+	m := newModel(t, testOptions(t), "abc\n---\nxyz", buffer.Pos{Line: 1, Col: 2}, 20, 3)
+	m, _ = typeKeys(m, "v", "j")
+	selected := m.sty.style(sty{role: roleRule, sel: true}).Render(strings.Repeat("─", 18))
+	if !strings.Contains(m.View(), selected) {
+		t.Errorf("rule inside the selection is not highlighted:\n%q", m.View())
+	}
+}
+
+func TestDoneTaskInQuoteStyled(t *testing.T) {
+	m := newModel(t, testOptions(t), "x\n> - [x] done", buffer.Pos{}, 30, 3)
+	done := m.sty.style(sty{kind: mdstyle.TaskDoneText}).Render("done")
+	if !strings.Contains(m.View(), done) {
+		t.Errorf("done task text in a quote is not struck through:\n%q", m.View())
 	}
 }

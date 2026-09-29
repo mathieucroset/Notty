@@ -43,13 +43,14 @@ type sty struct {
 	sel  bool
 }
 
-// unit is one grapheme of a line's display form. src is the source grapheme
-// column it stands for (display-only units carry the column they are
-// attached to), used for the selection.
+// unit is one grapheme of a line's display form. [src, end) are the source
+// grapheme columns it stands for, used for the selection: one column for a
+// typed grapheme, the replaced range for a substitution (a task glyph, a
+// chip, a rule), empty for display-only additions (heading progress).
 type unit struct {
-	g   string
-	src int
-	st  sty
+	g        string
+	src, end int
+	st       sty
 }
 
 // styler maps cell styles to lipgloss styles built from the palette.
@@ -267,9 +268,9 @@ func (a *aux) forgetMissing() {
 	}
 }
 
-// progressBar renders a 10-cell bar for done/total.
+// progressBar renders a 5-cell bar for done/total, like "▰▰▰▱▱ 3/5".
 func progressBar(done, total int) string {
-	const width = 10
+	const width = 5
 	filled := (done*width + total/2) / total
 	return strings.Repeat("▰", filled) + strings.Repeat("▱", width-filled) + fmt.Sprintf(" %d/%d", done, total)
 }
@@ -290,24 +291,25 @@ func (m Model) rawUnits(i int) []unit {
 			st = sty{kind: spans[j].Kind, tok: spans[j].Token}
 		}
 		if glyph, ok := controlGlyph(g); ok {
-			units[c] = unit{g: glyph, src: c, st: sty{role: roleControl}}
+			units[c] = unit{g: glyph, src: c, end: c + 1, st: sty{role: roleControl}}
 		} else {
-			units[c] = unit{g: g, src: c, st: st}
+			units[c] = unit{g: g, src: c, end: c + 1, st: st}
 		}
 		off += len(g)
 	}
 	return units
 }
 
-// textUnits turns s into display-only units attached to column src.
-func textUnits(s string, src int, st sty) []unit {
+// textUnits turns s into display units standing for source columns
+// [from, to).
+func textUnits(s string, from, to int, st sty) []unit {
 	gs := buffer.Graphemes(s)
 	out := make([]unit, len(gs))
 	for i, g := range gs {
 		if glyph, ok := controlGlyph(g); ok {
 			g = glyph // e.g. an escape character in an image name
 		}
-		out[i] = unit{g: g, src: src, st: st}
+		out[i] = unit{g: g, src: from, end: to, st: st}
 	}
 	return out
 }
@@ -334,11 +336,11 @@ func (m Model) displayUnits(i int, raw bool) []unit {
 	if len(spans) == 0 {
 		return units
 	}
-	col := func(off int) int { return buffer.ByteToCol(line, off) }
+	n := len(units)
 
 	switch spans[0].Kind {
 	case mdstyle.Rule:
-		return textUnits(strings.Repeat("─", max(1, m.lay.width)), 0, sty{role: roleRule})
+		return textUnits(strings.Repeat("─", max(1, m.lay.width)), 0, n, sty{role: roleRule})
 	case mdstyle.CodeBlock, mdstyle.CodeFence:
 		return units
 	}
@@ -349,44 +351,68 @@ func (m Model) displayUnits(i int, raw bool) []unit {
 		}
 	}
 
-	for k, sp := range spans {
-		switch sp.Kind {
-		case mdstyle.TaskOpen, mdstyle.TaskDone:
-			glyph, r := "☐", roleTaskGlyph
-			if sp.Kind == mdstyle.TaskDone {
-				glyph, r = "☑", roleTaskDoneGlyph
-			}
-			from := col(sp.Start)
-			if k > 0 && spans[k-1].Kind == mdstyle.ListMarker {
-				if mk := strings.TrimSpace(line[spans[k-1].Start:spans[k-1].End]); mk == "-" || mk == "*" || mk == "+" {
-					from = col(spans[k-1].Start)
-				}
-			}
-			units = splice(units, from, col(sp.End), textUnits(glyph, from, sty{role: r}))
-			return units
+	quote := spans[0].Kind == mdstyle.Markup && strings.HasPrefix(strings.TrimLeft(line, " "), ">")
+	if quote {
+		// The tokenizer does not look for tasks inside a quote; do it on the
+		// quoted text so "> - [ ] x" shows the bar and the glyph.
+		q := spans[0].End
+		inner, _ := mdstyle.TokenizeLine(line[q:], mdstyle.State{})
+		for k := range inner {
+			inner[k].Start += q
+			inner[k].End += q
 		}
-	}
-
-	if spans[0].Kind == mdstyle.Markup && strings.HasPrefix(strings.TrimLeft(line, " "), ">") {
+		units = taskGlyph(units, line, inner, true)
 		sp := spans[0]
 		bar := "▎"
 		if sp.End-sp.Start > 1 && strings.HasSuffix(line[sp.Start:sp.End], " ") {
 			bar += " "
 		}
-		return splice(units, col(sp.Start), col(sp.End), textUnits(bar, col(sp.Start), sty{role: roleQuoteBar}))
+		from, to := buffer.ByteToCol(line, sp.Start), buffer.ByteToCol(line, sp.End)
+		return splice(units, from, to, textUnits(bar, from, to, sty{role: roleQuoteBar}))
 	}
+
+	units = taskGlyph(units, line, spans, false)
 
 	if spans[0].Kind == mdstyle.Markup && strings.HasPrefix(strings.TrimLeft(line, " "), "#") {
 		if done, total := m.aux.progress(m.buf, i); total > 0 {
-			units = append(units, textUnits(" ", len(units), sty{})...)
-			units = append(units, textUnits(progressBar(done, total), len(units), sty{role: roleProgress})...)
+			units = append(units, textUnits(" "+progressBar(done, total), n, n, sty{role: roleProgress})...)
 		}
 	}
 	return units
 }
 
+// taskGlyph replaces the checkbox of a task line (and a bullet marker
+// before it) with ☐ or ☑. Units are still one per source column, so span
+// columns index them directly. restyle marks the text of a done task as
+// done (for tasks inside a quote, which the tokenizer styles as quote text).
+func taskGlyph(units []unit, line string, spans []mdstyle.Span, restyle bool) []unit {
+	col := func(off int) int { return buffer.ByteToCol(line, off) }
+	for k, sp := range spans {
+		if sp.Kind != mdstyle.TaskOpen && sp.Kind != mdstyle.TaskDone {
+			continue
+		}
+		glyph, r := "☐", roleTaskGlyph
+		if sp.Kind == mdstyle.TaskDone {
+			glyph, r = "☑", roleTaskDoneGlyph
+			if restyle {
+				for c := col(sp.End); c < len(units); c++ {
+					units[c].st = sty{kind: mdstyle.TaskDoneText}
+				}
+			}
+		}
+		from, to := col(sp.Start), col(sp.End)
+		if k > 0 && spans[k-1].Kind == mdstyle.ListMarker {
+			if mk := strings.TrimSpace(line[spans[k-1].Start:spans[k-1].End]); mk == "-" || mk == "*" || mk == "+" {
+				from = col(spans[k-1].Start)
+			}
+		}
+		return splice(units, from, to, textUnits(glyph, from, to, sty{role: r}))
+	}
+	return units
+}
+
 // chips renders an image-only line as one chip per image:
-// "🖼 name.png  640×480", or "missing" when the file cannot be read.
+// "🖼️ name.png  640×480", or "missing" when the file cannot be read.
 func (m Model) chips(line string) []unit {
 	imgs := links.FindImages(line)
 	if len(imgs) == 0 {
@@ -394,26 +420,26 @@ func (m Model) chips(line string) []unit {
 	}
 	var out []unit
 	for k, img := range imgs {
-		src := buffer.ByteToCol(line, img.Start)
+		src, end := buffer.ByteToCol(line, img.Start), buffer.ByteToCol(line, img.End)
 		if k > 0 {
-			out = append(out, textUnits(" ", src, sty{})...)
+			out = append(out, textUnits(" ", src, src, sty{})...)
 		}
 		name := path.Base(img.Target)
-		text, r := " 🖼 "+name+" ", roleChip
+		text, r := " 🖼️ "+name+" ", roleChip
 		rel, external := links.Resolve(img.Target, m.path)
 		switch {
 		case external:
 		case rel == "":
-			text, r = " 🖼 "+name+"  missing ", roleChipMissing
+			text, r = " 🖼️ "+name+"  missing ", roleChipMissing
 		default:
 			d := m.aux.dimensions(filepath.Join(m.opts.VaultRoot, filepath.FromSlash(rel)))
 			if d.ok {
-				text = fmt.Sprintf(" 🖼 %s  %d×%d ", name, d.w, d.h)
+				text = fmt.Sprintf(" 🖼️ %s  %d×%d ", name, d.w, d.h)
 			} else {
-				text, r = " 🖼 "+name+"  missing ", roleChipMissing
+				text, r = " 🖼️ "+name+"  missing ", roleChipMissing
 			}
 		}
-		out = append(out, textUnits(text, src, sty{role: r})...)
+		out = append(out, textUnits(text, src, end, sty{role: r})...)
 	}
 	return out
 }

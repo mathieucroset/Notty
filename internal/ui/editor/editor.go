@@ -394,7 +394,7 @@ func (m Model) View() string {
 				eol = e
 				units = slices.Clone(units) // the memoized units are shared
 				for k := range units {
-					if units[k].src >= from && units[k].src < to {
+					if u := units[k]; u.src < to && u.end > from {
 						units[k].st.sel = true
 					}
 				}
