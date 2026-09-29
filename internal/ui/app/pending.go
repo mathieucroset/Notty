@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/mathieucroset/notty/internal/ui/dialog"
+	"github.com/mathieucroset/notty/internal/vault"
 )
 
 // opKind is the action a dialog's result feeds.
@@ -19,6 +20,8 @@ const (
 	opRename
 	opMove
 	opTrash
+	opDeleteForever
+	opEmptyTrash
 )
 
 // pendingOp is what to do once a dialog is confirmed, with the data the
@@ -29,6 +32,8 @@ type pendingOp struct {
 	// path is the note, file or folder the action applies to (the target
 	// folder for new notes and folders).
 	path string
+	// item is the trash item to delete forever.
+	item vault.TrashItem
 }
 
 // runPending performs op with the confirmed dialog result res.
@@ -55,6 +60,10 @@ func (m *Model) runPending(op pendingOp, res dialog.ResultMsg) tea.Cmd {
 		return renameCmd(v, m.ix, opMove, op.path, dest)
 	case opTrash:
 		return trashCmd(v, m.ix, op.path)
+	case opDeleteForever:
+		return deleteForeverCmd(v, op.item)
+	case opEmptyTrash:
+		return emptyTrashCmd(v)
 	}
 	return nil
 }

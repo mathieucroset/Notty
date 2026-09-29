@@ -25,6 +25,7 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/textutil"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 	"github.com/mathieucroset/notty/internal/ui/toast"
+	"github.com/mathieucroset/notty/internal/ui/trash"
 	"github.com/mathieucroset/notty/internal/vault"
 	"github.com/mathieucroset/notty/internal/watcher"
 )
@@ -127,6 +128,7 @@ type Model struct {
 
 	tasks      tasksview.Model
 	openTasks  int
+	trash      trash.Model
 	trashCount int
 	note    note
 	openSeq int // number of the latest open request
@@ -149,6 +151,7 @@ func New(opts Options) *Model {
 		status:         statusbar.New(opts.Styles),
 		toast:          toast.New(opts.Styles),
 		tasks:          tasksview.New(opts.Styles, opts.Config.Tasks.DueSoonDays, opts.Config.Tasks.ShowDone),
+		trash:          trash.New(opts.Styles, opts.Palette),
 	}
 	m.sidebar.SetExpanded(opts.Local.Expanded)
 	m.sidebar.SetPins(opts.Pins.Pins)
@@ -177,7 +180,8 @@ func (m *Model) Init() tea.Cmd {
 		return nil
 	}
 	m.indexing = true
-	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault), listenWatcherCmd(m.opts.Watcher))
+	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault), m.startupTrashCmd(),
+		listenWatcherCmd(m.opts.Watcher))
 }
 
 // Update handles a message.
@@ -242,8 +246,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msgs.EntryTasks:
 			m.showTasks()
 		case msgs.EntryTrash:
-			m.mainView = ViewTrash
-			m.setFocus(FocusMain)
+			return m, m.showTrash()
 		case msgs.EntryConflicts:
 			return m, emit(msgs.OpenResolverMsg{})
 		}
@@ -296,6 +299,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dialog.ResultMsg:
 		return m, m.handleDialogResult(msg)
 	default:
+		if cmd, ok := m.updateTrashMsg(msg); ok {
+			return m, cmd
+		}
 		// Toast expiry ticks.
 		var cmd tea.Cmd
 		m.toast, cmd = m.toast.Update(msg)
@@ -362,6 +368,7 @@ func (m *Model) relayout() {
 		m.setFocus(FocusMain)
 	}
 	m.tasks = m.tasks.SetSize(l.Content.W, l.Content.H)
+	m.trash = m.trash.SetSize(l.Content.W, l.Content.H)
 	m.status.SetSize(l.Status.W)
 }
 
@@ -444,7 +451,7 @@ func (m *Model) paneTitle() string {
 	case ViewTasks:
 		return m.tasks.Title()
 	case ViewTrash:
-		return "Trash"
+		return m.trash.Title()
 	}
 	if m.note.path == "" {
 		if m.opts.Vault == nil {
@@ -510,7 +517,7 @@ func (m *Model) mainContent(w, h int) string {
 	case ViewTasks:
 		return m.tasks.View()
 	case ViewTrash:
-		return centered("Trash view coming soon")
+		return m.trash.View()
 	}
 	if m.note.path == "" {
 		return centered(m.emptyHint())

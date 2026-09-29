@@ -262,7 +262,7 @@ func (m *Model) handleFileOp(msg fileOpMsg) tea.Cmd {
 		m.pendingSelect = msg.path
 		cmds = append(cmds, m.pathRenamed(msg.old, msg.path))
 	case opTrash:
-		cmds = append(cmds, m.pathRemoved(msg.old),
+		cmds = append(cmds, m.pathRemoved(msg.old), loadTrashCmd(m.opts.Vault),
 			m.pushToast(msgs.ToastInfo, fmt.Sprintf("Moved '%s' to trash", displayName(msg.old))))
 	}
 	m.refreshIndexViews()

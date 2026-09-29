@@ -70,6 +70,9 @@ func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
 	case ViewTasks:
 		m.tasks, cmd = m.tasks.Update(k)
 		return cmd
+	case ViewTrash:
+		m.trash, cmd = m.trash.Update(k)
+		return cmd
 	}
 	switch k.String() {
 	case "tab":
