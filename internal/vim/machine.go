@@ -93,6 +93,7 @@ type Machine struct {
 	// command line and search
 	cmdPrefix, cmdText string
 	cmdPrev            Mode
+	cmdCount           int // count typed before / or ?
 	lastSearch         string
 	lastSearchFwd      bool
 
@@ -371,7 +372,7 @@ func (m *Machine) execOther(b *buffer.Buffer, c cmd) {
 	case ".":
 		m.repeat(b, c)
 	case "/", "?", ":":
-		m.startCmdline(c.name)
+		m.startCmdline(c.name, c.count())
 	case "<tab>":
 		m.eff.FocusSidebar = true
 	case "<c-w>":
@@ -411,7 +412,7 @@ func normalCol(b *buffer.Buffer, l, col int) int {
 func (m *Machine) execVisualSpecial(b *buffer.Buffer, c cmd) bool {
 	switch c.name {
 	case "/", "?":
-		m.startCmdline(c.name)
+		m.startCmdline(c.name, c.count())
 		return true
 	}
 	return false

@@ -14,9 +14,11 @@ const (
 	msgNoPrevious = "E35: No previous regular expression"
 )
 
-// startCmdline enters command mode with prefix ":", "/" or "?".
-func (m *Machine) startCmdline(prefix string) {
+// startCmdline enters command mode with prefix ":", "/" or "?". count is
+// the search count (3/foo finds the third match).
+func (m *Machine) startCmdline(prefix string, count int) {
 	m.cmdPrev = m.mode
+	m.cmdCount = count
 	m.mode = Command
 	m.cmdPrefix = prefix
 	m.cmdText = ""
@@ -48,7 +50,7 @@ func (m *Machine) commandKey(b *buffer.Buffer, k Key) {
 		if prefix == ":" {
 			m.runEx(b, text)
 		} else {
-			m.doSearch(b, text, prefix == "/")
+			m.doSearch(b, text, prefix == "/", m.cmdCount)
 		}
 		if m.mode == Normal || m.isVisual() {
 			m.clampNormal(b)
@@ -71,13 +73,14 @@ func (m *Machine) commandKey(b *buffer.Buffer, k Key) {
 	}
 }
 
-// doSearch runs /pat or ?pat. An empty pattern reuses the last one.
-func (m *Machine) doSearch(b *buffer.Buffer, pat string, fwd bool) {
+// doSearch runs /pat or ?pat count times. An empty pattern reuses the last
+// one.
+func (m *Machine) doSearch(b *buffer.Buffer, pat string, fwd bool, count int) {
 	if pat != "" {
 		m.lastSearch = pat
 	}
 	m.lastSearchFwd = fwd
-	r := m.searchMotion(b, b.Cursor(), false, 1)
+	r := m.searchMotion(b, b.Cursor(), false, max(1, count))
 	if r.ok {
 		b.SetCursor(r.pos)
 		m.curswant = cursorCell(b)
