@@ -92,8 +92,9 @@ func TestSyncConflictExits2(t *testing.T) {
 	assertUnlocked(t, f.vaultDir)
 }
 
-func TestSyncMergeInProgressExits2WithoutCommitting(t *testing.T) {
-	f, g := syncFixture(t)
+// startConflictedMerge leaves the laptop in a conflicted merge of README.md.
+func startConflictedMerge(t *testing.T, g *gittest.Env) {
+	t.Helper()
 	conflictingChange(t, g)
 	gittest.CommitAll(t, g.Laptop, "Update README.md · laptop")
 	if err := g.Laptop.Fetch(t.Context()); err != nil {
@@ -102,25 +103,53 @@ func TestSyncMergeInProgressExits2WithoutCommitting(t *testing.T) {
 	if err := g.Laptop.Merge("origin/main", false); !errors.Is(err, gitsync.ErrConflict) {
 		t.Fatalf("merge: %v, want a conflict", err)
 	}
-	// Resolve the file but leave the merge uncommitted, and make another
-	// change: notty sync must commit neither.
-	gittest.Write(t, g.Laptop, "README.md", "# Both\n")
-	gittest.Git(t, g.Laptop.Dir, "add", "README.md")
-	gittest.Write(t, g.Laptop, "Extra.md", "# Extra\n")
-	head := gittest.Git(t, g.Laptop.Dir, "rev-parse", "HEAD")
+}
 
-	if code := run([]string{"sync"}, f.env()); code != 2 {
-		t.Fatalf("exit code %d, want 2; stderr %q", code, f.stderr.String())
-	}
-	if got := gittest.Git(t, g.Laptop.Dir, "rev-parse", "HEAD"); got != head {
-		t.Errorf("HEAD moved from %s to %s", head, got)
-	}
-	if !g.Laptop.MergeInProgress() {
-		t.Error("merge no longer in progress")
-	}
-	if !strings.Contains(f.stderr.String(), "merge conflict") {
-		t.Errorf("stderr = %q", f.stderr.String())
-	}
+// A merge found in progress at start is handled by the syncer (spec §7):
+// with conflicts left notty sync exits 2 without committing; with every
+// file resolved the merge is committed and the sync goes on.
+func TestSyncMergeInProgress(t *testing.T) {
+	t.Run("unresolved", func(t *testing.T) {
+		f, g := syncFixture(t)
+		startConflictedMerge(t, g)
+		gittest.Write(t, g.Laptop, "Extra.md", "# Extra\n")
+		head := gittest.Git(t, g.Laptop.Dir, "rev-parse", "HEAD")
+
+		if code := run([]string{"sync"}, f.env()); code != 2 {
+			t.Fatalf("exit code %d, want 2; stderr %q", code, f.stderr.String())
+		}
+		if got := gittest.Git(t, g.Laptop.Dir, "rev-parse", "HEAD"); got != head {
+			t.Errorf("HEAD moved from %s to %s", head, got)
+		}
+		if !g.Laptop.MergeInProgress() {
+			t.Error("merge no longer in progress")
+		}
+		if !strings.Contains(f.stderr.String(), "merge conflict") {
+			t.Errorf("stderr = %q", f.stderr.String())
+		}
+		assertUnlocked(t, f.vaultDir)
+	})
+	t.Run("resolved but uncommitted", func(t *testing.T) {
+		f, g := syncFixture(t)
+		startConflictedMerge(t, g)
+		gittest.Write(t, g.Laptop, "README.md", "# Both\n")
+		gittest.Git(t, g.Laptop.Dir, "add", "README.md")
+
+		if code := run([]string{"sync"}, f.env()); code != 0 {
+			t.Fatalf("exit code %d, want 0; stderr %q", code, f.stderr.String())
+		}
+		if g.Laptop.MergeInProgress() {
+			t.Error("merge still in progress")
+		}
+		// The merge commit (two parents) reached the remote.
+		parents := gittest.Git(t, "", "--git-dir", g.Remote, "log", "--merges", "-1", "--format=%P", "main")
+		if len(strings.Fields(parents)) != 2 {
+			t.Errorf("no merge commit on the remote (parents %q)", parents)
+		}
+		if got := gittest.Git(t, "", "--git-dir", g.Remote, "show", "main:README.md"); got != "# Both" {
+			t.Errorf("remote README.md = %q", got)
+		}
+	})
 }
 
 func TestSyncWhileLocked(t *testing.T) {

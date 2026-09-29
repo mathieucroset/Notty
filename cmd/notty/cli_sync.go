@@ -92,17 +92,22 @@ func runSync(args []string, vaultFlag string, e env) int {
 		}
 		return fail("%v", err)
 	}
+	// If this process dies before the deferred Release (a crash or a kill),
+	// the lock is left behind; the next AcquireLock takes it over because
+	// its pid is no longer alive (spec §9 stale locks).
 	defer func() { _ = lock.Release() }()
 
-	// Spec §7: while in Conflict, notty sync exits nonzero without committing.
-	if repo.MergeInProgress() {
-		_, _ = fmt.Fprintln(e.stderr, conflictMessage)
-		return exitConflict
+	// The lock file must never be committed. A merge in progress is left
+	// untouched (.gitignore could be one of its conflicted files).
+	if !repo.MergeInProgress() {
+		if _, err := vault.EnsureGitignore(root); err != nil {
+			return fail("%v", err)
+		}
 	}
-	// The lock file must never be committed.
-	if _, err := vault.EnsureGitignore(root); err != nil {
-		return fail("%v", err)
-	}
+	// A merge found in progress is handled by the syncer's startup (spec
+	// §7): with conflicts left it enters Conflict, and notty sync exits 2
+	// without committing; with every file resolved it commits the merge
+	// and the cycle goes on.
 	return syncOnce(repo, cfg, e.stdout, e.stderr)
 }
 
