@@ -61,7 +61,7 @@ func (m *Model) handleKey(k tea.KeyPressMsg) tea.Cmd {
 	if m.opts.WizardNeeded {
 		return nil // the vault is being opened
 	}
-	if k.String() == "R" && m.trashWarningNewest() && restoreKeyContext(m.keyContext()) {
+	if k.String() == "R" && m.trashWarningNewest() && m.restoreKeyActive() {
 		return m.restoreDeletedRemotely()
 	}
 	if m.overlayOpen() {
@@ -145,11 +145,17 @@ func (m *Model) handleAction(a keys.Action) tea.Cmd {
 	return nil
 }
 
-// restoreKeyContext reports whether R on a trash warning toast restores its
-// note in ctx: everywhere keys are not typed or taken by vim (R is vim's
-// replace mode, so the editor keeps it; the palette entry works there).
-func restoreKeyContext(ctx keys.Context) bool {
-	switch ctx {
+// restoreKeyActive reports whether R on a trash warning toast restores its
+// note: everywhere keys are not typed or taken by vim (R is vim's replace
+// mode, so an open editor keeps it; the palette entry works there),
+// including the empty main pane left when the open note was the one
+// deleted.
+func (m *Model) restoreKeyActive() bool {
+	if m.focus == FocusMain && m.mainView == ViewNote && m.note.path == "" && !m.overlayOpen() &&
+		m.history == nil && m.resolver == nil {
+		return true
+	}
+	switch m.keyContext() {
 	case keys.Sidebar, keys.Preview, keys.TasksView, keys.TrashView, keys.EditorReadOnly:
 		return true
 	}

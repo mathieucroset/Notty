@@ -284,23 +284,36 @@ func TestAuthErrorShowsDialog(t *testing.T) {
 }
 
 func TestTrashWarningRestore(t *testing.T) {
-	for _, via := range []string{"R", "palette"} {
+	for _, via := range []string{"R", "R on the emptied pane", "palette"} {
 		t.Run(via, func(t *testing.T) {
 			opts := testOptions(t)
 			m := start(t, opts, 120, 30)
+			if via == "R on the emptied pane" {
+				run(t, m, msgs.OpenNoteMsg{Path: "ideas.md", Line: 0})
+			}
 			it, err := opts.Vault.Trash("ideas.md")
 			if err != nil {
 				t.Fatal(err)
+			}
+			if via == "R on the emptied pane" {
+				// The merge removed the open note: the main pane is empty.
+				run(t, m, pathsGoneMsg{paths: []string{"ideas.md"}})
+				if m.NotePath() != "" || m.Focus() != FocusMain {
+					t.Fatalf("note %q, focus %v", m.NotePath(), m.Focus())
+				}
 			}
 			w := syncer.TrashWarning{Path: "ideas.md", TrashPath: ".trash/" + it.ID + "/ideas.md", Host: "desktop"}
 			run(t, m, syncUpdateMsg{u: syncer.Update{Status: syncer.Status{State: syncer.Synced}, TrashWarnings: []syncer.TrashWarning{w}}})
 			if !hasToast(m, msgs.ToastWarn, "'ideas' was deleted on desktop, but you edited it here") {
 				t.Fatalf("toasts = %v", toastTexts(m))
 			}
-			if via == "R" {
+			switch via {
+			case "R":
 				m.focusSidebar()
 				run(t, m, keyMsg("R"))
-			} else {
+			case "R on the emptied pane":
+				run(t, m, keyMsg("R"))
+			default:
 				run(t, m, restoreDeletedRemotelyMsg{})
 			}
 			if _, err := os.Stat(filepath.Join(opts.Vault.Root, "ideas.md")); err != nil {
