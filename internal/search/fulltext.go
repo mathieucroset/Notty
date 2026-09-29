@@ -109,12 +109,7 @@ func tokenEnd(s string, i int) int {
 // path, then line. At most limit hits are returned (no limit when limit <=
 // 0). An empty query returns nil, and so does a cancelled ctx.
 func FullText(ctx context.Context, q Query, notes []*index.Note, limit int) []Hit {
-	var needles []string
-	for _, n := range append(append([]string(nil), q.Terms...), q.Phrases...) {
-		if n != "" {
-			needles = append(needles, n)
-		}
-	}
+	needles := foldNeedles(q)
 	in := strings.ToLower(strings.Trim(q.In, "/"))
 	if len(needles) == 0 && len(q.Tags) == 0 && in == "" {
 		return nil
@@ -157,7 +152,29 @@ func FullText(ctx context.Context, q Query, notes []*index.Note, limit int) []Hi
 	return hits
 }
 
+// foldNeedles returns q's terms and phrases case-folded (index.Fold),
+// without empty or duplicate needles, longest first: longer needles are
+// usually more selective, so notes are rejected sooner.
+func foldNeedles(q Query) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, group := range [][]string{q.Terms, q.Phrases} {
+		for _, s := range group {
+			f := index.Fold(s)
+			if f == "" || seen[f] {
+				continue
+			}
+			seen[f] = true
+			out = append(out, f)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	return out
+}
+
 // qualifies reports whether n passes the folder, tag and needle filters.
+// Needles must already be folded; the needle test runs on the note's
+// precomputed folded content.
 func qualifies(n *index.Note, needles, tags []string, in string) bool {
 	if in != "" {
 		p := strings.ToLower(n.Path)
@@ -171,7 +188,7 @@ func qualifies(n *index.Note, needles, tags []string, in string) bool {
 		}
 	}
 	for _, nd := range needles {
-		if s, _ := indexFold(n.Content, nd); s < 0 {
+		if !n.ContainsFold(nd) {
 			return false
 		}
 	}

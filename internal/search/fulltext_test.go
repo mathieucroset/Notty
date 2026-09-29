@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mathieucroset/notty/internal/index"
 )
@@ -59,8 +61,30 @@ func project(hs []Hit) []hit {
 	return out
 }
 
+// note builds an index note with a predictable title and explicit tags.
 func note(path, content string, tags ...string) *index.Note {
-	return &index.Note{Path: path, Title: "T " + path, Content: content, Tags: tags}
+	n := index.NewNote(path, content, time.Time{})
+	n.Title = "T " + path
+	n.Tags = tags
+	return n
+}
+
+func TestFoldNeedles(t *testing.T) {
+	q := Query{Terms: []string{"fox", "FOX", "a", ""}, Phrases: []string{"brown fox", "", "Fox"}}
+	want := []string{"BROWN FOX", "FOX", "A"}
+	if got := foldNeedles(q); !reflect.DeepEqual(got, want) {
+		t.Errorf("foldNeedles = %q, want %q", got, want)
+	}
+}
+
+func TestFullTextLiteralNote(t *testing.T) {
+	// A Note built as a literal (no precomputed fold) still matches.
+	ns := []*index.Note{{Path: "a.md", Content: "Hello World"}}
+	got := project(FullText(context.Background(), ParseQuery("world"), ns, 0))
+	want := []hit{{"a.md", 0, "Hello World", "", [][2]int{{6, 11}}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
 }
 
 func TestFullText(t *testing.T) {
@@ -172,7 +196,7 @@ func TestFullText(t *testing.T) {
 
 func TestFullTextUnicodeByteRanges(t *testing.T) {
 	ns := []*index.Note{
-		note("u.md", "Ünïcode ÜBER straße über\nKelvin: 5K is k\n"),
+		note("u.md", "Ünïcode ÜBER straße über\nKelvin: 5\u212a is k\n"),
 	}
 	tests := []struct {
 		query string
@@ -182,20 +206,20 @@ func TestFullTextUnicodeByteRanges(t *testing.T) {
 			query: "über",
 			want: []hit{
 				// "Ünïcode " is 10 bytes; "ÜBER" is 5; " straße " is 9.
-				{"u.md", 0, "Ünïcode ÜBER straße über", "Kelvin: 5K is k", [][2]int{{10, 15}, {24, 29}}},
+				{"u.md", 0, "Ünïcode ÜBER straße über", "Kelvin: 5\u212a is k", [][2]int{{10, 15}, {24, 29}}},
 			},
 		},
 		{
 			query: "straße",
 			want: []hit{
-				{"u.md", 0, "Ünïcode ÜBER straße über", "Kelvin: 5K is k", [][2]int{{16, 23}}},
+				{"u.md", 0, "Ünïcode ÜBER straße über", "Kelvin: 5\u212a is k", [][2]int{{16, 23}}},
 			},
 		},
 		{
 			// The Kelvin sign (3 bytes) folds to "k" (1 byte).
 			query: "5k",
 			want: []hit{
-				{"u.md", 1, "Kelvin: 5K is k", "Ünïcode ÜBER straße über", [][2]int{{8, 12}}},
+				{"u.md", 1, "Kelvin: 5\u212a is k", "Ünïcode ÜBER straße über", [][2]int{{8, 12}}},
 			},
 		},
 	}
@@ -273,6 +297,47 @@ func TestFullTextCancelled(t *testing.T) {
 	}
 }
 
+// benchNotes builds 5000 notes of 200 lines each; five notes spread over
+// the folders contain the rare word "zanzibar" once.
+func benchNotes() []*index.Note {
+	words := []string{"the", "quick", "brown", "fox", "Jumps", "over", "lazy", "dog", "meeting", "notes", "Über", "project"}
+	ns := make([]*index.Note, 0, 5000)
+	mt := time.Now()
+	for i := range 5000 {
+		var b strings.Builder
+		fmt.Fprintf(&b, "# Note %d\n", i)
+		for l := range 199 {
+			for w := range 8 {
+				b.WriteString(words[(i+l*3+w*7)%len(words)])
+				b.WriteByte(' ')
+			}
+			if i%1000 == 537 && l == 100 {
+				b.WriteString("Zanzibar")
+			}
+			b.WriteByte('\n')
+		}
+		ns = append(ns, index.NewNote(fmt.Sprintf("folder%d/note%04d.md", i%10, i), b.String(), mt))
+	}
+	sort.Slice(ns, func(i, j int) bool { return ns[i].Path < ns[j].Path })
+	return ns
+}
+
+func BenchmarkFullText(b *testing.B) {
+	ns := benchNotes()
+	for _, bc := range []struct{ name, query string }{
+		{"rare term", "zanzibar"},
+		{"rare and common terms", "fox zanzibar"},
+		{"absent phrase", `"fox fox fox"`},
+	} {
+		b.Run(bc.name, func(b *testing.B) {
+			q := ParseQuery(bc.query)
+			for b.Loop() {
+				FullText(context.Background(), q, ns, 200)
+			}
+		})
+	}
+}
+
 func TestIndexFold(t *testing.T) {
 	tests := []struct {
 		s, needle  string
@@ -283,7 +348,7 @@ func TestIndexFold(t *testing.T) {
 		{"hello", "xyz", -1, -1},
 		{"hel", "hello", -1, -1},
 		{"aÜb", "ü", 1, 3},
-		{"xKy", "K", 1, 4},
+		{"x\u212ay", "K", 1, 4},
 		{"abc\xffdef", "def", 4, 7},
 	}
 	for _, tt := range tests {
