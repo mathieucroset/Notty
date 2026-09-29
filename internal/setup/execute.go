@@ -59,7 +59,7 @@ func ExecuteRepo(ctx context.Context, repo *gitsync.Repo, steps []Step, gh GH, p
 		}
 		next, conflicted, err := runStep(ctx, repo, s, gh)
 		if err != nil {
-			return false, &StepError{Index: i, Step: s, Err: err}
+			return conflicted, &StepError{Index: i, Step: s, Err: err}
 		}
 		repo = next
 		if conflicted {
@@ -149,7 +149,7 @@ func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.R
 	case StepMergeUnrelated:
 		err := repo.Merge(arg, true)
 		if errors.Is(err, gitsync.ErrConflict) && repo.MergeInProgress() {
-			return repo, true, nil
+			return repo, true, writeGitignoreDuringMerge(repo)
 		}
 		return repo, false, err
 	case StepPush:
@@ -174,6 +174,24 @@ func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.R
 		return repo, false, err
 	}
 	return repo, false, fmt.Errorf("unknown step %v", s.Kind)
+}
+
+// writeGitignoreDuringMerge makes sure .gitignore lists Notty's entries
+// while a setup merge waits for the resolver, so the first commits after the
+// resolution never pick up .notty/lock or recovery files. It does not stage
+// or commit, and leaves a conflicted .gitignore alone for the resolver.
+func writeGitignoreDuringMerge(repo *gitsync.Repo) error {
+	conflicts, err := repo.ConflictedFiles()
+	if err != nil {
+		return err
+	}
+	for _, c := range conflicts {
+		if c.Path == ".gitignore" {
+			return nil
+		}
+	}
+	_, err = vault.EnsureGitignore(repo.Dir)
+	return err
 }
 
 // junkPatterns returns the lines vault.EnsureGitignore guarantees, by

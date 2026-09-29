@@ -321,8 +321,41 @@ func TestExecuteFilesWithHistoryConflict(t *testing.T) {
 	if after := gittest.Git(t, remote, "rev-parse", "refs/heads/main"); after != before {
 		t.Error("remote changed although the merge conflicted")
 	}
-	if _, err := os.Stat(filepath.Join(vault, ".gitignore")); err == nil {
-		t.Error(".gitignore written during the merge")
+	// .gitignore is written but neither staged nor committed.
+	assertGitignore(t, vault)
+	if st := gittest.Git(t, vault, "status", "--porcelain", "--", ".gitignore"); st != "?? .gitignore" {
+		t.Errorf(".gitignore status = %q, want untracked", st)
+	}
+
+	// The resolver resolves while the app holds the lock; the syncer's next
+	// cycle then commits everything else.
+	writeFiles(t, vault, map[string]string{".notty/lock": "123", "README.md": "# merged\n", ".notty/recovery/r.md": "r"})
+	if err := repo.Add("README.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CommitMerge("Merge · box"); err != nil {
+		t.Fatal(err)
+	}
+	gittest.CommitAll(t, repo, "Update · box")
+	if got, want := tracked(t, vault), []string{".gitignore", "README.md"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("tracked = %v, want %v", got, want)
+	}
+}
+
+func TestExecuteConflictedGitignoreLeftToResolver(t *testing.T) {
+	gittest.Isolate(t)
+	remote := newRemote(t, "main", map[string]string{".gitignore": "*.bak\n"})
+	identity(t)
+	vault := filepath.Join(t.TempDir(), "Notes")
+	writeFiles(t, vault, map[string]string{".gitignore": "*.tmp\n", "a.md": "a\n"})
+
+	conflicted, err := run(t, setup.Request{Vault: vault, Choice: setup.ExistingURL, URL: remote, Host: "box"}, nil)
+	if err != nil || !conflicted {
+		t.Fatalf("Execute = %v, %v; want a conflict", conflicted, err)
+	}
+	gi := readFile(t, vault, ".gitignore")
+	if !strings.Contains(gi, "<<<<<<<") || strings.Contains(gi, ".notty/lock") {
+		t.Errorf("conflicted .gitignore was rewritten:\n%s", gi)
 	}
 }
 
