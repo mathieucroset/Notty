@@ -174,6 +174,59 @@ func TestStartConflictWhenListingFails(t *testing.T) {
 	}
 }
 
+func TestFetchTickConflictStopsFetchTimer(t *testing.T) {
+	env := gittest.New(t)
+	shareBase(t, env, func(r *gitsync.Repo) { gittest.Write(t, r, "note.md", "line\n") })
+	h := newHarness(t, env.Laptop)
+	h.start()
+	gittest.Write(t, env.Laptop, "note.md", "laptop\n")
+	gittest.CommitAll(t, env.Laptop, "Update note.md · laptop")
+	deskPush(t, env, func(r *gitsync.Repo) { gittest.Write(t, r, "note.md", "desktop\n") })
+	h.advance(5 * time.Minute)
+	h.wantState(Conflict)
+	if got := h.clock.Pending(); len(got) != 0 {
+		t.Fatalf("fetch timer re-armed in Conflict: pending %v", got)
+	}
+	h.s.armFetch()
+	if got := h.clock.Pending(); len(got) != 0 {
+		t.Fatalf("armFetch armed a timer in Conflict: pending %v", got)
+	}
+}
+
+func TestStaleConflictIsLeft(t *testing.T) {
+	for _, via := range []string{"SyncNow", "fetchTick"} {
+		t.Run(via, func(t *testing.T) {
+			env, h := conflictHarness(t)
+			// Nothing happens while the merge is really in progress.
+			h.s.SyncNow()
+			h.s.enqueue(job{fn: h.s.fetchTick})
+			h.s.waitIdle()
+			h.wantState(Conflict)
+			merges := h.repo.merges.Load()
+
+			// The merge is aborted outside Notty.
+			if err := env.Laptop.AbortMerge(); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Write(t, env.Laptop, "x.md", "x\n")
+			if via == "SyncNow" {
+				h.s.SyncNow()
+			} else {
+				h.s.enqueue(job{fn: h.s.fetchTick})
+			}
+			h.s.waitIdle()
+			if got := h.repo.merges.Load(); got != merges+1 {
+				t.Fatalf("merges = %d, want a fresh merge attempt after leaving the stale Conflict", got-merges)
+			}
+			if got := gittest.Git(t, env.Laptop.Dir, "log", "-1", "--format=%s", "--", "x.md"); got == "" {
+				t.Fatalf("x.md was not committed after leaving the stale Conflict")
+			}
+			// Local and remote still disagree on note.md: a new conflict.
+			h.wantState(Conflict)
+		})
+	}
+}
+
 func TestQuitDuringConflictDoesNotCommit(t *testing.T) {
 	env, h := conflictHarness(t)
 	before := head(t, env.Laptop)

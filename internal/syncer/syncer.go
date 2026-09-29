@@ -191,12 +191,22 @@ func (s *Syncer) NoteChanged(rel string) {
 	s.arm(&s.commitTimer, s.commitDelay, s.requestCycle)
 }
 
-// SyncNow runs a full cycle immediately. In Conflict it does nothing: the UI
-// opens the resolver instead.
+// SyncNow runs a full cycle immediately. In Conflict it does nothing (the UI
+// opens the resolver instead), unless the merge was ended outside Notty: then
+// it leaves Conflict and runs the cycle.
 func (s *Syncer) SyncNow() {
 	s.mu.Lock()
-	if s.quitting || s.status.State == Conflict {
+	if s.quitting {
 		s.mu.Unlock()
+		return
+	}
+	if s.status.State == Conflict {
+		s.mu.Unlock()
+		s.enqueue(job{fn: func() {
+			if s.Status().State == Conflict && s.leaveStaleConflict() {
+				s.cycle()
+			}
+		}})
 		return
 	}
 	s.authBlocked = false
@@ -533,11 +543,27 @@ func (s *Syncer) deferIfEditing() bool {
 	return true
 }
 
-// armFetch schedules the next fetch tick unless sync is local-only.
+// leaveStaleConflict leaves Conflict when no merge is in progress any more
+// (it was concluded or aborted outside Notty) and resumes the fetch timer.
+// It reports whether the syncer is out of Conflict.
+func (s *Syncer) leaveStaleConflict() bool {
+	if s.Status().State != Conflict {
+		return true
+	}
+	if s.repo.MergeInProgress() {
+		return false
+	}
+	s.setState(Idle)
+	s.armFetch()
+	return true
+}
+
+// armFetch schedules the next fetch tick unless sync is local-only or in
+// Conflict (where the timer is paused).
 func (s *Syncer) armFetch() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.quitting || s.localOnly {
+	if s.quitting || s.localOnly || s.status.State == Conflict {
 		return
 	}
 	s.arm(&s.fetchTimer, s.fetchInterval, func() { s.enqueue(job{fn: s.fetchTick}) })
@@ -638,13 +664,12 @@ func (s *Syncer) cycle() {
 // fetchTick is the fetch timer (spec §7): fetch; if the remote is ahead run
 // the rest of a full cycle, if only local is ahead push.
 func (s *Syncer) fetchTick() {
-	s.mu.Lock()
-	conflict := s.status.State == Conflict
-	skip := s.authBlocked
-	s.mu.Unlock()
-	if conflict {
+	if !s.leaveStaleConflict() {
 		return // the timer resumes when the conflict is resolved
 	}
+	s.mu.Lock()
+	skip := s.authBlocked
+	s.mu.Unlock()
 	defer s.armFetch()
 	if skip || s.deferIfEditing() {
 		return
