@@ -206,6 +206,7 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 	}
 	opts := app.Options{
 		Config:       cfg,
+		ConfigPath:   e.configPath,
 		Styles:       theme.NewStyles(p),
 		Palette:      p,
 		Caps:         caps,

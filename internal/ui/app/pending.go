@@ -22,6 +22,7 @@ const (
 	opTrash
 	opDeleteForever
 	opEmptyTrash
+	opCleanAttachments
 )
 
 // pendingOp is what to do once a dialog is confirmed, with the data the
@@ -34,6 +35,8 @@ type pendingOp struct {
 	path string
 	// item is the trash item to delete forever.
 	item vault.TrashItem
+	// files are the attachments to delete.
+	files []string
 }
 
 // runPending performs op with the confirmed dialog result res.
@@ -64,6 +67,8 @@ func (m *Model) runPending(op pendingOp, res dialog.ResultMsg) tea.Cmd {
 		return deleteForeverCmd(v, op.item)
 	case opEmptyTrash:
 		return emptyTrashCmd(v)
+	case opCleanAttachments:
+		return deleteFilesCmd(v, op.files)
 	}
 	return nil
 }

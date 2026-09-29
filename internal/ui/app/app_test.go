@@ -55,13 +55,14 @@ func testOptions(t *testing.T) Options {
 		t.Fatal(err)
 	}
 	return Options{
-		Config:    config.Default(),
-		Styles:    theme.NewStyles(p),
-		Palette:   p,
-		Vault:     v,
-		Local:     local,
-		LocalPath: localPath,
-		Pins:      &meta.State{Pins: []string{}},
+		Config:     config.Default(),
+		Styles:     theme.NewStyles(p),
+		Palette:    p,
+		Vault:      v,
+		Local:      local,
+		LocalPath:  localPath,
+		Pins:       &meta.State{Pins: []string{}},
+		ConfigPath: filepath.Join(t.TempDir(), "config.toml"),
 	}
 }
 

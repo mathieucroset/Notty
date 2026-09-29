@@ -7,8 +7,11 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/mathieucroset/notty/internal/ui/dialog"
+	"github.com/mathieucroset/notty/internal/ui/help"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
+	"github.com/mathieucroset/notty/internal/ui/palette"
 	"github.com/mathieucroset/notty/internal/ui/textutil"
+	"github.com/mathieucroset/notty/internal/ui/toast"
 )
 
 // overlayKind identifies the overlay on top of the screen (spec §4.2).
@@ -30,6 +33,10 @@ type overlayState struct {
 	dialog dialog.Model
 	// pending says what to do with the dialog's result.
 	pending pendingOp
+
+	palette palette.Model
+	help    help.Model
+	log     toast.LogView
 }
 
 // toastTimer wraps the expiry command of an info or warning toast. Tests
@@ -53,6 +60,12 @@ func (m *Model) updateOverlay(k tea.KeyPressMsg) tea.Cmd {
 	switch m.overlay.kind {
 	case overlayDialog:
 		m.overlay.dialog, cmd = m.overlay.dialog.Update(k)
+	case overlayPalette:
+		m.overlay.palette, cmd = m.overlay.palette.Update(k)
+	case overlayHelp:
+		m.overlay.help, cmd = m.overlay.help.Update(k)
+	case overlayLog:
+		m.overlay.log, cmd = m.overlay.log.Update(k)
 	}
 	return cmd
 }
@@ -98,6 +111,12 @@ func (m *Model) overlayBox() string {
 	switch m.overlay.kind {
 	case overlayDialog:
 		return m.overlay.dialog.View()
+	case overlayPalette:
+		return m.overlay.palette.View()
+	case overlayHelp:
+		return m.overlay.help.View()
+	case overlayLog:
+		return m.logBox()
 	}
 	return ""
 }

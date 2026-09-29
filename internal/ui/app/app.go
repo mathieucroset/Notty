@@ -51,6 +51,9 @@ type Options struct {
 	Watcher *watcher.Watcher
 	// Now is the clock (time.Now when nil); tests fix it.
 	Now func() time.Time
+	// ConfigPath is the local config.toml that palette settings are
+	// written to (config.ConfigPath() when empty).
+	ConfigPath string
 }
 
 // Focus is the pane with keyboard focus.
@@ -310,6 +313,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd, ok := m.updateHistoryMsg(msg); ok {
 			return m, cmd
 		}
+		if cmd, ok := m.updateCommandMsg(msg); ok {
+			return m, cmd
+		}
 		// Toast expiry ticks.
 		var cmd tea.Cmd
 		m.toast, cmd = m.toast.Update(msg)
@@ -381,6 +387,7 @@ func (m *Model) relayout() {
 		h := m.history.SetSize(m.width, m.height)
 		m.history = &h
 	}
+	m.resizeOverlay()
 	m.status.SetSize(l.Status.W)
 }
 
