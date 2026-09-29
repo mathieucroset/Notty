@@ -131,11 +131,44 @@ func (v *Vault) fill(dir *Node) error {
 	return nil
 }
 
+// hidden reports whether Tree omits the entry name inside folder parent.
 func hidden(parent, name string) bool {
 	if strings.HasPrefix(name, ".") || strings.HasSuffix(name, tmpSuffix) {
 		return true
 	}
 	return parent == "" && hiddenTopLevel[name]
+}
+
+// reserved reports whether name inside folder parent must not be created by
+// user actions: anything Tree hides, with the top-level names matched
+// case-insensitively so "Attachments" cannot alias "attachments" on
+// case-insensitive filesystems.
+func reserved(parent, name string) bool {
+	return hidden(parent, name) || (parent == "" && hiddenTopLevel[strings.ToLower(name)])
+}
+
+// inReserved reports whether the clean path rel is, or lies inside, a
+// reserved entry (for example ".trash/x" or "attachments").
+func inReserved(rel string) bool {
+	if rel == "" {
+		return false
+	}
+	parent := ""
+	for _, seg := range strings.Split(rel, "/") {
+		if reserved(parent, seg) {
+			return true
+		}
+		parent = path.Join(parent, seg)
+	}
+	return false
+}
+
+// parentOf returns the clean parent folder of a clean path ("" for the root).
+func parentOf(rel string) string {
+	if d := path.Dir(rel); d != "." {
+		return d
+	}
+	return ""
 }
 
 // isNoteName reports whether a file name has the note extension (".md",

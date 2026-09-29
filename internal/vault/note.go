@@ -93,12 +93,17 @@ func syncDir(dir string) {
 // CreateNote creates a note titled title in folder (vault-relative, "" for
 // the root), creating the folder if needed. The file name follows spec §3,
 // with " 2", " 3", ... appended on collision. It returns the note's path.
+// A folder inside a hidden location (the top-level hidden folders, dot
+// folders) is rejected with ErrInvalidPath.
 func (v *Vault) CreateNote(folder, title string) (string, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		title = untitled
 	}
 	dir := clean(folder)
+	if inReserved(dir) {
+		return "", fmt.Errorf("vault: create note in %q: reserved location: %w", dir, ErrInvalidPath)
+	}
 	if err := os.MkdirAll(v.Abs(dir), 0o755); err != nil {
 		return "", fmt.Errorf("vault: create note in %q: %w", dir, err)
 	}
@@ -125,10 +130,14 @@ func (v *Vault) CreateNote(folder, title string) (string, error) {
 }
 
 // CreateFolder creates a folder named name (sanitized like note titles)
-// inside parent, appending " 2", " 3", ... on collision. It returns the new
-// folder's path.
+// inside parent, appending " 2", " 3", ... on collision; reserved names
+// count as collisions. It returns the new folder's path. A parent inside a
+// hidden location is rejected with ErrInvalidPath.
 func (v *Vault) CreateFolder(parent, name string) (string, error) {
 	dir := clean(parent)
+	if inReserved(dir) {
+		return "", fmt.Errorf("vault: create folder in %q: reserved location: %w", dir, ErrInvalidPath)
+	}
 	if err := os.MkdirAll(v.Abs(dir), 0o755); err != nil {
 		return "", fmt.Errorf("vault: create folder in %q: %w", dir, err)
 	}
@@ -146,12 +155,17 @@ func (v *Vault) CreateFolder(parent, name string) (string, error) {
 }
 
 // claim calls create on dir/base+ext, then dir/base 2+ext, ... until create
-// succeeds, skipping names that already exist. It returns the claimed path.
+// succeeds, skipping names that already exist or are reserved (so a folder
+// named "attachments" at the root becomes "attachments 2"). It returns the
+// claimed path.
 func (v *Vault) claim(dir, base, ext string, create func(abs string) error) (string, error) {
 	for i := 1; i <= maxCollisions; i++ {
 		name := base + ext
 		if i > 1 {
 			name = base + " " + strconv.Itoa(i) + ext
+		}
+		if reserved(dir, name) {
+			continue
 		}
 		rel := path.Join(dir, name)
 		err := create(v.Abs(rel))
@@ -166,7 +180,7 @@ func (v *Vault) claim(dir, base, ext string, create func(abs string) error) (str
 }
 
 // Rename renames the note, folder or file at rel within its folder. newName
-// is sanitized like a title. Notes always end in ".md": a user-typed ".md"
+// is sanitized like a title and must not be a reserved name (ErrInvalidName). Notes always end in ".md": a user-typed ".md"
 // in any case is normalized, and it is appended if omitted. It fails with
 // ErrExists if the target is taken.
 func (v *Vault) Rename(rel, newName string) (string, error) {
@@ -184,16 +198,18 @@ func (v *Vault) Rename(rel, newName string) (string, error) {
 			name += noteExt
 		}
 	}
-	if name == "" {
+	dir := parentOf(src)
+	if name == "" || reserved(dir, name) {
 		return "", fmt.Errorf("vault: rename %q to %q: %w", src, newName, ErrInvalidName)
 	}
-	return v.move(src, path.Join(path.Dir(src), name))
+	return v.move(src, path.Join(dir, name))
 }
 
 // Move moves the note, folder or file at rel into destFolder ("" for the
 // root), creating destFolder if needed. It fails with ErrExists if the
 // target is taken, and with ErrInvalidPath if destFolder is rel itself, lies
-// inside rel, or is not a folder.
+// inside rel, is not a folder, or is (inside) a reserved location such as
+// .trash or attachments, or if the moved name is reserved there.
 func (v *Vault) Move(rel, destFolder string) (string, error) {
 	src, dest := clean(rel), clean(destFolder)
 	if src == "" {
@@ -201,6 +217,9 @@ func (v *Vault) Move(rel, destFolder string) (string, error) {
 	}
 	if dest == src || strings.HasPrefix(dest, src+"/") {
 		return "", fmt.Errorf("vault: move %q into itself (%q): %w", src, dest, ErrInvalidPath)
+	}
+	if inReserved(dest) || reserved(dest, path.Base(src)) {
+		return "", fmt.Errorf("vault: move %q to %q: reserved location: %w", src, dest, ErrInvalidPath)
 	}
 	if fi, err := os.Stat(v.Abs(dest)); err == nil && !fi.IsDir() {
 		return "", fmt.Errorf("vault: move %q: destination %q is not a folder: %w", src, dest, ErrInvalidPath)
@@ -212,7 +231,8 @@ func (v *Vault) Move(rel, destFolder string) (string, error) {
 // newRel's parent folders. It refuses to replace an existing entry, except
 // when both paths name the same file (a case-only rename on a
 // case-insensitive filesystem). It is the single point where entries change
-// path, so link rewriting can hook in here.
+// path, so link rewriting can hook in here. It does not check reserved
+// names, so internal callers (such as trash) may target hidden folders.
 func (v *Vault) move(oldRel, newRel string) (string, error) {
 	if oldRel == newRel {
 		if _, err := os.Lstat(v.Abs(oldRel)); err != nil {

@@ -347,3 +347,97 @@ func TestMoveSiblingPrefixAllowed(t *testing.T) {
 		t.Errorf("newRel = %q, want WorkX/Work", got)
 	}
 }
+
+func TestCreateFolderSkipsReservedNames(t *testing.T) {
+	tests := []struct {
+		name, parent, in, want string
+	}{
+		{"attachments at root", "", "attachments", "attachments 2"},
+		{"attachments any case", "", "Attachments", "Attachments 2"},
+		{"attachments nested allowed", "Work", "attachments", "Work/attachments"},
+		{"trash name without dot allowed", "", "trash", "trash"},
+		{"temp suffix", "", "x.notty-tmp", "x.notty-tmp 2"},
+		{"temp suffix nested", "Work", "y.notty-tmp", "Work/y.notty-tmp 2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := openVault(t)
+			got, err := v.CreateFolder(tt.parent, tt.in)
+			if err != nil {
+				t.Fatalf("CreateFolder: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("rel = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateInHiddenLocations(t *testing.T) {
+	dirs := []string{".git", ".trash/123", ".notty", "attachments", "Attachments/sub", "Work/.hidden", "Work/x.notty-tmp"}
+	for _, dir := range dirs {
+		t.Run(dir, func(t *testing.T) {
+			v := openVault(t)
+			if _, err := v.CreateNote(dir, "n"); !errors.Is(err, ErrInvalidPath) {
+				t.Errorf("CreateNote(%q): err = %v, want ErrInvalidPath", dir, err)
+			}
+			if _, err := v.CreateFolder(dir, "f"); !errors.Is(err, ErrInvalidPath) {
+				t.Errorf("CreateFolder(%q): err = %v, want ErrInvalidPath", dir, err)
+			}
+			if exists(v, dir) {
+				t.Errorf("%q was created", dir)
+			}
+		})
+	}
+}
+
+func TestRenameMoveToReservedNames(t *testing.T) {
+	rename := func(rel, name string) func(v *Vault) (string, error) {
+		return func(v *Vault) (string, error) { return v.Rename(rel, name) }
+	}
+	move := func(rel, dest string) func(v *Vault) (string, error) {
+		return func(v *Vault) (string, error) { return v.Move(rel, dest) }
+	}
+	tests := []struct {
+		name    string
+		op      func(v *Vault) (string, error)
+		wantErr error
+		want    string
+	}{
+		{"rename folder to attachments", rename("F", "attachments"), ErrInvalidName, ""},
+		{"rename folder to Attachments", rename("F", "Attachments"), ErrInvalidName, ""},
+		{"rename folder to temp name", rename("F", "x.notty-tmp"), ErrInvalidName, ""},
+		{"rename file to temp name", rename("p.png", "p.notty-tmp"), ErrInvalidName, ""},
+		{"rename nested folder to attachments ok", rename("Work/F", "attachments"), nil, "Work/attachments"},
+		{"move into .trash", move("a.md", ".trash"), ErrInvalidPath, ""},
+		{"move into .git", move("a.md", ".git/objects"), ErrInvalidPath, ""},
+		{"move into .notty", move("a.md", ".notty"), ErrInvalidPath, ""},
+		{"move into attachments", move("a.md", "attachments"), ErrInvalidPath, ""},
+		{"move into Attachments", move("a.md", "Attachments"), ErrInvalidPath, ""},
+		{"move nested attachments to root", move("Other/attachments", ""), ErrInvalidPath, ""},
+		{"move nested attachments elsewhere ok", move("Other/attachments", "F"), nil, "F/attachments"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := openVault(t)
+			mkfiles(t, v.Root, "a.md", "p.png", "F/", "Work/F/", "Other/attachments/",
+				".git/objects/", ".trash/", ".notty/", "attachments/")
+			got, err := tt.op(v)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("newRel = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSaveUnrestricted(t *testing.T) {
+	v := openVault(t)
+	for _, rel := range []string{".notty/state.json", ".trash/1/meta.json", "attachments/a.txt"} {
+		if err := v.Save(rel, "x"); err != nil {
+			t.Errorf("Save(%q): %v", rel, err)
+		}
+	}
+}
