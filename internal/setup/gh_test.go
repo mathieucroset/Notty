@@ -72,7 +72,7 @@ func TestGHErrors(t *testing.T) {
 				t.Fatalf("err = %v, want gh's output included", err)
 			}
 			for _, sentinel := range []error{gitsync.ErrAuth, gitsync.ErrNetwork} {
-				if got := errors.Is(err, sentinel); got != (sentinel == tt.want) {
+				if got := errors.Is(err, sentinel); got != errors.Is(sentinel, tt.want) {
 					t.Errorf("errors.Is(err, %v) = %v", sentinel, got)
 				}
 			}

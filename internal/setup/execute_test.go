@@ -701,7 +701,7 @@ func TestExecuteProgressAndNetworkError(t *testing.T) {
 func TestExecuteNeedsIdentity(t *testing.T) {
 	gittest.Isolate(t)
 	t.Setenv("EMAIL", "")
-	os.Unsetenv("EMAIL")
+	_ = os.Unsetenv("EMAIL")
 	gittest.Git(t, "", "config", "--global", "user.useConfigOnly", "true")
 	vault := filepath.Join(t.TempDir(), "Notes")
 	req := setup.Request{Vault: vault, Choice: setup.LocalOnly, Host: "box"}

@@ -300,7 +300,7 @@ func cloneInto(ctx context.Context, url, branch, dir string) (*gitsync.Repo, err
 		return nil, err
 	}
 	for _, e := range entries {
-		if !(e.Name() == nottyDir && e.IsDir()) {
+		if e.Name() != nottyDir || !e.IsDir() {
 			return nil, fmt.Errorf("vault folder %s is not empty", dir)
 		}
 	}

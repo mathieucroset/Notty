@@ -168,7 +168,7 @@ func InspectVault(path string) (VaultState, error) {
 		return 0, fmt.Errorf("setup: inspect vault: %w", err)
 	}
 	for _, e := range entries {
-		if !(e.Name() == nottyDir && e.IsDir()) {
+		if e.Name() != nottyDir || !e.IsDir() {
 			return FilesNoRepo, nil
 		}
 	}
@@ -308,7 +308,8 @@ func ValidateRepoName(name string) error {
 			ok = false
 		}
 		for _, r := range p {
-			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			isAllowed := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.'
+			if !isAllowed {
 				ok = false
 			}
 		}
