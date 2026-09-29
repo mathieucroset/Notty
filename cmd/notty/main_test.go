@@ -216,6 +216,9 @@ func TestUnknownThemeFallsBack(t *testing.T) {
 	if f.got.Palette.Name != "catppuccin-mocha" {
 		t.Errorf("palette = %q, want catppuccin-mocha", f.got.Palette.Name)
 	}
+	if got := f.stderr.String(); !strings.Contains(got, `unknown theme "no-such-theme"`) {
+		t.Errorf("stderr = %q, want an unknown-theme warning", got)
+	}
 }
 
 func TestErrors(t *testing.T) {

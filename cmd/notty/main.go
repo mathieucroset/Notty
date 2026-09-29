@@ -200,6 +200,7 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 
 	p, ok := theme.Get(cfg.Theme)
 	if !ok {
+		fmt.Fprintf(e.stderr, "notty: unknown theme %q, using %s\n", cfg.Theme, fallbackTheme)
 		p, _ = theme.Get(fallbackTheme)
 	}
 	opts := app.Options{
