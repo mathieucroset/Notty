@@ -263,10 +263,11 @@ func (m Model) bannerRows() int {
 // textHeight is the number of rows showing text.
 func (m Model) textHeight() int { return max(0, m.h-m.bannerRows()) }
 
-// rawLine reports whether line i is shown as typed: the cursor line of an
-// editable note keeps its markdown so the cursor maps 1:1.
+// rawLine reports whether line i is shown as typed: the cursor line keeps
+// its markdown so the cursor maps 1:1 (also in read-only notes, where
+// motions still move the cursor).
 func (m Model) rawLine(i int) bool {
-	return !m.readOnly && i == m.buf.Cursor().Line
+	return i == m.buf.Cursor().Line
 }
 
 // lineUnits returns the display units of line i and its row starts.
@@ -301,15 +302,18 @@ func (m Model) ensureVisible() Model {
 }
 
 // CursorPosition returns the terminal cursor relative to the editor's
-// top-left corner, or nil when the editor is unfocused, read-only, in
-// command mode (the app draws the command line cursor) or scrolled away.
-// The shape is a bar while typing (insert mode, Plain) and a block
-// otherwise.
+// top-left corner, or nil when the editor is unfocused, in command mode (the
+// app draws the command line cursor) or scrolled away. The shape is a bar
+// while typing (insert mode, Plain) and a block otherwise, including in a
+// read-only note.
 func (m Model) CursorPosition() *tea.Cursor {
-	if !m.focused || m.readOnly || m.w <= 0 || m.textHeight() <= 0 {
+	if !m.focused || m.w <= 0 || m.textHeight() <= 0 {
 		return nil
 	}
 	shape := tea.CursorBar
+	if m.readOnly {
+		shape = tea.CursorBlock
+	}
 	if mc, ok := m.ed.(*vim.Machine); ok {
 		switch mc.Mode() {
 		case vim.Command:

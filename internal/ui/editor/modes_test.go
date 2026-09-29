@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,8 +24,8 @@ func TestReadOnly(t *testing.T) {
 			if m.ModeName() != "READ-ONLY" {
 				t.Errorf("ModeName = %q", m.ModeName())
 			}
-			if m.CursorPosition() != nil {
-				t.Error("read-only editor shows a cursor")
+			if c := m.CursorPosition(); c == nil || c.Shape != tea.CursorBlock || c.Y != 1 {
+				t.Errorf("read-only cursor = %+v, want a block below the banner", c)
 			}
 			rows := plainView(m)
 			if want := "⚠ " + DefaultBanner; strings.TrimSpace(rows[0]) != want {
@@ -360,5 +361,30 @@ func TestExternalEditsQueuedWhileLocked(t *testing.T) {
 	}
 	if toast, ok := find[msgs.ToastMsg](collect(cmd)); !ok || !strings.Contains(toast.Text, "missing") {
 		t.Error("failed replayed toggle does not toast")
+	}
+}
+
+func TestReadOnlyCursorLineRaw(t *testing.T) {
+	doc := "# Head\n- [ ] a task line long enough to wrap around the pane\n- [x] done\nlast"
+	m := newModel(t, testOptions(t), doc, buffer.Pos{Line: 1, Col: 40}, 24, 8).SetReadOnly(true, "")
+	rows := plainView(m)
+	// Banner, heading, then the raw (wrapped) cursor line.
+	if !strings.HasPrefix(strings.TrimSpace(rows[2]), "- [ ] a task") {
+		t.Errorf("cursor line not raw in read-only: %q", rows)
+	}
+	if !slices.Contains(rows, " ☑ done") {
+		t.Errorf("other lines lost their substitutions: %q", rows)
+	}
+	c := m.CursorPosition()
+	if c == nil {
+		t.Fatal("no cursor")
+	}
+	cur, x := m.cursorAnchor()
+	if want := 1 + distance(m.top, cur, 100, m.rows); c.Y != want || c.X != 1+x {
+		t.Errorf("cursor at (%d,%d), want (%d,%d)", c.X, c.Y, 1+x, want)
+	}
+	m, _ = typeKeys(m, "j")
+	if rows := plainView(m); m.CursorLine() != 2 || !slices.Contains(rows, " - [x] done") {
+		t.Errorf("after j: line %d view %q", m.CursorLine(), rows)
 	}
 }
