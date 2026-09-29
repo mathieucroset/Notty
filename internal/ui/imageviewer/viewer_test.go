@@ -11,14 +11,20 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/mathieucroset/notty/internal/imgrender"
 )
+
+// The UI runs the viewer with tea.Exec.
+var _ tea.ExecCommand = (*Viewer)(nil)
 
 const (
 	altEnter   = "\x1b[?1049h"
@@ -383,6 +389,9 @@ func TestRunResizeRedraws(t *testing.T) {
 }
 
 func TestRunOSPipeLeavesLaterInputUnread(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows: only the stdin console handle can be canceled, not a pipe")
+	}
 	dir := t.TempDir()
 	a := writePNG(t, dir, "a.png", 10, 10)
 	r, w, err := os.Pipe()
@@ -411,6 +420,9 @@ func TestRunOSPipeLeavesLaterInputUnread(t *testing.T) {
 }
 
 func TestKeyReaderStopEndsGoroutine(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows: only the stdin console handle can be canceled, not a pipe")
+	}
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
