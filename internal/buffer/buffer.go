@@ -234,12 +234,13 @@ func (b *Buffer) Delete(r Range) string {
 }
 
 // Replace swaps the text in r (normalized and clamped) for text and returns
-// the position just after the new text.
+// the position just after the new text. Replacing text with identical text
+// is a no-op: no undo step, no version bump, dirty state unchanged.
 func (b *Buffer) Replace(r Range, text string) Pos {
 	text = normalizeNewlines(text)
 	start, end := b.bRange(r)
-	if start == end && text == "" {
-		return b.toPos(start)
+	if b.textBetween(start, end) == text {
+		return b.toPosCeil(end)
 	}
 	_, newEnd := b.edit(start, end, text)
 	return b.toPosCeil(newEnd)

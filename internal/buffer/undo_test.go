@@ -58,6 +58,57 @@ func TestUndoRedoEmpty(t *testing.T) {
 	}
 }
 
+func TestReplaceIdenticalIsNoOp(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial string
+		r       Range
+		text    string
+		wantEnd Pos
+	}{
+		{"same line", "hello", R(0, 1, 0, 3), "el", P(0, 3)},
+		{"across lines", "ab\ncd", R(0, 1, 1, 1), "b\nc", P(1, 1)},
+		{"reversed range", "hello", R(0, 3, 0, 1), "el", P(0, 3)},
+		{"crlf text equal after normalizing", "ab\ncd", R(0, 1, 1, 1), "b\r\nc", P(1, 1)},
+		{"grapheme", "a" + thumbsUp + "b", R(0, 1, 0, 2), thumbsUp, P(0, 2)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := New(tt.initial)
+			v := b.Version()
+			end := b.Replace(tt.r, tt.text)
+			if end != tt.wantEnd {
+				t.Errorf("end = %v, want %v", end, tt.wantEnd)
+			}
+			if b.String() != tt.initial {
+				t.Errorf("String() = %q, want %q", b.String(), tt.initial)
+			}
+			if b.Dirty() {
+				t.Error("dirty after identical Replace")
+			}
+			if b.Version() != v {
+				t.Errorf("Version() = %d, want %d", b.Version(), v)
+			}
+			if b.FirstChangedLine() != -1 {
+				t.Errorf("FirstChangedLine() = %d, want -1", b.FirstChangedLine())
+			}
+			if _, ok := b.Undo(); ok {
+				t.Error("identical Replace created an undo step")
+			}
+		})
+	}
+}
+
+func TestReplaceIdenticalKeepsRedo(t *testing.T) {
+	b := New("ab")
+	b.Insert(P(0, 2), "c")
+	b.Undo()
+	b.Replace(R(0, 0, 0, 1), "a")
+	if _, ok := b.Redo(); !ok {
+		t.Error("identical Replace cleared the redo stack")
+	}
+}
+
 func TestGroupUndoesAsOne(t *testing.T) {
 	b := New("abc")
 	b.BeginGroup()
