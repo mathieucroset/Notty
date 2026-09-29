@@ -73,6 +73,20 @@ func (p *Plain) Reset(b *buffer.Buffer) {
 	p.curswant = cursorCell(b)
 }
 
+// Resync applies an external change, closing the typing group first so the
+// change is its own undo step (see Editor).
+func (p *Plain) Resync(b *buffer.Buffer, change func()) {
+	p.attach(b)
+	if p.groupBuf != nil {
+		p.endTyping(p.groupBuf)
+	}
+	if change != nil {
+		change()
+	}
+	b.SetCursor(b.Cursor())
+	p.anchor = b.Clamp(p.anchor)
+}
+
 // Selection returns the shift-selection, if any.
 func (p *Plain) Selection(b *buffer.Buffer) (buffer.Range, bool) {
 	if !p.selecting || b != p.buf {

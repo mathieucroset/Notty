@@ -223,7 +223,7 @@ func Plan(req Request, vs VaultState, rs RemoteState) ([]Step, error) {
 		if !req.GHAvailable {
 			return nil, ErrGHUnavailable
 		}
-		if err := checkRepoName(req.RepoName); err != nil {
+		if err := ValidateRepoName(req.RepoName); err != nil {
 			return nil, err
 		}
 		if isRepo {
@@ -295,11 +295,11 @@ func checkURL(u string) error {
 	return nil
 }
 
-// checkRepoName accepts "name" or "owner/name" made of the characters GitHub
-// allows.
-func checkRepoName(name string) error {
+// ValidateRepoName accepts "name" or "owner/name" made of the characters GitHub
+// allows. Plan uses it for CreateGitHub; the wizard checks the name as typed.
+func ValidateRepoName(name string) error {
 	if name == "" {
-		return errors.New("setup: plan: no GitHub repo name")
+		return errors.New("setup: no GitHub repo name")
 	}
 	parts := strings.Split(name, "/")
 	ok := len(parts) <= 2
@@ -314,7 +314,7 @@ func checkRepoName(name string) error {
 		}
 	}
 	if !ok {
-		return fmt.Errorf("setup: plan: invalid GitHub repo name %q", name)
+		return fmt.Errorf("setup: invalid GitHub repo name %q", name)
 	}
 	return nil
 }
