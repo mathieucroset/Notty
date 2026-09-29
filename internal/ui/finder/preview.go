@@ -198,11 +198,11 @@ func previewMarkIndex(full []string, key previewKey, h search.Hit) int {
 }
 
 // previewWidth is the preview pane's content width, given the box's current
-// size.
+// size: the pane less one column of padding on each side.
 func (m Model) previewWidth() int {
 	cw := max(m.width-2, 0)
 	_, previewW := m.paneWidths(cw)
-	return previewW
+	return max(previewW-2, 0)
 }
 
 // previewPaneLines builds the preview pane's body from the cache: the

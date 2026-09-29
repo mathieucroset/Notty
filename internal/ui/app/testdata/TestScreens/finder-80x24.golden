@@ -7,15 +7,15 @@
 │  ▾ Wor│ › ▏                                                          │       │
 │    • S│ Recent                                                       │       │
 │  • ide│ Standup notes             │                                  │       │
-│       │  Work/Standup notes.md    │ Standup notes                    │       │
+│       │  Work/Standup notes.md    │  Standup notes                   │       │
 │  T A G│                           │                                  │       │
-│   #des│                           │• shipped auth flow               │       │
-│   #tod│                           │☐ follow up with #design          │       │
-│       │                           │☑ review the PR #todo             │       │
+│   #des│                           │ • shipped auth flow              │       │
+│   #tod│                           │ ☐ follow up with #design         │       │
+│       │                           │ ☑ review the PR #todo            │       │
 │  ☐ Tas│                           │                                  │       │
-│  ⌫ Tra│                           ││ Keep it short.                  │       │
+│  ⌫ Tra│                           │ │ Keep it short.                 │       │
 │       │                           │                                  │       │
-│       │                           │## Next                           │       │
+│       │                           │ ## Next                          │       │
 │       │ enter open · esc close · ctrl+j/k move                       │       │
 │       ╰──────────────────────────────────────────────────────────────╯       │
 │                          ││                                                  │

@@ -7,15 +7,15 @@
 │      │ › ▏                                                  │      │
 │ ▎ Kee│ Recent                                               │      │
 │      │ Standup notes          │                             │      │
-│ ## Ne│  Work/Standup notes.md │ Standup notes               │      │
+│ ## Ne│  Work/Standup notes.md │  Standup notes              │      │
 │      │                        │                             │      │
-│ Plan │                        │• shipped auth flow          │      │
-│      │                        │☐ follow up with #design     │      │
-│      │                        │☑ review the PR #todo        │      │
+│ Plan │                        │ • shipped auth flow         │      │
+│      │                        │ ☐ follow up with #design    │      │
+│      │                        │ ☑ review the PR #todo       │      │
 │      │                        │                             │      │
-│      │                        ││ Keep it short.             │      │
+│      │                        │ │ Keep it short.            │      │
 │      │                        │                             │      │
-│      │                        │## Next                      │      │
+│      │                        │ ## Next                     │      │
 │      │ enter open · esc close · ctrl+j/k move               │      │
 │      ╰──────────────────────────────────────────────────────╯      │
 │                                                                    │

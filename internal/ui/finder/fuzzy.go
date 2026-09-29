@@ -30,7 +30,15 @@ func (m Model) fuzzyStatus() string {
 	if m.isEmptyQuery() {
 		return "Recent"
 	}
-	return strconv.Itoa(len(m.fuzzy)) + " results"
+	return resultCount(len(m.fuzzy))
+}
+
+// resultCount is the status text for n results: "1 result", "2 results".
+func resultCount(n int) string {
+	if n == 1 {
+		return "1 result"
+	}
+	return strconv.Itoa(n) + " results"
 }
 
 // fuzzyItemLines renders result i's two lines: the title (with matched
