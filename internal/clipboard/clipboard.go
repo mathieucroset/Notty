@@ -203,7 +203,7 @@ func (c *Clipboard) readImageWindows() ([]byte, error) {
 	}
 
 	tmpPath := c.tempPNGPath()
-	script := `Add-Type -AssemblyName System.Windows.Forms; ` +
+	script := `Add-Type -AssemblyName System.Windows.Forms, System.Drawing; ` +
 		`$i=[Windows.Forms.Clipboard]::GetImage(); ` +
 		`if($i){$i.Save('` + tmpPath + `',[System.Drawing.Imaging.ImageFormat]::Png)}`
 	// Ignore the exit status: the file's presence is the source of truth

@@ -360,6 +360,12 @@ func TestReadImage_Windows_Success(t *testing.T) {
 	if !strings.Contains(script, "System.Windows.Forms") || !strings.Contains(script, "ImageFormat]::Png") {
 		t.Fatalf("powershell script = %q, missing expected fragments", script)
 	}
+	// System.Drawing must be loaded alongside System.Windows.Forms: the
+	// script references [System.Drawing.Imaging.ImageFormat]::Png, which
+	// System.Windows.Forms alone does not guarantee is loaded.
+	if !strings.Contains(script, "Add-Type -AssemblyName System.Windows.Forms, System.Drawing") {
+		t.Fatalf("powershell script = %q, want it to load System.Drawing", script)
+	}
 }
 
 // TestTempPNGPath_IncludesPID guards against a filename collision when two
