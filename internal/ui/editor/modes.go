@@ -19,16 +19,11 @@ func (m Model) autosave(t AutosaveTickMsg) tea.Cmd {
 	return emit(msgs.SaveRequestMsg{})
 }
 
-// SetLocked locks or unlocks the editor for the merge window (spec §7).
-// While locked, key presses and pastes are queued and autosave pauses.
-// SetLocked(false) is Unlock(true) with its Cmd discarded; the app should
-// call Unlock to get the Cmd and the dropped count.
-func (m Model) SetLocked(locked bool) Model {
-	if locked {
-		m.locked = true
-		return m
-	}
-	m, _, _ = m.Unlock(true)
+// Lock locks the editor for the merge window (spec §7): key presses,
+// pastes, clipboard text, task toggles and text insertions are queued and
+// autosave pauses. Unlock is the only way out.
+func (m Model) Lock() Model {
+	m.locked = true
 	return m
 }
 

@@ -97,10 +97,11 @@ func (m Model) newEditor(vimMode bool) vim.Editor {
 
 // Load replaces the buffer with a new one holding content (a new buffer per
 // note, so undo history does not leak between notes), places the cursor and
-// rebuilds the markdown styling. The read-only and locked states are kept;
-// the app sets them per note.
+// rebuilds the markdown styling. The read-only and locked states are kept
+// (the app sets them per note); input queued while locked is discarded.
 func (m Model) Load(path, content string, cursor buffer.Pos) Model {
 	m.path = path
+	m.queue = nil // queued input belongs to the previous note
 	m.buf = buffer.New(content)
 	m.buf.SetCursor(cursor)
 	m.ed.Reset(m.buf)

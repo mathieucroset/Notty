@@ -82,7 +82,7 @@ func TestReadOnlyMotionsWork(t *testing.T) {
 }
 
 func TestLockQueueReplay(t *testing.T) {
-	m := newModel(t, testOptions(t), "", buffer.Pos{}, 40, 5).SetLocked(true)
+	m := newModel(t, testOptions(t), "", buffer.Pos{}, 40, 5).Lock()
 	m, _ = typeKeys(m, "i", "a", "b", "esc")
 	m, _ = m.Update(tea.PasteMsg{Content: "zz"})
 	if m.Content() != "" {
@@ -101,7 +101,7 @@ func TestLockQueueReplay(t *testing.T) {
 }
 
 func TestLockQueueDrop(t *testing.T) {
-	m := newModel(t, testOptions(t), "text", buffer.Pos{}, 40, 5).SetLocked(true)
+	m := newModel(t, testOptions(t), "text", buffer.Pos{}, 40, 5).Lock()
 	m, _ = typeKeys(m, "d", "d", "x")
 	m, _, dropped := m.Unlock(false)
 	if dropped != 3 {
@@ -142,7 +142,7 @@ func TestAutosave(t *testing.T) {
 	if _, cmd := m.SetReadOnly(true, "").Update(tick); cmd != nil {
 		t.Error("read-only buffer autosaved")
 	}
-	if _, cmd := m.SetLocked(true).Update(tick); cmd != nil {
+	if _, cmd := m.Lock().Update(tick); cmd != nil {
 		t.Error("locked buffer autosaved")
 	}
 }
@@ -270,7 +270,7 @@ func TestReloadKeepsModeAndUndo(t *testing.T) {
 	t.Run("keys queued in insert mode replay literally", func(t *testing.T) {
 		m := newModel(t, testOptions(t), "alpha\nbeta\ngamma\n", buffer.Pos{Line: 1, Col: 4}, 40, 10)
 		m, _ = typeKeys(m, "A")
-		m = m.SetLocked(true)
+		m = m.Lock()
 		m, _ = typeKeys(m, " ", "d", "d", " ", "x")
 		m = m.Reload("alpha\nbeta\ngamma\ndelta\n")
 		if m.ModeName() != "INSERT" {
@@ -295,4 +295,14 @@ func TestReloadKeepsModeAndUndo(t *testing.T) {
 			t.Errorf("second undo gives %q, want the reload undone", got)
 		}
 	})
+}
+
+func TestLoadClearsQueue(t *testing.T) {
+	m := newModel(t, testOptions(t), "text", buffer.Pos{}, 40, 5).Lock()
+	m, _ = typeKeys(m, "x", "x")
+	m = m.Load("other.md", "other", buffer.Pos{})
+	m, _, dropped := m.Unlock(true)
+	if dropped != 0 || m.Content() != "other" {
+		t.Errorf("keys queued for the old note reached the new one: %q (dropped %d)", m.Content(), dropped)
+	}
 }
