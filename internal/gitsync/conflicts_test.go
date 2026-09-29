@@ -418,3 +418,37 @@ func TestHostFromSubject(t *testing.T) {
 		}
 	}
 }
+
+func TestLastCommitAdding(t *testing.T) {
+	env := gittest.New(t)
+	const trashed = ".trash/20260929101600-desktop-cd34/Note.md"
+	// The desktop moves the note to the trash (a rename, which must count as
+	// adding the trash path); the laptop edited it meanwhile, so the merge
+	// commit differs from both parents at the trash path and must not be
+	// mistaken for the trashing commit.
+	err := diverge(t, env,
+		func(r *gitsync.Repo) { gittest.Write(t, r, "Note.md", "one\ntwo\nthree\n") },
+		func(r *gitsync.Repo) { gittest.Write(t, r, "Note.md", "one\ntwo\nthree\nlaptop\n") },
+		func(r *gitsync.Repo) { gittest.Move(t, r, "Note.md", trashed) })
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	want := gittest.Git(t, env.Laptop.Dir, "rev-parse", "HEAD^2")
+	if got := gittest.Read(t, env.Laptop, trashed); got != "one\ntwo\nthree\nlaptop\n" {
+		t.Fatalf("trashed copy = %q, want the laptop edit", got)
+	}
+	gittest.Write(t, env.Laptop, trashed, "edited in the trash\n")
+	gittest.CommitAll(t, env.Laptop, "Update Note.md · laptop")
+
+	got, err := env.Laptop.LastCommitAdding(trashed)
+	if err != nil || got != want {
+		t.Fatalf("LastCommitAdding(%s) = %q, %v; want the trashing commit %q", trashed, got, err, want)
+	}
+	got, err = env.Laptop.LastCommitAdding("missing.md")
+	if err != nil || got != "" {
+		t.Fatalf("LastCommitAdding(missing.md) = %q, %v; want \"\"", got, err)
+	}
+	if _, err := env.Laptop.LastCommitAdding("../outside.md"); err == nil {
+		t.Fatalf("LastCommitAdding accepted a path outside the repository")
+	}
+}
