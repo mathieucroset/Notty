@@ -88,8 +88,10 @@ func writePNG(t *testing.T, path string, w, h int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
 	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -351,7 +353,7 @@ func TestKittyTransmitHeldUntilTerminalReady(t *testing.T) {
 func TestKittyTransmitAfterReadyGoesOutWithRender(t *testing.T) {
 	m, content := kittyNote(t)
 	m, _ = m.SetTerminalReady()
-	m, raws := setContent(t, m, "n.md", content)
+	_, raws := setContent(t, m, "n.md", content)
 	if len(raws) != 1 || !strings.Contains(raws[0], "\x1b_Ga=T") {
 		t.Fatalf("raws = %d, want one transmit", len(raws))
 	}

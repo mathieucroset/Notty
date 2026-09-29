@@ -197,6 +197,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m, c = m.applyRender(msg)
 			cmds = append(cmds, c)
 		}
+	case tea.KeyPressMsg:
+		if m.mode == ModeFull {
+			var c tea.Cmd
+			m, c = m.handleKey(msg)
+			cmds = append(cmds, c)
+		}
 	}
 	return m, tea.Batch(cmds...)
 }
@@ -344,7 +350,7 @@ func (m Model) View() string {
 	}
 	out := make([]string, m.height)
 	for i := range out {
-		out[i] = m.row(m.offset+i)
+		out[i] = m.row(m.offset + i)
 	}
 	return strings.Join(out, "\n")
 }
