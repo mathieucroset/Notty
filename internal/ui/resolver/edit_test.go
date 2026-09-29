@@ -1,11 +1,13 @@
 package resolver
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/mathieucroset/notty/internal/imgrender"
 	"github.com/mathieucroset/notty/internal/ui/editor"
 	"github.com/mathieucroset/notty/internal/ui/keys"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
@@ -179,30 +181,77 @@ func TestEditVimQuitLeaves(t *testing.T) {
 	}
 }
 
-func TestTranslate(t *testing.T) {
-	cmd := tea.Batch(
-		emit(msgs.SaveRequestMsg{}),
-		tea.Sequence(emit(msgs.SaveRequestMsg{}), emit(msgs.QuitMsg{})),
-		emit(editor.ChangedMsg{}),
-		emit(editor.AutosaveTickMsg{}),
-		emit(msgs.OpenNoteMsg{Path: "x.md"}),
-		emit(editor.StatusMsg{Text: "hi"}),
-		emit(msgs.ToastMsg{Text: "keep"}),
-	)
-	got := collect(translate(cmd))
-	want := []tea.Msg{acceptEditMsg{}, acceptEditMsg{}, leaveEditMsg{}, editStatusMsg{text: "hi"}, msgs.ToastMsg{Text: "keep"}}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
+func TestOwnsAndRouting(t *testing.T) {
+	if !Owns(editorMsg{inner: msgs.ToastMsg{}}) {
+		t.Error("Owns(editorMsg) = false")
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("msg %d = %#v, want %#v", i, got[i], want[i])
+	for _, msg := range []tea.Msg{key("o"), tea.PasteMsg{}, msgs.SaveRequestMsg{}, msgs.ToastMsg{}, nil} {
+		if Owns(msg) {
+			t.Errorf("Owns(%#v) = true", msg)
 		}
 	}
-	if translate(nil) != nil {
-		t.Error("translate(nil) should be nil")
+	m := newModel(t, 120, 40, textFile("n.md", base1, ours1, theirs1))
+	m, _ = press(t, m, "e")
+	// Messages the resolver does not own are ignored, even while editing:
+	// an app-level save request must not accept the edit.
+	for _, msg := range []tea.Msg{msgs.SaveRequestMsg{}, msgs.QuitMsg{}, editor.StatusMsg{Text: "x"}} {
+		var cmd tea.Cmd
+		m, cmd = m.Update(msg)
+		if cmd != nil || !m.Editing() {
+			t.Fatalf("Update(%#v) acted: cmd=%v editing=%v", msg, cmd != nil, m.Editing())
+		}
+	}
+	// A status message wrapped by the editor reaches the edit footer.
+	m, _ = m.Update(editorMsg{inner: editor.StatusMsg{Text: "search hit BOTTOM"}})
+	if !strings.Contains(plain(m), "search hit BOTTOM") {
+		t.Error("editor status not shown")
 	}
 }
+
+func TestEditorClipboardComesBackWrapped(t *testing.T) {
+	s, p, opts := testOpts(t, true)
+	opts.Clipboard = fakeClipboard{text: "CLIP"}
+	caps := imgrender.Caps{Inline: imgrender.ProtoHalfBlocks}
+	m := New([]File{textFile("n.md", base1, ours1, theirs1)}, s, p, caps, opts).SetSize(120, 40)
+	m, _ = press(t, m, "e")
+	var cmd tea.Cmd
+	for _, k := range []string{"\"", "+", "p"} {
+		m, cmd = m.Update(key(k))
+	}
+	got := collect(cmd)
+	if len(got) != 1 || !Owns(got[0]) {
+		t.Fatalf("clipboard read produced %#v, want one owned message", got)
+	}
+	m, _ = drain(m, cmd)
+	m, _ = press(t, m, "ctrl+s")
+	if tx := m.items[0].text; !strings.Contains(tx.editedText, "CLIP") {
+		t.Errorf("clipboard text not pasted: %q", tx.editedText)
+	}
+}
+
+func TestWriteAcceptsSynchronously(t *testing.T) {
+	m := newModelVim(t, true, 120, 40, textFile("n.md", base1, ours1, theirs1))
+	m, _ = press(t, m, "e", "d", "d", ":", "w")
+	// The accept happens inside Update, before any command runs.
+	m, _ = m.Update(key("enter"))
+	if m.Editing() || !m.items[0].text.edited {
+		t.Fatal(":w did not accept synchronously")
+	}
+	// The next key is a resolver key, not an editor key.
+	m, _ = m.Update(key("o"))
+	if !strings.Contains(plain(m), "u discards the edit") {
+		t.Error("the key after :w went to the editor")
+	}
+}
+
+// fakeClipboard is an editor.Clipboard holding text only.
+type fakeClipboard struct{ text string }
+
+func (f fakeClipboard) ReadImage() ([]byte, error) { return nil, errNoImage }
+func (f fakeClipboard) ReadText() (string, error)  { return f.text, nil }
+func (f fakeClipboard) WriteText(string) error     { return nil }
+
+var errNoImage = errors.New("no image")
 
 func TestEditPaste(t *testing.T) {
 	m := newModel(t, 120, 40, textFile("n.md", base1, ours1, theirs1))

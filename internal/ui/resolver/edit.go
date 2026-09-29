@@ -1,7 +1,7 @@
 package resolver
 
 import (
-	"reflect"
+	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -10,16 +10,38 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 )
 
-// acceptEditMsg accepts the embedded editor's text as the result (ctrl+s,
-// or the editor's :w).
-type acceptEditMsg struct{}
+// editorMsg is the envelope for the embedded editor's own messages (its
+// clipboard reads, flash timer and status messages): the app hands it back
+// to Update (Owns reports true) and the resolver unwraps it for the editor.
+type editorMsg struct{ inner tea.Msg }
 
-// leaveEditMsg closes the embedded editor keeping its edits (the editor's
-// :q).
-type leaveEditMsg struct{}
+// editSignals records the editor's save (:w) and quit (:q) requests. The
+// editor maps its requests synchronously inside Update (editor.Options.
+// MapMsg), so the resolver acts on them before the next key arrives. It is
+// shared by every copy of the Model.
+type editSignals struct{ save, quit atomic.Bool }
 
-// editStatusMsg carries a vim status message for the edit footer.
-type editStatusMsg struct{ text string }
+// mapMsg is the embedded editor's MapMsg: requests become signals, messages
+// meant for the main editor's surroundings (change notifications,
+// autosave, :e, focus moves, image imports, help, resolver) are dropped,
+// toasts go to the app as they are, and the rest is wrapped in editorMsg.
+func (s *editSignals) mapMsg(msg tea.Msg) tea.Msg {
+	switch msg.(type) {
+	case msgs.SaveRequestMsg:
+		s.save.Store(true)
+		return nil
+	case msgs.QuitMsg:
+		s.quit.Store(true)
+		return nil
+	case editor.ChangedMsg, editor.AutosaveTickMsg, msgs.OpenNoteMsg,
+		msgs.FocusSidebarMsg, msgs.FocusMainMsg, msgs.ImportImageMsg,
+		msgs.OpenHelpMsg, msgs.OpenResolverMsg:
+		return nil
+	case msgs.ToastMsg:
+		return msg
+	}
+	return editorMsg{inner: msg}
+}
 
 // editNote is shown above the embedded editor.
 const editNote = "Editing the result · unresolved blocks were pre-filled with yours"
@@ -50,26 +72,47 @@ func (m Model) openEditor() (Model, tea.Cmd) {
 }
 
 // editKey handles a key while the embedded editor is open: ctrl+s accepts,
-// esc leaves (in vim mode only from normal mode), everything else goes to
-// the editor.
+// esc leaves when the editor has nothing left to cancel (vim: normal mode
+// with no pending command), everything else goes to the editor.
 func (m Model) editKey(k tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch k.String() {
 	case "ctrl+s":
 		return m.acceptEdit()
 	case "esc":
-		if !m.vim || m.ed.ModeName() == "NORMAL" {
+		if m.ed.CanLeave() {
 			return m.leaveEdit(), nil
 		}
 	}
 	return m.forwardToEditor(k)
 }
 
-// forwardToEditor passes msg to the embedded editor and translates the
-// messages its commands produce.
+// forwardToEditor passes msg to the embedded editor, then acts on the save
+// or quit request it made, if any (":wq" accepts, which also leaves).
 func (m Model) forwardToEditor(msg tea.Msg) (Model, tea.Cmd) {
+	m.sig.save.Store(false)
+	m.sig.quit.Store(false)
 	var cmd tea.Cmd
 	m.ed, cmd = m.ed.Update(msg)
-	return m, translate(cmd)
+	save, quit := m.sig.save.Swap(false), m.sig.quit.Swap(false)
+	switch {
+	case save:
+		m, _ = m.acceptEdit()
+	case quit:
+		m = m.leaveEdit()
+	}
+	return m, cmd
+}
+
+// editorMessage handles an editorMsg while editing.
+func (m Model) editorMessage(msg editorMsg) (Model, tea.Cmd) {
+	if !m.editing {
+		return m, nil
+	}
+	if st, ok := msg.inner.(editor.StatusMsg); ok {
+		m.status = st.Text
+		return m, nil
+	}
+	return m.forwardToEditor(msg.inner)
 }
 
 // acceptEdit makes the editor's text the result: every block counts as
@@ -107,56 +150,6 @@ func (m Model) closeEditor() Model {
 	m.ed = m.ed.SetFocused(false)
 	m.status = ""
 	return m
-}
-
-// translate wraps the embedded editor's command so the messages it
-// produces make sense inside the resolver: a save request (:w, or :wq's
-// first half) accepts the edit, :q leaves it, a status message goes to the
-// edit footer, and messages addressed to the main editor's surroundings
-// (autosave, change notifications, :e, focus moves, image imports, help)
-// are dropped. Batches and sequences are translated recursively.
-func translate(cmd tea.Cmd) tea.Cmd {
-	if cmd == nil {
-		return nil
-	}
-	return func() tea.Msg { return translateMsg(cmd()) }
-}
-
-var cmdType = reflect.TypeFor[tea.Cmd]()
-
-func translateMsg(msg tea.Msg) tea.Msg {
-	switch msg := msg.(type) {
-	case nil:
-		return nil
-	case msgs.SaveRequestMsg:
-		return acceptEditMsg{}
-	case msgs.QuitMsg:
-		return leaveEditMsg{}
-	case editor.StatusMsg:
-		return editStatusMsg{text: msg.Text}
-	case editor.ChangedMsg, editor.AutosaveTickMsg, msgs.OpenNoteMsg,
-		msgs.FocusSidebarMsg, msgs.FocusMainMsg, msgs.ImportImageMsg,
-		msgs.OpenHelpMsg, msgs.OpenResolverMsg:
-		return nil
-	case tea.BatchMsg:
-		out := make(tea.BatchMsg, len(msg))
-		for i, c := range msg {
-			out[i] = translate(c)
-		}
-		return out
-	}
-	// tea.Sequence produces an unexported []tea.Cmd type: rebuild it with
-	// the same type so Bubble Tea still runs it in order.
-	v := reflect.ValueOf(msg)
-	if v.Kind() == reflect.Slice && v.Type().Elem() == cmdType {
-		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
-		for i := range v.Len() {
-			c, _ := v.Index(i).Interface().(tea.Cmd)
-			out.Index(i).Set(reflect.ValueOf(translate(c)))
-		}
-		return out.Interface()
-	}
-	return msg
 }
 
 // editorSize returns the embedded editor's size: the right pane below the

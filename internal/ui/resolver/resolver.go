@@ -16,10 +16,11 @@
 // The resolver never runs git or writes files. It emits ResolveTextMsg and
 // ResolveChoiceMsg for the app to perform (the writes and staging go
 // through the syncer's queue); the app reports back with MarkResolved or
-// SetError. While the resolver is open the app must route every message to
-// Update, not just key presses: the embedded editor's own messages
-// (clipboard reads, flash timers) and the resolver's private messages come
-// back through it.
+// SetError. While the resolver is open the app forwards to Update the key
+// messages (tea.KeyPressMsg, tea.PasteMsg) and every message for which
+// Owns reports true (the embedded editor's clipboard reads and timers come
+// back that way, wrapped in the resolver's private envelope). Update
+// ignores anything else.
 package resolver
 
 import (
@@ -149,7 +150,7 @@ type Model struct {
 	sel   int
 
 	ed      editor.Model
-	vim     bool
+	sig     *editSignals
 	editing bool
 	status  string // editor status message while editing
 
@@ -162,13 +163,15 @@ type Model struct {
 
 // New returns a resolver for files, selecting the first unresolved one.
 func New(files []File, styles theme.Styles, palette theme.Palette, caps imgrender.Caps, editorOpts editor.Options) Model {
+	sig := &editSignals{}
 	editorOpts.Styles, editorOpts.Palette = styles, palette
+	editorOpts.MapMsg = sig.mapMsg
 	m := Model{
 		styles:  styles,
 		palette: palette,
 		caps:    caps,
 		ed:      editor.New(editorOpts),
-		vim:     editorOpts.Vim,
+		sig:     sig,
 		narrow:  colResult,
 	}
 	m.items = make([]item, len(files))
@@ -308,8 +311,8 @@ func (m Model) current() *item {
 	return &m.items[m.sel]
 }
 
-// Update handles key presses, pastes, the embedded editor's messages and
-// the resolver's own messages.
+// Update handles key presses, pastes and the resolver's own messages (see
+// Owns); anything else is ignored.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -322,19 +325,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m.forwardToEditor(msg)
 		}
 		return m, nil
-	case acceptEditMsg:
-		return m.acceptEdit()
-	case leaveEditMsg:
-		return m.leaveEdit(), nil
-	case editStatusMsg:
-		if m.editing {
-			m.status = msg.text
-		}
-		return m, nil
+	case editorMsg:
+		return m.editorMessage(msg)
 	}
-	// Anything else may be one of the editor's internal messages (clipboard
-	// reads, flash timers).
-	return m.forwardToEditor(msg)
+	return m, nil
+}
+
+// Owns reports whether msg is one of the resolver's own messages, which the
+// app must route back to Update while the resolver is open.
+func Owns(msg tea.Msg) bool {
+	switch msg.(type) {
+	case editorMsg:
+		return true
+	}
+	return false
 }
 
 // navKey handles a key in the navigation context.

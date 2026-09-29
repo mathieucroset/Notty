@@ -65,7 +65,8 @@ func key(s string) tea.KeyPressMsg {
 
 // press feeds keys one by one (each key string is one key; use "]", "c"
 // for chords) and returns the model and every message the commands
-// produced, after feeding resolver-private messages back.
+// produced, after feeding the resolver's own messages (Owns) back, as the
+// app does.
 func press(t *testing.T, m Model, keys ...string) (Model, []tea.Msg) {
 	t.Helper()
 	var out []tea.Msg
@@ -84,19 +85,20 @@ func press(t *testing.T, m Model, keys ...string) (Model, []tea.Msg) {
 func drain(m Model, cmd tea.Cmd) (Model, []tea.Msg) {
 	var out []tea.Msg
 	for _, msg := range collect(cmd) {
-		switch msg.(type) {
-		case acceptEditMsg, leaveEditMsg, editStatusMsg:
-			var next tea.Cmd
-			m, next = m.Update(msg)
-			var more []tea.Msg
-			m, more = drain(m, next)
-			out = append(out, more...)
-		default:
+		if !Owns(msg) {
 			out = append(out, msg)
+			continue
 		}
+		var next tea.Cmd
+		m, next = m.Update(msg)
+		var more []tea.Msg
+		m, more = drain(m, next)
+		out = append(out, more...)
 	}
 	return m, out
 }
+
+var cmdType = reflect.TypeFor[tea.Cmd]()
 
 // collect runs cmd and flattens batches and sequences into their messages.
 func collect(cmd tea.Cmd) []tea.Msg {
@@ -126,8 +128,10 @@ func collect(cmd tea.Cmd) []tea.Msg {
 	return []tea.Msg{msg}
 }
 
-// runQuick runs cmd but gives up on commands that block (timers), which
-// the tests never need.
+// runQuick runs cmd but gives up after a short wait on commands that block
+// (timers such as the editor's flash), which the tests never need. The
+// goroutine running such a command is left behind until its timer fires;
+// the timers are short, so this is harmless in tests.
 func runQuick(cmd tea.Cmd) tea.Msg {
 	ch := make(chan tea.Msg, 1)
 	go func() { ch <- cmd() }()
