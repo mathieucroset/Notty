@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/mathieucroset/notty/internal/ui/textutil"
 	"github.com/mathieucroset/notty/internal/ui/theme"
 )
 
@@ -377,16 +378,16 @@ func (m Model) View() string {
 	inner := outer - borderAndPadding
 
 	lines := []string{
-		m.styles.DialogTitle.Render(padLine(m.title, inner)),
+		m.styles.DialogTitle.Render(textutil.PadLine(m.title, inner)),
 		"",
 	}
 
 	switch m.kind {
 	case KindInput:
-		lines = append(lines, padLine(m.renderInputLine(), inner))
+		lines = append(lines, textutil.PadLine(m.renderInputLine(), inner))
 		if m.errMsg != "" {
-			for _, l := range wrapLines(m.errMsg, inner) {
-				lines = append(lines, m.styles.Error.Render(padLine(l, inner)))
+			for _, l := range textutil.Wrap(m.errMsg, inner) {
+				lines = append(lines, m.styles.Error.Render(textutil.PadLine(l, inner)))
 			}
 		}
 		if len(m.suggestions) > 0 {
@@ -394,28 +395,28 @@ func (m Model) View() string {
 			for i, s := range m.suggestions {
 				row := "  " + s
 				if i == m.sugIndex {
-					lines = append(lines, m.styles.Selection.Render(padLine(row, inner)))
+					lines = append(lines, m.styles.Selection.Render(textutil.PadLine(row, inner)))
 				} else {
-					lines = append(lines, m.styles.Muted.Render(padLine(row, inner)))
+					lines = append(lines, m.styles.Muted.Render(textutil.PadLine(row, inner)))
 				}
 			}
 		}
 	case KindConfirm:
-		for _, l := range wrapLines(m.message, inner) {
-			lines = append(lines, padLine(l, inner))
+		for _, l := range textutil.Wrap(m.message, inner) {
+			lines = append(lines, textutil.PadLine(l, inner))
 		}
-		lines = append(lines, "", padLine(m.buttonsRow(), inner))
+		lines = append(lines, "", textutil.PadLine(m.buttonsRow(), inner))
 	case KindChoice:
-		for _, l := range wrapLines(m.message, inner) {
-			lines = append(lines, padLine(l, inner))
+		for _, l := range textutil.Wrap(m.message, inner) {
+			lines = append(lines, textutil.PadLine(l, inner))
 		}
 		lines = append(lines, "")
 		for i, opt := range m.options {
 			row := strconv.Itoa(i+1) + ". " + opt
 			if i == m.choiceSel {
-				lines = append(lines, m.styles.Selection.Render(padLine("› "+row, inner)))
+				lines = append(lines, m.styles.Selection.Render(textutil.PadLine("› "+row, inner)))
 			} else {
-				lines = append(lines, padLine("  "+row, inner))
+				lines = append(lines, textutil.PadLine("  "+row, inner))
 			}
 		}
 	}

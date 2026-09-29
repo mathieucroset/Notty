@@ -6,6 +6,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/mathieucroset/notty/internal/ui/textutil"
 )
 
 // Overlay composes box centered over base (dim-rendered first via dim) and
@@ -27,7 +29,8 @@ func Overlay(base string, box string, width, height int, dim func(string) string
 	canvas := lipgloss.NewCanvas(width, height)
 	canvas.Compose(compositor)
 
-	return padBlock(canvas.Render(), width, height)
+	lines := strings.Split(canvas.Render(), "\n")
+	return strings.Join(textutil.FitBlock(lines, width, height), "\n")
 }
 
 // DimANSI strips s's existing ANSI styling and re-renders every line in
@@ -39,18 +42,4 @@ func DimANSI(s string, muted color.Color) string {
 		lines[i] = style.Render(l)
 	}
 	return strings.Join(lines, "\n")
-}
-
-// padBlock pads or truncates s to exactly width columns by height rows.
-func padBlock(s string, width, height int) string {
-	lines := strings.Split(s, "\n")
-	out := make([]string, height)
-	for i := range height {
-		if i < len(lines) {
-			out[i] = padLine(lines[i], width)
-		} else {
-			out[i] = strings.Repeat(" ", width)
-		}
-	}
-	return strings.Join(out, "\n")
 }
