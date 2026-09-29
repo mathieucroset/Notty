@@ -105,8 +105,8 @@ var palettes = map[string]Palette{
 	"tokyo-night": {
 		Name:    "tokyo-night",
 		Dark:    true,
-		Base:    hex("#1a1b26"), // bg
-		Surface: hex("#24283b"), // bg_dark variant used as raised panel
+		Base:    hex("#1a1b26"), // bg (Night)
+		Surface: hex("#24283b"), // bg (Storm), used here as a raised panel
 		Overlay: hex("#292e42"), // bg_highlight
 		Text:    hex("#c0caf5"), // fg
 		Subtext: hex("#a9b1d6"), // fg_dark
@@ -131,11 +131,11 @@ var palettes = map[string]Palette{
 		Name:    "tokyo-night-day",
 		Dark:    false,
 		Base:    hex("#e1e2e7"), // bg
-		Surface: hex("#d5d6db"), // bg_dark
+		Surface: hex("#d0d5e3"), // bg_dark
 		Overlay: hex("#c4c8da"), // bg_highlight
 		Text:    hex("#3760bf"), // fg
 		Subtext: hex("#6172b0"), // fg_dark
-		Muted:   hex("#9699a3"), // comment
+		Muted:   hex("#848cb5"), // comment
 		Accent:  hex("#2e7de9"), // blue
 		Accent2: hex("#7847bd"), // purple
 		Success: hex("#587539"), // green
