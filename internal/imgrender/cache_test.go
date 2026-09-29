@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"sync"
 	"testing"
 )
 
@@ -85,6 +87,32 @@ func TestCacheReplace(t *testing.T) {
 	slices.Sort(got)
 	if !slices.Equal(got, []uint32{2, 7}) || c.Len() != 0 {
 		t.Errorf("Clear returned %v, Len %d; want [2 7], 0", got, c.Len())
+	}
+}
+
+// TestCacheConcurrent hammers one cache from many goroutines; run with -race.
+func TestCacheConcurrent(t *testing.T) {
+	const workers, ops, capacity = 8, 500, 16
+	c := NewCache(capacity)
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			for i := range ops {
+				k := CacheKey{Path: strconv.Itoa((w*ops + i) % 40), Cols: 1, Rows: 1, Proto: ProtoKitty}
+				if i%3 == 0 {
+					c.Put(k, Rendered{KittyID: uint32(i + 1)})
+				} else if r, ok := c.Get(k); ok && r.KittyID == 0 {
+					t.Errorf("got zero id for %v", k)
+				}
+				if i%97 == 0 {
+					_ = c.Len()
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if n := c.Len(); n > capacity {
+		t.Errorf("Len = %d, exceeds capacity %d", n, capacity)
 	}
 }
 
