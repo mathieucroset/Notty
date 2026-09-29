@@ -6,8 +6,8 @@ package deps
 
 import (
 	_ "charm.land/bubbles/v2/key"
-	_ "charm.land/bubbles/v2/textinput"
 	_ "charm.land/bubbles/v2/spinner"
+	_ "charm.land/bubbles/v2/textinput"
 	_ "charm.land/bubbletea/v2"
 	_ "charm.land/glamour/v2"
 	_ "charm.land/lipgloss/v2"
@@ -15,9 +15,9 @@ import (
 	_ "github.com/alecthomas/chroma/v2"
 	_ "github.com/atotto/clipboard"
 	_ "github.com/charmbracelet/x/ansi"
+	_ "github.com/charmbracelet/x/ansi/iterm2"
 	_ "github.com/charmbracelet/x/ansi/kitty"
 	_ "github.com/charmbracelet/x/ansi/sixel"
-	_ "github.com/charmbracelet/x/ansi/iterm2"
 	_ "github.com/charmbracelet/x/exp/teatest/v2"
 	_ "github.com/charmbracelet/x/term"
 	_ "github.com/fsnotify/fsnotify"
