@@ -22,10 +22,13 @@ import (
 
 const (
 	// debounce is the quiet window: an Event is emitted once no change has
-	// been seen for this long.
+	// been seen for this long, and a path is only ever reported once it has
+	// itself been quiet this long (so the app's NoteSelfWrite, called right
+	// after a save, always lands before the save's event is judged).
 	debounce = 100 * time.Millisecond
 	// maxDelay caps how long a continuous stream of changes can hold back an
-	// Event, so a busy file cannot starve the consumer.
+	// Event: after it, the paths already quiet for debounce are delivered and
+	// the still-changing ones wait for their own quiet window.
 	maxDelay = time.Second
 	// errBuffer is the capacity of the Errors channel; further errors are
 	// dropped while it is full.
@@ -64,12 +67,12 @@ type Watcher struct {
 	selfWrites map[string]fileStamp // rel -> stamp recorded by NoteSelfWrite
 
 	// Owned by the run goroutine.
-	dirs           map[string]bool // watched directories, vault-relative ("." = root)
-	pending        map[string]bool // changed paths not yet debounced
-	ready          map[string]bool // debounced paths awaiting delivery
-	urgent         []error         // errors delivered even when the Errors buffer is full
-	rootGone       bool            // ErrRootGone already queued
-	overflowQueued bool            // an overflow error is queued in urgent
+	dirs           map[string]bool      // watched directories, vault-relative ("." = root)
+	pending        map[string]time.Time // changed paths not yet debounced -> last change
+	ready          map[string]bool      // debounced paths awaiting delivery
+	urgent         []error              // errors delivered even when the Errors buffer is full
+	rootGone       bool                 // ErrRootGone already queued
+	overflowQueued bool                 // an overflow error is queued in urgent
 }
 
 // New starts watching root and every directory below it, except ignored ones.
@@ -110,7 +113,7 @@ func newWatcher(root string) (*Watcher, error) {
 		done:       make(chan struct{}),
 		selfWrites: map[string]fileStamp{},
 		dirs:       map[string]bool{},
-		pending:    map[string]bool{},
+		pending:    map[string]time.Time{},
 		ready:      map[string]bool{},
 	}
 	errs, err := w.addTree(".", nil)
@@ -197,10 +200,26 @@ func (w *Watcher) run() {
 	defer timer.Stop()
 	var (
 		timerC       <-chan time.Time // nil while nothing is pending
-		firstPending time.Time
-		out          chan Event // nil while nothing is ready
-		ev           Event      // the batch offered on out
+		firstPending time.Time        // first change of the current batch
+		lastChange   time.Time        // latest change of any path
+		out          chan Event       // nil while nothing is ready
+		ev           Event            // the batch offered on out
 	)
+	// arm schedules the next flush: at the end of the vault-wide quiet window,
+	// or at the maxDelay cap if that comes first.
+	arm := func(now time.Time) {
+		if len(w.pending) == 0 {
+			timer.Stop()
+			timerC = nil
+			return
+		}
+		deadline := lastChange.Add(debounce)
+		if limit := firstPending.Add(maxDelay); limit.Before(deadline) {
+			deadline = limit
+		}
+		timer.Reset(max(deadline.Sub(now), 0))
+		timerC = timer.C
+	}
 	for {
 		var (
 			errOut    chan error // nil while no urgent error is queued
@@ -219,18 +238,16 @@ func (w *Watcher) run() {
 				return
 			}
 			wasIdle := len(w.pending) == 0
-			if !w.handle(fe) {
+			now := time.Now()
+			if !w.handle(fe, now) {
 				continue
 			}
-			// Every recorded change restarts the quiet window, capped at
-			// maxDelay after the first change of the batch.
-			now := time.Now()
+			// Every recorded change restarts the quiet window.
 			if wasIdle {
 				firstPending = now
 			}
-			wait := min(debounce, max(firstPending.Add(maxDelay).Sub(now), 0))
-			timer.Reset(wait)
-			timerC = timer.C
+			lastChange = now
+			arm(now)
 
 		case err, ok := <-w.fsw.Errors:
 			if !ok {
@@ -240,7 +257,10 @@ func (w *Watcher) run() {
 
 		case <-timerC:
 			timerC = nil
-			w.flush()
+			now := time.Now()
+			w.flush(now)
+			firstPending = now // any path still pending starts a new batch
+			arm(now)
 			if len(w.ready) > 0 {
 				out = w.events
 				ev = Event{Paths: sortedKeys(w.ready)}
@@ -298,9 +318,9 @@ func (w *Watcher) resync() {
 }
 
 // handle updates the directory watches for one fsnotify event and records the
-// changed path unless it is ignored or the watcher is paused. It reports
-// whether a change was recorded.
-func (w *Watcher) handle(fe fsnotify.Event) bool {
+// changed path, at time now, unless it is ignored or the watcher is paused. It
+// reports whether any change was recorded.
+func (w *Watcher) handle(fe fsnotify.Event, now time.Time) bool {
 	rel, ok := w.rel(fe.Name)
 	if !ok {
 		return false
@@ -320,6 +340,7 @@ func (w *Watcher) handle(fe fsnotify.Event) bool {
 		return false
 	}
 	paused := w.isPaused()
+	recorded := false
 
 	if fe.Has(fsnotify.Remove) || fe.Has(fsnotify.Rename) {
 		w.unwatchTree(rel)
@@ -328,9 +349,12 @@ func (w *Watcher) handle(fe fsnotify.Event) bool {
 		if info, err := os.Lstat(fe.Name); err == nil && info.IsDir() {
 			// Files may have been created inside before the watch existed,
 			// so report everything found while adding the watches.
-			var found map[string]bool
+			var found func(string)
 			if !paused {
-				found = w.pending
+				found = func(sub string) {
+					w.pending[sub] = now
+					recorded = true
+				}
 			}
 			errs, err := w.addTree(rel, found)
 			for _, e := range errs {
@@ -342,17 +366,22 @@ func (w *Watcher) handle(fe fsnotify.Event) bool {
 		}
 	}
 	if paused {
-		return false
+		return recorded
 	}
-	w.pending[rel] = true
+	w.pending[rel] = now
 	return true
 }
 
-// flush moves pending paths to the ready set, dropping the app's own writes.
-func (w *Watcher) flush() {
+// flush moves the pending paths that have been quiet for debounce to the
+// ready set, dropping the app's own writes.
+func (w *Watcher) flush(now time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	for rel := range w.pending {
+	for rel, last := range w.pending {
+		if now.Sub(last) < debounce {
+			continue
+		}
+		delete(w.pending, rel)
 		if stamp, ok := w.selfWrites[rel]; ok {
 			info, err := os.Stat(w.abs(rel))
 			if err == nil && info.ModTime().Equal(stamp.mtime) && info.Size() == stamp.size {
@@ -362,15 +391,14 @@ func (w *Watcher) flush() {
 		}
 		w.ready[rel] = true
 	}
-	clear(w.pending)
 }
 
 // addTree watches rel and every non-ignored directory below it. When found is
-// non-nil, every path discovered below rel is added to it. A directory that
+// non-nil, it is called with every path discovered below rel. A directory that
 // cannot be read or watched (permissions, inotify watch limit) is skipped and
 // its error collected in errs; fatal is non-nil only when the vault root itself
 // cannot be walked or watched.
-func (w *Watcher) addTree(rel string, found map[string]bool) (errs []error, fatal error) {
+func (w *Watcher) addTree(rel string, found func(string)) (errs []error, fatal error) {
 	fatal = filepath.WalkDir(w.abs(rel), func(p string, d fs.DirEntry, err error) error {
 		sub, ok := w.rel(p)
 		if !ok {
@@ -397,7 +425,7 @@ func (w *Watcher) addTree(rel string, found map[string]bool) (errs []error, fata
 			return nil
 		}
 		if found != nil && sub != rel {
-			found[sub] = true
+			found(sub)
 		}
 		if !d.IsDir() || w.dirs[sub] {
 			return nil

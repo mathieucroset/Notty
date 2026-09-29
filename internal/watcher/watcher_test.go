@@ -258,6 +258,61 @@ func TestRepeatedWritesToOneFileExtendQuietWindow(t *testing.T) {
 	expectNoEvent(t, w)
 }
 
+func TestMaxDelayFlushesOnlyQuietPaths(t *testing.T) {
+	root := t.TempDir()
+	w := newTestWatcher(t, root)
+
+	// hot.md is rewritten every 20ms for 1.6s, so the vault never has a 100ms
+	// quiet window. After maxDelay (1s) the quiet path must still be
+	// delivered, without the hot one; hot.md follows once it settles.
+	stop := make(chan struct{})
+	stalled := make(chan time.Duration, 1)
+	go func() {
+		var maxGap time.Duration
+		last := time.Now()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				stalled <- maxGap
+				return
+			default:
+			}
+			_ = os.WriteFile(filepath.Join(root, "hot.md"), []byte{byte(i)}, 0o644)
+			now := time.Now()
+			maxGap = max(maxGap, now.Sub(last))
+			last = now
+			time.Sleep(20 * time.Millisecond)
+		}
+	}()
+	time.Sleep(10 * time.Millisecond)
+	writeFile(t, root, "quiet.md", "x")
+	start := time.Now()
+
+	var first Event
+	select {
+	case first = <-w.Events():
+	case <-time.After(1600 * time.Millisecond):
+	}
+	close(stop)
+	if gap := <-stalled; gap > 70*time.Millisecond {
+		t.Skipf("writer stalled for %v; machine too slow to test maxDelay", gap)
+	}
+	if first.Paths == nil {
+		t.Fatal("no event while hot.md kept changing: maxDelay cap not applied")
+	}
+	if !slices.Equal(first.Paths, []string{"quiet.md"}) {
+		t.Fatalf("capped batch paths = %v, want [quiet.md]", first.Paths)
+	}
+	if d := time.Since(start); d < 800*time.Millisecond {
+		t.Fatalf("capped batch after %v, want about maxDelay (1s)", d)
+	}
+
+	ev := nextEvent(t, w)
+	if !slices.Equal(ev.Paths, []string{"hot.md"}) {
+		t.Fatalf("paths after settling = %v, want [hot.md]", ev.Paths)
+	}
+}
+
 func TestPausedEventsDroppedAndResumeDelivers(t *testing.T) {
 	root := t.TempDir()
 	w := newTestWatcher(t, root)
