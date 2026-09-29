@@ -16,7 +16,7 @@ func (m *Machine) startInsert(b *buffer.Buffer, p buffer.Pos, repeat int) {
 }
 
 // openLine implements o (below) and O (above), keeping the indentation of
-// the current line.
+// the current line; o also continues a markdown list.
 func (m *Machine) openLine(b *buffer.Buffer, l int, above bool) {
 	line := b.Line(l)
 	prefix := leadingWS(line)
@@ -24,6 +24,9 @@ func (m *Machine) openLine(b *buffer.Buffer, l int, above bool) {
 	if above {
 		p = b.InsertLineAfter(l-1, prefix)
 	} else {
+		if cont, _ := ContinueList(line); cont != "" {
+			prefix = cont
+		}
 		p = b.InsertLineAfter(l, prefix)
 	}
 	p.Col = graphemeLen(prefix)
@@ -102,20 +105,22 @@ func (m *Machine) insertNewline(b *buffer.Buffer) {
 	b.SetCursor(splitLine(b, b.Cursor()))
 }
 
-// splitLine breaks the line at p, continuing a markdown list or keeping the
-// indentation of the line, and returns the new cursor position.
-func splitLine(b *buffer.Buffer, p buffer.Pos) buffer.Pos {
-	line := b.Line(p.Line)
-	indent := leadingWS(line)
-	if p.Col < graphemeLen(indent) {
-		indent = ""
+// insertSpecial handles the Notty insert-mode keys: tab / shift+tab indent
+// and outdent the line, ctrl+t toggles the task. It reports whether tok was
+// handled.
+func (m *Machine) insertSpecial(b *buffer.Buffer, tok string) bool {
+	switch tok {
+	case "<tab>", "<s-tab>":
+		shiftLine(b, tok == "<tab>")
+	case "<c-t>":
+		if toggleTask(b) {
+			m.eff.ToggleTask = true
+		}
+	default:
+		return false
 	}
-	return b.Insert(p, "\n"+indent)
+	return true
 }
-
-// insertSpecial handles insert-mode control keys added by later features.
-// It reports whether tok was handled.
-func (m *Machine) insertSpecial(b *buffer.Buffer, tok string) bool { return false }
 
 // leaveInsert returns to normal mode: it applies the i/a count, closes the
 // undo group and moves the cursor left one column, as vim does.

@@ -123,7 +123,7 @@ var normalActions = map[string]bool{
 	"x": true, "X": true, "<del>": true, "s": true, "S": true, "J": true,
 	"p": true, "P": true, "D": true, "C": true, "Y": true, "~": true,
 	"u": true, "<c-r>": true, "v": true, "V": true, ".": true,
-	"/": true, "?": true, ":": true, "<tab>": true,
+	"/": true, "?": true, ":": true, "<tab>": true, "<space>": true,
 }
 
 // argActions take one more key as argument.

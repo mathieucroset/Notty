@@ -274,6 +274,7 @@ var changeActions = map[string]bool{
 	"i": true, "a": true, "I": true, "A": true, "o": true, "O": true,
 	"x": true, "X": true, "<del>": true, "s": true, "S": true, "J": true,
 	"p": true, "P": true, "D": true, "C": true, "~": true, "r": true,
+	"<space>": true,
 }
 
 // execChange runs a buffer-modifying command inside an undo group.
@@ -325,6 +326,10 @@ func (m *Machine) execChange(b *buffer.Buffer, c cmd) {
 			return
 		}
 		m.put(b, m.unnamed, c.name == "P", c.count())
+	case "<space>":
+		if toggleTask(b) {
+			m.eff.ToggleTask = true
+		}
 	}
 }
 

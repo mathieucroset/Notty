@@ -156,8 +156,17 @@ func (p *Plain) Handle(b *buffer.Buffer, k Key) Effect {
 // plainVertical keys keep the desired column.
 var plainVertical = map[string]bool{"<up>": true, "<down>": true, "<s-up>": true, "<s-down>": true}
 
-// handleSpecial handles keys added by later features.
-func (p *Plain) handleSpecial(b *buffer.Buffer, tok string, eff *Effect) bool { return false }
+// handleSpecial handles the Notty additions: ctrl+t toggles the task on
+// the cursor line.
+func (p *Plain) handleSpecial(b *buffer.Buffer, tok string, eff *Effect) bool {
+	if tok != "<c-t>" {
+		return false
+	}
+	b.BeginGroup()
+	eff.ToggleTask = toggleTask(b)
+	b.EndGroup()
+	return true
+}
 
 // typeText inserts typed text, replacing the selection, inside the open
 // typing group.
