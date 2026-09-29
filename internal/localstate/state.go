@@ -109,6 +109,13 @@ func (s *State) Save(path string) error {
 	// Best-effort cleanup; harmless if the rename below already moved it.
 	defer os.Remove(tmpPath)
 
+	// os.CreateTemp creates the file with mode 0600; widen it to the usual
+	// 0644 for a regular config/state file before it takes its final name.
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("localstate: chmod temp file: %w", err)
+	}
+
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return fmt.Errorf("localstate: write temp file: %w", err)
@@ -142,18 +149,24 @@ func (s *State) Touch(notePath string) {
 	s.LastNote = notePath
 }
 
-// renamePath rewrites p if it equals oldPath (an exact note match) or if it
-// is inside the folder oldPath (i.e. starts with "oldPath/"). Any other path,
-// including one that merely shares oldPath as a string prefix without the
-// separator (e.g. "Work2/x" when renaming "Work"), is left untouched.
+// isUnder reports whether p is target itself or is inside the folder target
+// (i.e. starts with "target/"). It deliberately requires the separator, so
+// e.g. "Work2/x" is not considered under "Work".
+func isUnder(p, target string) bool {
+	return p == target || strings.HasPrefix(p, target+"/")
+}
+
+// renamePath rewrites p if it is under oldPath (see isUnder): an exact match
+// becomes newPath, and a path inside the folder oldPath keeps its suffix
+// under newPath. Any other path is left untouched.
 func renamePath(p, oldPath, newPath string) string {
+	if !isUnder(p, oldPath) {
+		return p
+	}
 	if p == oldPath {
 		return newPath
 	}
-	if strings.HasPrefix(p, oldPath+"/") {
-		return newPath + p[len(oldPath):]
-	}
-	return p
+	return newPath + p[len(oldPath):]
 }
 
 // Rename updates every reference to oldPath (or, for a folder, everything
@@ -180,36 +193,30 @@ func (s *State) Rename(oldPath, newPath string) {
 	}
 }
 
-// matchesPath reports whether p is target itself or is inside the folder
-// target (i.e. starts with "target/").
-func matchesPath(p, target string) bool {
-	return p == target || strings.HasPrefix(p, target+"/")
-}
-
 // Remove deletes every reference to path (and, for a folder, everything
 // under it) from Recents, LastNote, Cursor, and Expanded.
 func (s *State) Remove(path string) {
 	recents := make([]string, 0, len(s.Recents))
 	for _, r := range s.Recents {
-		if !matchesPath(r, path) {
+		if !isUnder(r, path) {
 			recents = append(recents, r)
 		}
 	}
 	s.Recents = recents
 
-	if matchesPath(s.LastNote, path) {
+	if isUnder(s.LastNote, path) {
 		s.LastNote = ""
 	}
 
 	for k := range s.Cursor {
-		if matchesPath(k, path) {
+		if isUnder(k, path) {
 			delete(s.Cursor, k)
 		}
 	}
 
 	expanded := make([]string, 0, len(s.Expanded))
 	for _, e := range s.Expanded {
-		if !matchesPath(e, path) {
+		if !isUnder(e, path) {
 			expanded = append(expanded, e)
 		}
 	}
