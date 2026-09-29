@@ -6,11 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/colorprofile"
+
+	"github.com/mathieucroset/notty/internal/imgrender"
 	"github.com/mathieucroset/notty/internal/ui/app"
 )
 
@@ -24,6 +27,8 @@ type fixture struct {
 	tuiErr     error
 	got        *app.Options
 	during     func() // runs while the TUI would be running
+	// detectedWith records the protocol setting each detection ran with.
+	detectedWith []string
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -73,6 +78,10 @@ func (f *fixture) env() env {
 			return "", errors.New("not found")
 		},
 		lockWait: 300 * time.Millisecond,
+		detectCaps: func(protocol string) imgrender.Caps {
+			f.detectedWith = append(f.detectedWith, protocol)
+			return imgrender.Caps{Inline: imgrender.ProtoKitty, Viewer: imgrender.ProtoKitty, CellW: 10, CellH: 20}
+		},
 		runTUI: func(opts app.Options) error {
 			f.got = &opts
 			if f.during != nil {
@@ -281,5 +290,45 @@ func TestWizardTakesNoLock(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(f.vaultDir, ".notty", "lock")); !os.IsNotExist(err) {
 		t.Errorf("wizard mode created a lock: %v", err)
+	}
+}
+
+func TestImageCapsDetected(t *testing.T) {
+	for _, wizard := range []bool{false, true} {
+		f := newFixture(t)
+		f.makeRepo(t)
+		if !wizard {
+			f.writeConfig(t, "[images]\nprotocol = \"halfblocks\"\n")
+		}
+		if code := run([]string{"--vault", f.vaultDir}, f.env()); code != 0 {
+			t.Fatalf("exit code %d, stderr %q", code, f.stderr.String())
+		}
+		want := "halfblocks"
+		if wizard {
+			want = "auto"
+		}
+		if !reflect.DeepEqual(f.detectedWith, []string{want}) {
+			t.Errorf("wizard=%v: detection ran with %v, want [%s]", wizard, f.detectedWith, want)
+		}
+		if f.got.Caps.Inline != imgrender.ProtoKitty || f.got.Caps.CellW != 10 {
+			t.Errorf("wizard=%v: Options.Caps = %+v", wizard, f.got.Caps)
+		}
+	}
+}
+
+func TestColorProfileFor(t *testing.T) {
+	tests := []struct {
+		inline imgrender.Protocol
+		force  bool
+	}{
+		{imgrender.ProtoKitty, true},
+		{imgrender.ProtoHalfBlocks, false},
+		{imgrender.ProtoOff, false},
+	}
+	for _, tt := range tests {
+		p, force := colorProfileFor(imgrender.Caps{Inline: tt.inline})
+		if force != tt.force || (force && p != colorprofile.TrueColor) {
+			t.Errorf("colorProfileFor(%v) = (%v, %v), want force=%v TrueColor", tt.inline, p, force, tt.force)
+		}
 	}
 }

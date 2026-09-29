@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/mathieucroset/notty/internal/config"
+	"github.com/mathieucroset/notty/internal/imgrender"
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
@@ -31,6 +32,9 @@ type Options struct {
 	Local     *localstate.State
 	LocalPath string
 	Pins      *meta.State
+	// Caps are the terminal's image capabilities, passed on to the preview
+	// and the image viewer.
+	Caps imgrender.Caps
 	// WizardNeeded starts the app in first-run wizard mode, without a vault.
 	WizardNeeded bool
 }

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,11 +11,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/term"
 
 	"github.com/mathieucroset/notty/internal/config"
+	"github.com/mathieucroset/notty/internal/imgrender"
 	"github.com/mathieucroset/notty/internal/localstate"
 	"github.com/mathieucroset/notty/internal/meta"
 	"github.com/mathieucroset/notty/internal/ui/app"
@@ -37,7 +42,10 @@ type env struct {
 	// lockWait is how long to wait for a vault lock held by another
 	// process (spec §9: 10s, covering a running headless sync).
 	lockWait time.Duration
-	runTUI   func(app.Options) error
+	// detectCaps works out the terminal's image capabilities for the
+	// images.protocol setting (amendment A5).
+	detectCaps func(protocol string) imgrender.Caps
+	runTUI     func(app.Options) error
 }
 
 func main() {
@@ -48,11 +56,80 @@ func main() {
 		stateDir:   config.StateDir(),
 		lookPath:   exec.LookPath,
 		lockWait:   10 * time.Second,
-		runTUI: func(opts app.Options) error {
-			_, err := tea.NewProgram(app.New(opts)).Run()
-			return err
-		},
+		detectCaps: detectTerminalCaps,
+		runTUI:     runProgram,
 	}))
+}
+
+// runProgram runs the Bubble Tea program.
+func runProgram(opts app.Options) error {
+	var progOpts []tea.ProgramOption
+	if p, force := colorProfileFor(opts.Caps); force {
+		progOpts = append(progOpts, tea.WithColorProfile(p))
+	}
+	_, err := tea.NewProgram(app.New(opts), progOpts...).Run()
+	return err
+}
+
+// colorProfileFor returns the color profile the program must use for caps.
+// Kitty placeholder cells carry the image ID in a truecolor foreground, so
+// with inline Kitty images the program must render in TrueColor (kitty
+// spike, condition 2); otherwise the detected profile is kept.
+func colorProfileFor(caps imgrender.Caps) (colorprofile.Profile, bool) {
+	if caps.Inline == imgrender.ProtoKitty {
+		return colorprofile.TrueColor, true
+	}
+	return colorprofile.TrueColor, false
+}
+
+// detectTerminalCaps queries the controlling terminal for its image
+// capabilities before Bubble Tea takes it over. The tty is put in raw mode
+// for the queries and restored afterwards; without a terminal (or on
+// Windows) only the configuration and environment are used.
+func detectTerminalCaps(protocol string) imgrender.Caps {
+	var tty io.ReadWriter
+	if runtime.GOOS != "windows" {
+		if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+			defer f.Close()
+			if restore, ok := makeRaw(f); ok {
+				defer restore()
+				tty = f
+			}
+		}
+	}
+	return imgrender.Detect(protocol, os.Getenv, tty, runWithTimeout(2*time.Second))
+}
+
+// makeRaw puts the terminal f in raw mode and returns a func restoring it.
+// It reaches the descriptor through SyscallConn rather than f.Fd: Fd
+// switches the file to blocking mode, after which read deadlines are
+// silently ignored and Detect's bounded reads would block forever.
+func makeRaw(f *os.File) (restore func(), ok bool) {
+	rc, err := f.SyscallConn()
+	if err != nil {
+		return nil, false
+	}
+	var state *term.State
+	var fd uintptr
+	cerr := rc.Control(func(d uintptr) {
+		fd = d
+		if term.IsTerminal(d) {
+			state, err = term.MakeRaw(d)
+		}
+	})
+	if cerr != nil || err != nil || state == nil {
+		return nil, false
+	}
+	return func() { _ = term.Restore(fd, state) }, true
+}
+
+// runWithTimeout returns a command runner whose commands are killed after d.
+func runWithTimeout(d time.Duration) func(name string, args ...string) ([]byte, error) {
+	return func(name string, args ...string) ([]byte, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), d)
+		defer cancel()
+		return exec.CommandContext(ctx, name, args...).Output()
+	}
 }
 
 // run parses args, prepares the app (spec §11, plan amendment A1), runs the
@@ -118,7 +195,8 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 	}
 	cfg.Vault = root
 
-	// 2. TODO(Task 21): detect image capabilities here (amendment A5).
+	// 2. Image capabilities, while the terminal is still ours to query.
+	caps := e.detectCaps(cfg.Images.Protocol)
 
 	p, ok := theme.Get(cfg.Theme)
 	if !ok {
@@ -128,6 +206,7 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 		Config:       cfg,
 		Styles:       theme.NewStyles(p),
 		Palette:      p,
+		Caps:         caps,
 		WizardNeeded: wizard,
 	}
 
