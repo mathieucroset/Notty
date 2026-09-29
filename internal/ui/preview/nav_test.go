@@ -260,6 +260,38 @@ func TestImageNavigationAndViewer(t *testing.T) {
 	}
 }
 
+func TestMissingImagesNotOpenedInViewer(t *testing.T) {
+	vault := t.TempDir()
+	writePNG(t, filepath.Join(vault, "ok.png"), 16, 16)
+	m := newTest(t, imgrender.ProtoHalfBlocks, vault)
+	m, _ = setContent(t, m, "n.md", "![](gone.png)\n\n![](ok.png)")
+	m, _ = press(m, "]", "i")
+	if _, out := press(m, "enter"); len(out) != 0 {
+		t.Fatalf("enter on a missing image emitted %v", out)
+	}
+	m, _ = press(m, "]", "i")
+	_, out := press(m, "enter")
+	want := msgs.OpenImageViewerMsg{Paths: []string{filepath.Join(vault, "ok.png")}, Index: 0}
+	if len(out) != 1 || !reflect.DeepEqual(out[0], want) {
+		t.Fatalf("enter emitted %#v, want %#v", out, want)
+	}
+}
+
+func TestSplitModeClearsHighlights(t *testing.T) {
+	vault := t.TempDir()
+	writePNG(t, filepath.Join(vault, "ok.png"), 16, 16)
+	m := newTest(t, imgrender.ProtoHalfBlocks, vault)
+	m, _ = setContent(t, m, "n.md", "- [ ] t\n\n![](ok.png)")
+	m, _ = press(m, "]", "t")
+	m = m.SetMode(ModeSplit)
+	if m.taskIdx != -1 || m.imgIdx != -1 {
+		t.Fatalf("highlights kept in split mode: task %d image %d", m.taskIdx, m.imgIdx)
+	}
+	if v := ansi.Strip(m.View()); strings.Contains(v, "▸") || strings.Contains(v, "▌") {
+		t.Fatalf("marker shown in split mode:\n%s", v)
+	}
+}
+
 func TestFocusAndHelpKeys(t *testing.T) {
 	m := newTest(t, imgrender.ProtoOff, t.TempDir())
 	if _, out := press(m, "tab"); len(out) != 1 || out[0] != (msgs.FocusSidebarMsg{}) {

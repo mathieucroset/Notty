@@ -119,6 +119,10 @@ func (m Model) Refresh() (Model, tea.Cmd) {
 func (m Model) SetMode(mode Mode) Model {
 	m.mode = mode
 	m.pending = ""
+	if mode == ModeSplit {
+		// The passive side shows no highlight.
+		m.taskIdx, m.imgIdx = -1, -1
+	}
 	return m
 }
 

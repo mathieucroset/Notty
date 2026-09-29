@@ -271,7 +271,7 @@ func TestSizeChangeRerendersOnNextUpdate(t *testing.T) {
 }
 
 func TestMissingImageRendersWarningChip(t *testing.T) {
-	for _, proto := range []imgrender.Protocol{imgrender.ProtoKitty, imgrender.ProtoHalfBlocks} {
+	for _, proto := range []imgrender.Protocol{imgrender.ProtoKitty, imgrender.ProtoHalfBlocks, imgrender.ProtoOff} {
 		m := newTest(t, proto, t.TempDir())
 		m, _ = setContent(t, m, "notes/n.md", "![x](nope.png)\n\n![y](https://example.com/y.png)")
 		v := ansi.Strip(m.View())

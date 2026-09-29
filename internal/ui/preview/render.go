@@ -67,7 +67,7 @@ func hashString(s string) uint64 {
 // imgItem is one image of an Image segment, ready to lay out.
 type imgItem struct {
 	link links.ImageLink
-	abs  string // absolute path; "" for external links or links leaving the vault
+	abs  string // absolute path of an existing file; "" for external, escaping or missing links
 	name string
 	// reason is set when the image cannot be shown ("missing", "external",
 	// "unreadable", "too large"); it renders as a warning chip.
@@ -250,8 +250,15 @@ func (j renderJob) image(link links.ImageLink) *imgItem {
 		item.reason = "missing"
 		return item
 	}
-	item.abs = filepath.Join(j.vaultRoot, filepath.FromSlash(rel))
 	item.name = path.Base(rel)
+	abs := filepath.Join(j.vaultRoot, filepath.FromSlash(rel))
+	fi, err := os.Stat(abs)
+	if err != nil || fi.IsDir() {
+		item.reason = "missing"
+		return item
+	}
+	// Only existing files reach the image viewer.
+	item.abs = abs
 
 	proto := j.caps.Inline
 	if proto == imgrender.ProtoOff {
@@ -259,11 +266,6 @@ func (j renderJob) image(link links.ImageLink) *imgItem {
 	}
 	if proto != imgrender.ProtoKitty {
 		proto = imgrender.ProtoHalfBlocks
-	}
-	fi, err := os.Stat(item.abs)
-	if err != nil || fi.IsDir() {
-		item.reason = "missing"
-		return item
 	}
 	w, h, err := imgrender.Dimensions(item.abs)
 	if err != nil {
