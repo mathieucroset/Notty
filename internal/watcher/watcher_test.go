@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -463,6 +464,41 @@ func TestUnreadableNewSubdirectoryIsNotFatal(t *testing.T) {
 
 	writeFile(t, root, "sub/a.md", "still watched")
 	collectUntil(t, w, "sub/a.md")
+}
+
+func TestRootRemovalReportsError(t *testing.T) {
+	tests := []struct {
+		name   string
+		remove func(root string) error
+	}{
+		{"renamed", func(root string) error { return os.Rename(root, root+"-moved") }},
+		{"deleted", os.RemoveAll},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "vault")
+			writeFile(t, root, "a.md", "x")
+			w := newTestWatcher(t, root)
+
+			if err := tc.remove(root); err != nil {
+				t.Fatalf("remove root: %v", err)
+			}
+			deadline := time.After(waitTimeout)
+			for {
+				select {
+				case <-w.Events(): // the deleted note may be reported; ignore
+					continue
+				case err := <-w.Errors():
+					if !errors.Is(err, ErrRootGone) {
+						t.Fatalf("error = %v, want ErrRootGone", err)
+					}
+				case <-deadline:
+					t.Fatal("no error reported for the removed root")
+				}
+				break
+			}
+		})
+	}
 }
 
 func TestNewFailsOnMissingRoot(t *testing.T) {

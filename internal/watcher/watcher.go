@@ -32,6 +32,10 @@ const (
 	errBuffer = 16
 )
 
+// ErrRootGone is delivered on Errors when the vault root itself is deleted or
+// renamed. The watcher reports nothing further; the caller should close it.
+var ErrRootGone = errors.New("watcher: vault root was removed or renamed")
+
 // Event is one debounced batch of changed paths. Paths are vault-relative,
 // use "/" separators, and are deduplicated and sorted. A path may name a
 // file or a directory, and may no longer exist (deletions and renames are
@@ -60,9 +64,11 @@ type Watcher struct {
 	selfWrites map[string]fileStamp // rel -> stamp recorded by NoteSelfWrite
 
 	// Owned by the run goroutine.
-	dirs    map[string]bool // watched directories, vault-relative ("." = root)
-	pending map[string]bool // changed paths not yet debounced
-	ready   map[string]bool // debounced paths awaiting delivery
+	dirs     map[string]bool // watched directories, vault-relative ("." = root)
+	pending  map[string]bool // changed paths not yet debounced
+	ready    map[string]bool // debounced paths awaiting delivery
+	urgent   []error         // errors delivered even when the Errors buffer is full
+	rootGone bool            // ErrRootGone already queued
 }
 
 // New starts watching root and every directory below it, except ignored ones.
@@ -182,6 +188,14 @@ func (w *Watcher) run() {
 		ev           Event      // the batch offered on out
 	)
 	for {
+		var (
+			errOut    chan error // nil while no urgent error is queued
+			urgentErr error
+		)
+		if len(w.urgent) > 0 {
+			errOut, urgentErr = w.errors, w.urgent[0]
+		}
+
 		select {
 		case <-w.done:
 			return
@@ -221,6 +235,9 @@ func (w *Watcher) run() {
 		case out <- ev:
 			clear(w.ready)
 			out, ev = nil, Event{}
+
+		case errOut <- urgentErr:
+			w.urgent = w.urgent[1:]
 		}
 	}
 }
@@ -230,7 +247,17 @@ func (w *Watcher) run() {
 // whether a change was recorded.
 func (w *Watcher) handle(fe fsnotify.Event) bool {
 	rel, ok := w.rel(fe.Name)
-	if !ok || rel == "." || ignored(rel) {
+	if !ok {
+		return false
+	}
+	if rel == "." {
+		if (fe.Has(fsnotify.Remove) || fe.Has(fsnotify.Rename)) && !w.rootGone {
+			w.rootGone = true
+			w.urgent = append(w.urgent, ErrRootGone)
+		}
+		return false
+	}
+	if ignored(rel) {
 		return false
 	}
 	// Pure attribute changes (chmod, touch -a) do not change content.
