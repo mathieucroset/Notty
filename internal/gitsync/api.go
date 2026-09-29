@@ -671,6 +671,21 @@ func (r *Repo) ShowAt(rev, path string) ([]byte, error) {
 	return r.catBlob(rev + ":" + path)
 }
 
+// LastCommitAdding returns the newest non-merge commit reachable from HEAD
+// that added path, or "" if there is none. Rename detection is off, so moving
+// a file (such as into .trash/) counts as adding its destination.
+func (r *Repo) LastCommitAdding(path string) (string, error) {
+	if err := checkPaths([]string{path}); err != nil {
+		return "", err
+	}
+	res, err := r.git("log", "-1", "--no-merges", "--no-renames", "--diff-filter=A",
+		"--no-show-signature", "--format=%H", "HEAD", "--", path)
+	if err != nil {
+		return "", fmt.Errorf("gitsync: last commit adding %s: %w", path, err)
+	}
+	return strings.TrimSpace(string(res.Stdout)), nil
+}
+
 // LastCommitHostFor returns the host of the newest commit that touched path
 // and is reachable from before (inclusive), or "" if there is none or its
 // subject names no host.
