@@ -486,6 +486,30 @@ func TestClone(t *testing.T) {
 	}
 }
 
+func TestRemoteURLAndGitPath(t *testing.T) {
+	gittest.Isolate(t)
+	r, err := gitsync.Init(t.TempDir(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.RemoteURL(); !errors.Is(err, gitsync.ErrNoRemote) {
+		t.Fatalf("RemoteURL without origin err = %v, want ErrNoRemote", err)
+	}
+	if err := r.RemoteAdd("/srv/notes.git"); err != nil {
+		t.Fatal(err)
+	}
+	if u, err := r.RemoteURL(); err != nil || u != "/srv/notes.git" {
+		t.Fatalf("RemoteURL = %q, %v", u, err)
+	}
+	p, err := r.GitPath("info/exclude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(r.Dir, ".git", "info", "exclude"); p != want {
+		t.Fatalf("GitPath = %q, want %q", p, want)
+	}
+}
+
 func TestCloneBranch(t *testing.T) {
 	env := gittest.New(t)
 	gittest.Git(t, env.Laptop.Dir, "push", "-q", "origin", "main:trunk")

@@ -157,6 +157,36 @@ func (r *Repo) HasRemote() bool {
 	return err == nil
 }
 
+// RemoteURL returns the configured URL of origin, or an error wrapping
+// ErrNoRemote when origin is not configured.
+func (r *Repo) RemoteURL() (string, error) {
+	res, err := r.git("config", "--get", "remote."+remoteName+".url")
+	if exitCode(err) == 1 {
+		return "", fmt.Errorf("gitsync: remote url: %w", ErrNoRemote)
+	}
+	if err != nil {
+		return "", fmt.Errorf("gitsync: remote url: %w", err)
+	}
+	return strings.TrimSpace(string(res.Stdout)), nil
+}
+
+// GitPath returns the absolute path of p inside the repository's git
+// directory (`git rev-parse --git-path`), e.g. "info/exclude".
+func (r *Repo) GitPath(p string) (string, error) {
+	if err := checkArg("git path", p); err != nil {
+		return "", err
+	}
+	res, err := r.git("rev-parse", "--git-path", p)
+	if err != nil {
+		return "", fmt.Errorf("gitsync: git path %s: %w", p, err)
+	}
+	out := strings.TrimSpace(string(res.Stdout))
+	if !filepath.IsAbs(out) {
+		out = filepath.Join(r.Dir, out)
+	}
+	return out, nil
+}
+
 // CurrentBranch returns the checked-out branch name (also for an unborn
 // branch). It fails on a detached HEAD.
 func (r *Repo) CurrentBranch() (string, error) {
