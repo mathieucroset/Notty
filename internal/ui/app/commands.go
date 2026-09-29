@@ -203,10 +203,11 @@ func (m *Model) openConfig() tea.Cmd {
 }
 
 func (m *Model) handleConfigEdited(msg configEditedMsg) tea.Cmd {
+	ready := m.afterExec()
 	if msg.err != nil {
-		return m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err))
+		return tea.Batch(ready, m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err)))
 	}
-	return m.pushToast(msgs.ToastInfo, "Restart Notty to apply every config change")
+	return tea.Batch(ready, m.pushToast(msgs.ToastInfo, "Restart Notty to apply every config change"))
 }
 
 // findUnusedCmd lists the attachments no note references.

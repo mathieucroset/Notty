@@ -17,10 +17,6 @@ import (
 
 // newEditor builds the note editor from the configuration.
 func newEditor(opts Options) editor.Model {
-	root := ""
-	if opts.Vault != nil {
-		root = opts.Vault.Root
-	}
 	clip := opts.Clipboard
 	if clip == nil {
 		clip = clipboard.Default()
@@ -32,7 +28,7 @@ func newEditor(opts Options) editor.Model {
 		Styles:      opts.Styles,
 		Palette:     opts.Palette,
 		Clipboard:   clip,
-		VaultRoot:   root,
+		VaultRoot:   vaultRoot(opts),
 	})
 }
 
@@ -129,7 +125,9 @@ func (m *Model) handleEditorChanged(msg editor.ChangedMsg) tea.Cmd {
 	m.note.title = vault.Title(content, msg.Path)
 	m.note.words = len(strings.Fields(content))
 	m.sidebar.SetDirty(m.dirtyPath())
-	return nil
+	cmd := m.syncPreview()
+	m.followCursor()
+	return cmd
 }
 
 // editorFocused reports whether keys go to the editor: a note is open in
@@ -167,6 +165,7 @@ func (m *Model) handleEditorKey(k tea.KeyPressMsg) tea.Cmd {
 	m.editorStatus = ""
 	var cmd tea.Cmd
 	m.editor, cmd = m.editor.Update(k)
+	m.followCursor()
 	return cmd
 }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/mathieucroset/notty/internal/ui/editor"
 	"github.com/mathieucroset/notty/internal/ui/history"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
+	"github.com/mathieucroset/notty/internal/ui/preview"
 	"github.com/mathieucroset/notty/internal/ui/sidebar"
 	"github.com/mathieucroset/notty/internal/ui/statusbar"
 	"github.com/mathieucroset/notty/internal/ui/tasksview"
@@ -153,6 +154,11 @@ type Model struct {
 
 	// editor holds the open note's buffer.
 	editor editor.Model
+	// preview renders the buffer in split and preview views.
+	preview preview.Model
+	// kittyGen numbers the ready ticks: every tea.Exec starts a new
+	// generation, dropping ticks armed before it.
+	kittyGen int
 	// editorStatus is the editor's last message (unknown command, search
 	// wrapped), shown in the status row until the next key.
 	editorStatus string
@@ -182,11 +188,20 @@ func New(opts Options) *Model {
 		tasks:          tasksview.New(opts.Styles, opts.Config.Tasks.DueSoonDays, opts.Config.Tasks.ShowDone),
 		trash:          trash.New(opts.Styles, opts.Palette),
 		editor:         newEditor(opts),
+		preview:        preview.New(opts.Styles, opts.Palette, opts.Caps, vaultRoot(opts)),
 	}
 	m.sidebar.SetExpanded(opts.Local.Expanded)
 	m.sidebar.SetPins(opts.Pins.Pins)
 	m.sidebar.SetFocused(true)
 	return m
+}
+
+// vaultRoot is the absolute vault directory, or "" without a vault.
+func vaultRoot(opts Options) string {
+	if opts.Vault == nil {
+		return ""
+	}
+	return opts.Vault.Root
 }
 
 // Focus returns the focused pane.
@@ -211,7 +226,7 @@ func (m *Model) Init() tea.Cmd {
 	}
 	m.indexing = true
 	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault), m.startupTrashCmd(),
-		listenWatcherCmd(m.opts.Watcher), m.reopenLastNoteCmd())
+		listenWatcherCmd(m.opts.Watcher), m.reopenLastNoteCmd(), m.readyTickCmd())
 }
 
 // reopenLastNoteCmd reopens the note open when the app last quit, at its
@@ -289,6 +304,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case editor.StatusMsg:
 		m.editorStatus = msg.Text
+	case readyTickMsg:
+		if msg.gen == m.kittyGen {
+			return m, m.terminalReady()
+		}
+	case tea.KeyboardEnhancementsMsg:
+		return m, m.terminalReady()
 	case msgs.SaveRequestMsg:
 		return m, m.saveRequest()
 
@@ -303,7 +324,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case msgs.ToggleSidebarMsg:
 		m.toggleSidebar()
 	case msgs.CycleNoteViewMsg:
-		m.cycleNoteView()
+		return m, m.cycleNoteView()
 	case msgs.QuitMsg:
 		return m, m.quit()
 	case msgs.ActivateEntryMsg:
@@ -380,7 +401,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var edCmd, toastCmd tea.Cmd
 		m.editor, edCmd = m.editor.Update(msg)
 		m.toast, toastCmd = m.toast.Update(msg)
-		return m, tea.Batch(edCmd, toastCmd)
+		return m, tea.Batch(edCmd, m.updatePreview(msg), toastCmd)
 	}
 	return m, nil
 }
@@ -423,7 +444,7 @@ func (m *Model) showNote(p, content string, line int) tea.Cmd {
 	m.sidebar.Select(p)
 	m.setFocus(FocusMain)
 	m.syncExpandedState()
-	return m.saveLocalCmd()
+	return tea.Batch(m.saveLocalCmd(), m.syncPreview())
 }
 
 // sidebarShown reports whether the sidebar is actually drawn: it is
@@ -448,10 +469,6 @@ func (m *Model) toggleSidebar() {
 	m.relayout()
 }
 
-func (m *Model) cycleNoteView() {
-	m.noteView = (m.noteView + 1) % 3
-}
-
 // relayout resizes components and fixes focus after a layout change.
 func (m *Model) relayout() {
 	l := ComputeLayout(m.width, m.height, m.sidebarVisible)
@@ -467,7 +484,7 @@ func (m *Model) relayout() {
 		h := m.history.SetSize(m.width, m.height)
 		m.history = &h
 	}
-	m.editor = m.editor.SetSize(l.Content.W, l.Content.H)
+	m.sizeNoteViews(l.Content.W, l.Content.H)
 	m.resizeOverlay()
 	m.status.SetSize(l.Status.W)
 }
@@ -621,5 +638,5 @@ func (m *Model) mainContent(w, h int) string {
 	if m.note.path == "" {
 		return centered(m.emptyHint())
 	}
-	return m.editor.View()
+	return m.noteContent(w, h)
 }

@@ -355,9 +355,10 @@ func (m *Model) openExternal(rel string) tea.Cmd {
 
 // handleExternalDone re-reads a file edited in $EDITOR.
 func (m *Model) handleExternalDone(msg externalDoneMsg) tea.Cmd {
+	ready := m.afterExec()
 	if msg.err != nil {
-		return m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err))
+		return tea.Batch(ready, m.pushToast(msgs.ToastError, fmt.Sprintf("The editor failed: %v", msg.err)))
 	}
 	m.queueReindex(msg.path)
-	return tea.Batch(reindexCmd(m.opts.Vault, m.ix, []string{msg.path}), loadTreeCmd(m.opts.Vault), m.reloadNoteIf(msg.path))
+	return tea.Batch(ready, reindexCmd(m.opts.Vault, m.ix, []string{msg.path}), loadTreeCmd(m.opts.Vault), m.reloadNoteIf(msg.path))
 }

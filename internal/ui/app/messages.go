@@ -77,7 +77,7 @@ func (m *Model) handleNoteReloaded(msg noteReloadedMsg) tea.Cmd {
 	m.note.title = vault.Title(msg.content, msg.path)
 	m.note.words = len(strings.Fields(msg.content))
 	m.sidebar.SetDirty(m.dirtyPath())
-	return nil
+	return m.syncPreview()
 }
 
 // loadTreeCmd reads the vault tree off the UI goroutine.

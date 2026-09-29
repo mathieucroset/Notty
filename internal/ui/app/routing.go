@@ -85,8 +85,14 @@ func (m *Model) handleMainKey(k tea.KeyPressMsg) tea.Cmd {
 		m.trash, cmd = m.trash.Update(k)
 		return cmd
 	}
-	if m.note.path != "" && m.noteView != ViewPreview {
-		return m.handleEditorKey(k)
+	if m.note.path != "" {
+		if m.noteView != ViewPreview {
+			return m.handleEditorKey(k)
+		}
+		if k.String() == "esc" && m.dismissToast() {
+			return nil
+		}
+		return m.updatePreview(k)
 	}
 	switch k.String() {
 	case "tab":
@@ -109,7 +115,7 @@ func (m *Model) handleAction(a keys.Action) tea.Cmd {
 	case keys.ToggleSidebar:
 		m.toggleSidebar()
 	case keys.CycleView:
-		m.cycleNoteView()
+		return m.cycleNoteView()
 	case keys.Finder:
 		return emit(msgs.OpenFinderMsg{})
 	case keys.Search:
