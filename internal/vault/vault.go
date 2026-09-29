@@ -36,7 +36,12 @@ var hiddenTopLevel = map[string]bool{
 }
 
 // Vault is a directory of notes. Root is absolute and clean.
-type Vault struct{ Root string }
+type Vault struct {
+	Root string
+	// host overrides the hostname recorded in trash metadata; empty means
+	// the machine's short hostname (see hostname).
+	host string
+}
 
 // Node is an entry in the vault tree. Path is vault-relative with "/"
 // separators; the root node has Path "".
