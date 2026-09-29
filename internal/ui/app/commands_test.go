@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mathieucroset/notty/internal/ui/keys"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
@@ -240,13 +241,20 @@ func TestReplacingPreviewingPaletteCancelsTheme(t *testing.T) {
 func TestErrorLogOverlay(t *testing.T) {
 	m := start(t, testOptions(t), 120, 30)
 	run(t, m, msgs.ToastMsg{Level: msgs.ToastError, Text: "Disk on fire"})
+	run(t, m, msgs.ToastMsg{Level: msgs.ToastWarn, Text: "Running hot"})
+	run(t, m, msgs.ToastMsg{Level: msgs.ToastInfo, Text: "Pinned things"})
 	run(t, m, keyMsg("!"))
 	if m.topOverlay() == nil || m.topOverlay().kind != overlayLog {
 		t.Fatal("! did not open the error log")
 	}
-	s := screen(m)
-	if !strings.Contains(s, "Error log") || !strings.Contains(s, "Disk on fire") {
-		t.Errorf("error log content missing:\n%s", s)
+	s := ansi.Strip(m.logBox(m.topOverlay())) // the box alone, not the toasts
+	for _, want := range []string{"Error log", "Disk on fire", "Running hot"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("error log missing %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "Pinned things") {
+		t.Errorf("info toast listed in the error log:\n%s", s)
 	}
 	assertSize(t, m, 120, 30)
 	run(t, m, keyMsg("esc"))

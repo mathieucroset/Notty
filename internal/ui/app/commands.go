@@ -59,7 +59,14 @@ func (m *Model) toggleHelp() {
 
 // openErrorLog opens the error log overlay.
 func (m *Model) openErrorLog() {
-	lv := toast.NewLogView(m.toast.Log(), m.opts.Styles)
+	// The error log is for problems: info toasts are left out.
+	var entries []toast.Entry
+	for _, e := range m.toast.Log() {
+		if e.Level >= msgs.ToastWarn {
+			entries = append(entries, e)
+		}
+	}
+	lv := toast.NewLogView(entries, m.opts.Styles)
 	w, h := m.logSize()
 	lv.SetSize(w, h)
 	m.openOverlay(&overlayState{kind: overlayLog, log: lv})
