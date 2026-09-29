@@ -135,15 +135,16 @@ func (m *Model) withOverlay(screen string) string {
 // toastMaxWidth is the widest a toast box may be.
 const toastMaxWidth = 48
 
-// withToasts draws the visible toasts bottom-right, above the status bar.
+// withToasts draws the visible toasts bottom-right, inside the pane border
+// just above the status bar.
 func (m *Model) withToasts(screen string) string {
-	if !m.toast.Visible() || m.width < 4 || m.height < 2 {
+	if !m.toast.Visible() || m.width < 6 || m.height < 3 {
 		return screen
 	}
-	box := m.toast.View(min(toastMaxWidth, m.width-2))
+	box := m.toast.View(min(toastMaxWidth, m.width-4))
 	bw, bh := lipgloss.Width(box), lipgloss.Height(box)
-	x := max(m.width-bw-1, 0)
-	y := max(m.height-1-bh, 0)
+	x := max(m.width-bw-2, 0)
+	y := max(m.height-2-bh, 0)
 	return compose(screen, box, x, y, m.width, m.height)
 }
 

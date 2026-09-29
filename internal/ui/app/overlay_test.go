@@ -65,6 +65,9 @@ func TestToastDrawnBottomRight(t *testing.T) {
 	if !strings.Contains(lines[29], "F1 help") {
 		t.Errorf("status bar covered: %q", lines[29])
 	}
+	if !strings.HasSuffix(lines[28], "──╯") {
+		t.Errorf("pane border covered: %q", lines[28])
+	}
 	assertSize(t, m, 120, 30)
 }
 
