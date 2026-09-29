@@ -583,8 +583,11 @@ func TestMergeUnrelatedHistories(t *testing.T) {
 	if err := r.Merge("origin/main", false); err == nil {
 		t.Fatalf("Merge of unrelated histories without allowUnrelated succeeded")
 	}
-	if err := r.Merge("origin/main", true); err != nil {
+	if err := r.MergeWithMessage("origin/main", true, "Merge · here"); err != nil {
 		t.Fatalf("Merge allowUnrelated: %v", err)
+	}
+	if s := gittest.Git(t, r.Dir, "log", "-1", "--format=%s"); s != "Merge · here" {
+		t.Fatalf("merge subject = %q", s)
 	}
 	if gittest.Read(t, r, "README.md") != "# Notes\n" || gittest.Read(t, r, "local.md") != "local\n" {
 		t.Fatalf("unrelated merge did not combine files")

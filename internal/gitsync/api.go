@@ -420,6 +420,12 @@ func (r *Repo) hasCommit(rev string) bool {
 // ErrLocalChanges when git refused to start because uncommitted changes would
 // be overwritten.
 func (r *Repo) Merge(ref string, allowUnrelated bool) error {
+	return r.MergeWithMessage(ref, allowUnrelated, "")
+}
+
+// MergeWithMessage is Merge with msg as the merge commit message (also left
+// in MERGE_MSG when the merge conflicts). An empty msg means git's default.
+func (r *Repo) MergeWithMessage(ref string, allowUnrelated bool, msg string) error {
 	if err := checkArg("ref", ref); err != nil {
 		return err
 	}
@@ -429,6 +435,9 @@ func (r *Repo) Merge(ref string, allowUnrelated bool) error {
 	args := []string{"merge", "--no-edit", "--ff", "--no-autostash", "-Xfind-renames"}
 	if allowUnrelated {
 		args = append(args, "--allow-unrelated-histories")
+	}
+	if msg != "" {
+		args = append(args, "-m", msg)
 	}
 	args = append(args, ref)
 	res, err := r.git(noHooks(args...)...)
