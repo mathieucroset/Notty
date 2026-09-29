@@ -22,28 +22,33 @@ import (
 
 // shared is the state every copy of a Model points to: caches and the
 // Kitty bookkeeping. The maps are only touched from Update and the Set*
-// methods (the Bubble Tea goroutine); the image cache and the id
-// allocator are also used by render commands and are safe for that.
+// methods (the Bubble Tea goroutine); the image cache is also used by the
+// render command (one at a time) and is safe for that.
 type shared struct {
 	textCache map[textKey][]string
 	imgCache  *imgrender.Cache
-	// sent holds the Kitty ids transmitted since the terminal last lost
-	// its images (startup or ResetKittyState).
+	cacheCap  int
+	// sent holds the Kitty ids the terminal has: transmitted since it
+	// last lost its images (startup or ResetKittyState) and not deleted.
+	// It is the source of truth for deletes.
 	sent map[uint32]bool
-
-	idMu   sync.Mutex
-	lastID uint32
 
 	// glamourCalls counts Glamour renders, for tests of the segment cache.
 	glamourCalls atomic.Int64
 }
 
-// allocID hands out the next dynamic Kitty image id.
-func (s *shared) allocID() uint32 {
-	s.idMu.Lock()
-	defer s.idMu.Unlock()
-	s.lastID = imgrender.NextKittyID(s.lastID)
-	return s.lastID
+// kittyIDs allocates Kitty image ids for every preview in the process, so
+// two previews never share an id.
+var kittyIDs struct {
+	sync.Mutex
+	last uint32
+}
+
+func allocKittyID() uint32 {
+	kittyIDs.Lock()
+	defer kittyIDs.Unlock()
+	kittyIDs.last = imgrender.NextKittyID(kittyIDs.last)
+	return kittyIDs.last
 }
 
 // textKey identifies one Glamour rendering of a text segment.
@@ -69,8 +74,11 @@ type imgItem struct {
 	reason string
 	// rows are the rendered rows (half-blocks or Kitty placeholders); nil
 	// with an empty reason means a plain chip (images off).
-	rows     []string
-	kittyID  uint32
+	rows    []string
+	kittyID uint32
+	// transmit is the Kitty transmission, present only when the render
+	// found the id not yet sent; Update clears it once written. Cache
+	// entries never hold it.
 	transmit string
 }
 
@@ -89,8 +97,7 @@ type textJob struct {
 }
 
 // renderJob is everything a render command needs; it shares nothing
-// mutable with the model except the concurrency-safe image cache and id
-// allocator.
+// mutable with the model except the concurrency-safe image cache.
 type renderJob struct {
 	gen           int
 	sh            *shared
@@ -102,6 +109,11 @@ type renderJob struct {
 	vaultRoot     string
 	segs          []Segment
 	texts         []textJob // one per Text segment, in order
+	// sent is a snapshot of the Kitty ids the terminal has: images whose
+	// id is missing get their transmission (re)encoded.
+	sent map[uint32]bool
+	// encoded dedupes transmissions within the job.
+	encoded map[uint32]string
 }
 
 // renderedMsg carries a finished render back to Update.
@@ -110,7 +122,6 @@ type renderedMsg struct {
 	gen      int
 	doc      *doc
 	newTexts map[textKey][]string
-	evicted  []imgrender.Rendered
 }
 
 // renderTickMsg fires when the debounce delay after a change has passed.
@@ -135,6 +146,7 @@ func (j renderJob) run() tea.Msg {
 		blocks:   make([]block, len(j.segs)),
 	}
 	j.renderTexts()
+	j.encoded = map[uint32]string{}
 	ti := 0
 	for i, seg := range j.segs {
 		if seg.Kind == Text {
@@ -147,9 +159,7 @@ func (j renderJob) run() tea.Msg {
 			continue
 		}
 		for _, link := range seg.Images {
-			item, evicted := j.image(link)
-			d.blocks[i].images = append(d.blocks[i].images, item)
-			msg.evicted = append(msg.evicted, evicted...)
+			d.blocks[i].images = append(d.blocks[i].images, j.image(link))
 		}
 	}
 	d.layout()
@@ -226,23 +236,25 @@ func (j renderJob) glamour(tr *glamour.TermRenderer, md string) []string {
 }
 
 // image resolves, decodes (through the cache) and renders one image link.
-func (j renderJob) image(link links.ImageLink) (*imgItem, []imgrender.Rendered) {
+// Kitty renderings are cached without their transmission; it is encoded
+// only when the terminal does not have the id (j.sent).
+func (j renderJob) image(link links.ImageLink) *imgItem {
 	item := &imgItem{link: link, name: imageName(link.Target)}
 	rel, external := links.Resolve(link.Target, j.notePath)
 	switch {
 	case external:
 		item.reason = "external"
-		return item, nil
+		return item
 	case rel == "":
 		item.reason = "missing"
-		return item, nil
+		return item
 	}
 	item.abs = filepath.Join(j.vaultRoot, filepath.FromSlash(rel))
 	item.name = path.Base(rel)
 
 	proto := j.caps.Inline
 	if proto == imgrender.ProtoOff {
-		return item, nil
+		return item
 	}
 	if proto != imgrender.ProtoKitty {
 		proto = imgrender.ProtoHalfBlocks
@@ -250,41 +262,58 @@ func (j renderJob) image(link links.ImageLink) (*imgItem, []imgrender.Rendered) 
 	fi, err := os.Stat(item.abs)
 	if err != nil || fi.IsDir() {
 		item.reason = "missing"
-		return item, nil
+		return item
 	}
 	w, h, err := imgrender.Dimensions(item.abs)
 	if err != nil {
 		item.reason = decodeReason(err)
-		return item, nil
+		return item
 	}
 	cols, rows := j.fit(w, h)
 	key := imgrender.CacheKey{Path: item.abs, ModTime: fi.ModTime().UnixNano(), Cols: cols, Rows: rows, Proto: proto}
-	r, ok := j.sh.imgCache.Get(key)
-	var evicted []imgrender.Rendered
-	if !ok {
-		img, err := imgrender.Decode(item.abs)
-		if err != nil {
-			item.reason = decodeReason(err)
-			return item, nil
+	r, cached := j.sh.imgCache.Get(key)
+	needTransmit := proto == imgrender.ProtoKitty && (!cached || !j.sent[r.KittyID])
+	if cached && needTransmit {
+		if t, ok := j.encoded[r.KittyID]; ok {
+			item.rows, item.kittyID, item.transmit = r.Rows, r.KittyID, t
+			return item
 		}
-		if proto == imgrender.ProtoKitty {
-			id := j.sh.allocID()
-			r = imgrender.Rendered{
-				Rows:     imgrender.KittyPlaceholders(id, cols, rows),
-				KittyID:  id,
-				Transmit: j.wrap(imgrender.KittyTransmit(img, id, cols, rows)),
-			}
-		} else {
-			r = imgrender.Rendered{Rows: imgrender.HalfBlocks(img, cols, rows)}
+	}
+	if cached && !needTransmit {
+		item.rows, item.kittyID = r.Rows, r.KittyID
+		return item
+	}
+	img, err := imgrender.Decode(item.abs)
+	if err != nil {
+		item.reason = decodeReason(err)
+		return item
+	}
+	switch proto {
+	case imgrender.ProtoKitty:
+		id := r.KittyID
+		if !cached {
+			id = allocKittyID()
+			r = imgrender.Rendered{Rows: imgrender.KittyPlaceholders(id, cols, rows), KittyID: id}
 		}
+		t := imgrender.KittyTransmit(img, id, cols, rows)
+		if t == "" || len(r.Rows) == 0 {
+			item.reason = "unreadable"
+			return item
+		}
+		item.transmit = j.wrap(t)
+		j.encoded[id] = item.transmit
+	default:
+		r = imgrender.Rendered{Rows: imgrender.HalfBlocks(img, cols, rows)}
 		if len(r.Rows) == 0 {
 			item.reason = "unreadable"
-			return item, nil
+			return item
 		}
-		evicted = j.sh.imgCache.Put(key, r)
 	}
-	item.rows, item.kittyID, item.transmit = r.Rows, r.KittyID, r.Transmit
-	return item, evicted
+	if !cached {
+		j.sh.imgCache.Put(key, r)
+	}
+	item.rows, item.kittyID = r.Rows, r.KittyID
+	return item
 }
 
 // fit sizes an image: the pane width (minus padding) and at most 60% of

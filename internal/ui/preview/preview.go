@@ -85,6 +85,7 @@ func New(styles theme.Styles, palette theme.Palette, caps imgrender.Caps, vaultR
 		sh: &shared{
 			textCache: map[textKey][]string{},
 			imgCache:  imgrender.NewCache(imgrender.DefaultCacheSize),
+			cacheCap:  imgrender.DefaultCacheSize,
 			sent:      map[uint32]bool{},
 		},
 	}
@@ -158,19 +159,18 @@ func (m Model) SetTerminalReady() (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.ready = true
-	return m, m.kittyCmd(nil)
+	return m, m.syncKitty()
 }
 
-// ResetKittyState forgets every transmitted image, for after a tea.Exec
-// (the terminal left and re-entered the alternate screen, which wipes its
-// image store), and re-transmits the images of the current note. Call it
-// once the terminal is back.
+// ResetKittyState forgets every transmitted image and holds transmissions
+// again, for a tea.Exec (the terminal leaves and re-enters the alternate
+// screen, which wipes its image store). It returns no command: the app
+// re-arms its ready tick and calls SetTerminalReady, which re-transmits
+// the images of the current note.
 func (m Model) ResetKittyState() (Model, tea.Cmd) {
 	clear(m.sh.sent)
-	if !m.ready {
-		return m, nil
-	}
-	return m, m.kittyCmd(nil)
+	m.ready = false
+	return m, nil
 }
 
 // KittyCleanup returns the sequences that delete every transmitted image,
@@ -248,6 +248,20 @@ func (m Model) startRender() tea.Cmd {
 		caps:      m.caps,
 		vaultRoot: m.vaultRoot,
 		segs:      segs,
+		sent:      maps.Clone(m.sh.sent),
+	}
+	// The image cache holds at least every image of the note, so a render
+	// never evicts what it shows. Growing it drops the old entries; their
+	// Kitty images are deleted when the render is applied.
+	n := 0
+	for _, s := range segs {
+		if s.Kind == Image {
+			n += len(s.Images)
+		}
+	}
+	if n > m.sh.cacheCap {
+		m.sh.cacheCap = max(2*n, imgrender.DefaultCacheSize)
+		m.sh.imgCache = imgrender.NewCache(m.sh.cacheCap)
 	}
 	cw := contentWidth(m.width)
 	for _, s := range segs {
@@ -268,13 +282,6 @@ func (m Model) applyRender(msg renderedMsg) (Model, tea.Cmd) {
 	if msg.gen != m.gen {
 		return m, nil
 	}
-	var deletes []string
-	for _, r := range msg.evicted {
-		if r.KittyID != 0 && m.sh.sent[r.KittyID] {
-			deletes = append(deletes, m.wrap(imgrender.KittyDelete(r.KittyID)))
-			delete(m.sh.sent, r.KittyID)
-		}
-	}
 	// Keep only the text renderings the current document uses.
 	used := map[textKey]bool{}
 	cw := contentWidth(msg.doc.width)
@@ -293,27 +300,52 @@ func (m Model) applyRender(msg renderedMsg) (Model, tea.Cmd) {
 		m.imgIdx = len(m.doc.images) - 1
 	}
 	m.clampOffset()
-	return m, m.kittyCmd(deletes)
+	return m, m.syncKitty()
 }
 
-// kittyCmd writes pending delete sequences and, once the terminal is
-// ready, the transmissions of the current note's Kitty images not sent
-// yet, as one tea.Raw.
-func (m Model) kittyCmd(deletes []string) tea.Cmd {
-	var b strings.Builder
-	for _, d := range deletes {
-		b.WriteString(d)
-	}
-	if m.ready && m.doc != nil {
+// syncKitty makes the terminal's images match the current document, as
+// one tea.Raw: it deletes every sent id the document does not show (old
+// sizes, other notes, dropped images) and, once the terminal is ready,
+// transmits the shown ones it lacks. A shown image whose transmission was
+// already dropped (after ResetKittyState) needs a re-encode: a render is
+// requested for it.
+func (m *Model) syncKitty() tea.Cmd {
+	shown := map[uint32]bool{}
+	if m.doc != nil {
 		for _, item := range m.doc.images {
-			if item.kittyID == 0 || item.transmit == "" || m.sh.sent[item.kittyID] {
-				continue
+			if item.kittyID != 0 {
+				shown[item.kittyID] = true
 			}
-			b.WriteString(item.transmit)
-			m.sh.sent[item.kittyID] = true
 		}
 	}
-	return rawCmd(b.String())
+	var b strings.Builder
+	for _, id := range slices.Sorted(maps.Keys(m.sh.sent)) {
+		if !shown[id] {
+			b.WriteString(m.wrap(imgrender.KittyDelete(id)))
+			delete(m.sh.sent, id)
+		}
+	}
+	reencode := false
+	if m.ready && m.doc != nil {
+		for _, item := range m.doc.images {
+			switch {
+			case item.kittyID == 0 || m.sh.sent[item.kittyID]:
+			case item.transmit == "":
+				reencode = true
+			default:
+				b.WriteString(item.transmit)
+				m.sh.sent[item.kittyID] = true
+			}
+		}
+		for _, item := range m.doc.images {
+			item.transmit = "" // written, or superseded by the sent one
+		}
+	}
+	cmd := rawCmd(b.String())
+	if reencode {
+		cmd = tea.Batch(cmd, m.requestRender())
+	}
+	return cmd
 }
 
 func rawCmd(s string) tea.Cmd {

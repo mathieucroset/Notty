@@ -377,15 +377,51 @@ func TestKittyTransmitHeldUntilTerminalReady(t *testing.T) {
 		t.Fatalf("re-render re-sent %d raws", len(raws))
 	}
 
-	// After tea.Exec the terminal lost its images: re-transmit.
-	m, cmd = m.ResetKittyState()
-	m, raws, _ = run(m, cmd)
-	if len(raws) != 1 || !strings.Contains(raws[0], want) {
-		t.Fatalf("ResetKittyState: raws %d, want one re-transmit", len(raws))
-	}
-
 	if got, want := m.KittyCleanup(), imgrender.KittyDelete(id); got != want {
 		t.Fatalf("KittyCleanup = %q, want %q", got, want)
+	}
+
+	// For tea.Exec: forget everything and hold transmissions again.
+	m, cmd = m.ResetKittyState()
+	if cmd != nil {
+		t.Fatal("ResetKittyState returned a command")
+	}
+	if m.KittyCleanup() != "" {
+		t.Fatal("ids still recorded as sent after ResetKittyState")
+	}
+	m, raws = setContent(t, m, "n.md", content)
+	if len(raws) != 0 {
+		t.Fatal("transmitted after ResetKittyState before the terminal was ready")
+	}
+	// Ready again: the image is re-encoded and re-transmitted, same id.
+	m, cmd = m.SetTerminalReady()
+	m, raws, _ = run(m, cmd)
+	if len(raws) != 1 || !strings.Contains(raws[0], want) {
+		t.Fatalf("after reset + ready: raws %d, want one re-transmit containing %q", len(raws), want)
+	}
+	if got := m.doc.images[0].kittyID; got != id {
+		t.Fatalf("id changed from %d to %d", id, got)
+	}
+}
+
+func TestKittyReencodesAfterResetWithoutNewContent(t *testing.T) {
+	m, content := kittyNote(t)
+	m, _ = m.SetTerminalReady()
+	m, raws := setContent(t, m, "n.md", content)
+	if len(raws) != 1 {
+		t.Fatalf("raws = %d, want 1", len(raws))
+	}
+	if m.doc.images[0].transmit != "" {
+		t.Fatal("transmission kept after it was written")
+	}
+	m, _ = m.ResetKittyState()
+	m, cmd := m.SetTerminalReady()
+	if cmd == nil {
+		t.Fatal("no re-encode requested")
+	}
+	_, raws, _ = run(m, cmd)
+	if len(raws) != 1 || !strings.Contains(raws[0], "\x1b_Ga=T") {
+		t.Fatalf("raws = %d, want one re-transmit", len(raws))
 	}
 }
 
@@ -398,12 +434,11 @@ func TestKittyTransmitAfterReadyGoesOutWithRender(t *testing.T) {
 	}
 }
 
-func TestKittyEvictionDeletesImage(t *testing.T) {
+func TestKittyImagesNoLongerShownAreDeleted(t *testing.T) {
 	vault := t.TempDir()
 	writePNG(t, filepath.Join(vault, "a.png"), 32, 32)
 	writePNG(t, filepath.Join(vault, "b.png"), 32, 32)
 	m := newTest(t, imgrender.ProtoKitty, vault)
-	m.sh.imgCache = imgrender.NewCache(1)
 	m, _ = m.SetTerminalReady()
 	m, _ = setContent(t, m, "n.md", "![](a.png)")
 	idA := m.doc.images[0].kittyID
@@ -411,13 +446,91 @@ func TestKittyEvictionDeletesImage(t *testing.T) {
 	idB := m.doc.images[0].kittyID
 	all := strings.Join(raws, "")
 	if !strings.Contains(all, imgrender.KittyDelete(idA)) {
-		t.Fatal("evicted image not deleted")
+		t.Fatal("image no longer shown not deleted")
 	}
 	if !strings.Contains(all, fmt.Sprintf("i=%d,", idB)) {
 		t.Fatal("new image not transmitted")
 	}
 	if got := m.KittyCleanup(); got != imgrender.KittyDelete(idB) {
 		t.Fatalf("KittyCleanup = %q, want only b", got)
+	}
+}
+
+func TestKittyOldSizeDeletedOnResize(t *testing.T) {
+	vault := t.TempDir()
+	writePNG(t, filepath.Join(vault, "p.png"), 400, 64) // 50x4 cells
+	m := newTest(t, imgrender.ProtoKitty, vault)
+	m, _ = m.SetTerminalReady()
+	m, _ = setContent(t, m, "n.md", "![](p.png)")
+	for w := 45; w > 35; w-- {
+		old := m.doc.images[0].kittyID
+		m = m.SetSize(w, 30)
+		var cmd tea.Cmd
+		m, cmd = m.Refresh()
+		var raws []string
+		m, raws, _ = run(m, cmd)
+		if !strings.Contains(strings.Join(raws, ""), imgrender.KittyDelete(old)) {
+			t.Fatalf("width %d: old size %d not deleted", w, old)
+		}
+		if len(m.sh.sent) != 1 || !m.sh.sent[m.doc.images[0].kittyID] {
+			t.Fatalf("width %d: sent = %v, want only the shown id", w, m.sh.sent)
+		}
+	}
+}
+
+func TestKittyManyImagesStayStable(t *testing.T) {
+	vault := t.TempDir()
+	var b strings.Builder
+	for i := range 70 {
+		writePNG(t, filepath.Join(vault, fmt.Sprintf("p%d.png", i)), 16, 16)
+		fmt.Fprintf(&b, "![](p%d.png)\n\n", i)
+	}
+	m := newTest(t, imgrender.ProtoKitty, vault)
+	m, _ = m.SetTerminalReady()
+	m, raws := setContent(t, m, "n.md", b.String())
+	if got := strings.Count(strings.Join(raws, ""), "a=T"); got != 70 {
+		t.Fatalf("first render transmitted %d images, want 70", got)
+	}
+	for r := range 3 {
+		m, raws = setContent(t, m, "n.md", b.String()+strings.Repeat("x", r+1))
+		if len(raws) != 0 {
+			t.Fatalf("re-render %d sent %d raws, want none", r, len(raws))
+		}
+	}
+	if len(m.sh.sent) != 70 {
+		t.Fatalf("sent = %d ids, want 70", len(m.sh.sent))
+	}
+}
+
+func TestKittyStaleRenderNeverDeletesShownImages(t *testing.T) {
+	m, content := kittyNote(t)
+	m, _ = m.SetTerminalReady()
+	m, _ = setContent(t, m, "n.md", content)
+	id := m.doc.images[0].kittyID
+	stale := m.startRender()().(renderedMsg)
+	m.sh.imgCache.Clear()
+	m, cmd := m.SetContent("n.md", "no images")
+	m, c := m.Update(stale)
+	if _, raws, _ := run(m, c); len(raws) != 0 {
+		t.Fatalf("stale render wrote %q", raws)
+	}
+	if !m.sh.sent[id] {
+		t.Fatal("stale render forgot a shown id")
+	}
+	_, raws, _ := run(m, cmd)
+	if strings.Join(raws, "") != imgrender.KittyDelete(id) {
+		t.Fatalf("current render wrote %q, want the delete of %d", raws, id)
+	}
+}
+
+func TestKittyIDsUniqueAcrossPreviews(t *testing.T) {
+	m1, content := kittyNote(t)
+	m2 := New(m1.styles, m1.palette, m1.caps, m1.vaultRoot).SetSize(60, 30)
+	m2.debounce = time.Millisecond
+	m1, _ = setContent(t, m1, "n.md", content)
+	m2, _ = setContent(t, m2, "n.md", content)
+	if m1.doc.images[0].kittyID == m2.doc.images[0].kittyID {
+		t.Fatal("two previews share a kitty id")
 	}
 }
 
