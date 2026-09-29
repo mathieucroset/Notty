@@ -7,6 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/mathieucroset/notty/internal/ui/dialog"
+	"github.com/mathieucroset/notty/internal/ui/finder"
 	"github.com/mathieucroset/notty/internal/ui/help"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
 	"github.com/mathieucroset/notty/internal/ui/palette"
@@ -23,6 +24,7 @@ const (
 	overlayPalette
 	overlayHelp
 	overlayLog
+	overlayFinder
 )
 
 // overlayState is one overlay in the stack over the screen. Opening an
@@ -41,6 +43,7 @@ type overlayState struct {
 	paletteTheme string
 	help         help.Model
 	log          toast.LogView
+	finder       finder.Model
 }
 
 // toastTimer wraps the expiry command of an info or warning toast. Tests
@@ -123,8 +126,24 @@ func (m *Model) updateOverlay(k tea.KeyPressMsg) tea.Cmd {
 		o.help, cmd = o.help.Update(k)
 	case overlayLog:
 		o.log, cmd = o.log.Update(k)
+	case overlayFinder:
+		o.finder, cmd = o.finder.Update(k)
 	}
 	return cmd
+}
+
+// updateFinders forwards a non-key message to open finder overlays: their
+// search debounce, search results and preview renders.
+func (m *Model) updateFinders(msg tea.Msg) tea.Cmd {
+	var cmds []tea.Cmd
+	for _, o := range m.overlays {
+		if o.kind == overlayFinder {
+			var cmd tea.Cmd
+			o.finder, cmd = o.finder.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 // handleDialogResult closes the dialog that produced res and acts on it.
@@ -178,6 +197,8 @@ func (m *Model) overlayBox(o *overlayState) string {
 		return o.help.View()
 	case overlayLog:
 		return m.logBox(o)
+	case overlayFinder:
+		return o.finder.View()
 	}
 	return ""
 }

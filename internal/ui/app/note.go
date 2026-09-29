@@ -39,7 +39,8 @@ func (m *Model) openNote(msg msgs.OpenNoteMsg) tea.Cmd {
 	if m.opts.Vault == nil || msg.Path == "" {
 		return nil
 	}
-	m.openSeq++ // drop any load still in flight
+	m.closeOverlayKind(overlayFinder) // the finder's choice
+	m.openSeq++                       // drop any load still in flight
 	if msg.Path == m.note.path {
 		if msg.Line >= 0 {
 			m.editor = m.editor.SetCursor(buffer.Pos{Line: msg.Line})

@@ -416,7 +416,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var edCmd, toastCmd tea.Cmd
 		m.editor, edCmd = m.editor.Update(msg)
 		m.toast, toastCmd = m.toast.Update(msg)
-		return m, tea.Batch(edCmd, m.updatePreview(msg), toastCmd)
+		return m, tea.Batch(edCmd, m.updatePreview(msg), m.updateFinders(msg), toastCmd)
 	}
 	return m, nil
 }
