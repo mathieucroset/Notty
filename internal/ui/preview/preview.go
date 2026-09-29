@@ -57,6 +57,10 @@ type Model struct {
 	// return a command).
 	needTick bool
 	debounce time.Duration
+	// inFlight is set while a render command runs; only one runs at a
+	// time. dirty asks for another render when it returns.
+	inFlight bool
+	dirty    bool
 
 	doc     *doc
 	offset  int
@@ -136,7 +140,7 @@ func (m Model) SetTheme(styles theme.Styles, palette theme.Palette) (Model, tea.
 	m.styles, m.palette = styles, palette
 	m.gen++
 	m.needTick = false
-	return m, m.startRender()
+	return m, m.requestRender()
 }
 
 // SetOverlayOpen swaps images for chips while an overlay is open, since
@@ -189,13 +193,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case renderTickMsg:
 		if msg.sh == m.sh && msg.gen == m.gen {
-			cmds = append(cmds, m.startRender())
+			cmds = append(cmds, m.requestRender())
 		}
 	case renderedMsg:
 		if msg.sh == m.sh {
+			m.inFlight = false
 			var c tea.Cmd
 			m, c = m.applyRender(msg)
 			cmds = append(cmds, c)
+			if m.dirty {
+				m.dirty = false
+				cmds = append(cmds, m.requestRender())
+			}
 		}
 	case tea.KeyPressMsg:
 		if m.mode == ModeFull {
@@ -210,6 +219,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) tick() tea.Cmd {
 	sh, gen := m.sh, m.gen
 	return tea.Tick(m.debounce, func(time.Time) tea.Msg { return renderTickMsg{sh: sh, gen: gen} })
+}
+
+// requestRender starts a render of the current state, or, while one is
+// still running, marks the model dirty so the next one starts when it
+// returns: renders never pile up.
+func (m *Model) requestRender() tea.Cmd {
+	if m.inFlight {
+		m.dirty = true
+		return nil
+	}
+	m.inFlight = true
+	return m.startRender()
 }
 
 // startRender snapshots what the render needs and returns the command that
@@ -240,19 +261,19 @@ func (m Model) startRender() tea.Cmd {
 	return job.run
 }
 
-// applyRender stores a finished render. Evicted Kitty images are deleted
-// even when the render itself is stale.
+// applyRender stores a finished render. A stale render only feeds the
+// text cache: it never touches the images on screen.
 func (m Model) applyRender(msg renderedMsg) (Model, tea.Cmd) {
 	maps.Copy(m.sh.textCache, msg.newTexts)
+	if msg.gen != m.gen {
+		return m, nil
+	}
 	var deletes []string
 	for _, r := range msg.evicted {
 		if r.KittyID != 0 && m.sh.sent[r.KittyID] {
 			deletes = append(deletes, m.wrap(imgrender.KittyDelete(r.KittyID)))
 			delete(m.sh.sent, r.KittyID)
 		}
-	}
-	if msg.gen != m.gen {
-		return m, rawCmd(strings.Join(deletes, ""))
 	}
 	// Keep only the text renderings the current document uses.
 	used := map[textKey]bool{}

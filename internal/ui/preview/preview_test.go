@@ -188,6 +188,45 @@ func TestStaleRenderResultDropped(t *testing.T) {
 	}
 }
 
+func TestOnlyOneRenderInFlight(t *testing.T) {
+	m := newTest(t, imgrender.ProtoOff, t.TempDir())
+	m, tick := m.SetContent("n.md", "first")
+	m, render1 := m.Update(tick())
+	if render1 == nil {
+		t.Fatal("tick did not start a render")
+	}
+	m, tick = m.SetContent("n.md", "second")
+	m, c := m.Update(tick())
+	if c != nil {
+		t.Fatal("second render started while the first runs")
+	}
+	m, tick = m.SetContent("n.md", "third")
+	m, c = m.Update(tick())
+	if c != nil {
+		t.Fatal("third render started while the first runs")
+	}
+	// The stale first render returns: not applied, and exactly one new
+	// render starts for the latest content.
+	m, render2 := m.Update(render1())
+	if m.doc != nil {
+		t.Fatal("stale render applied")
+	}
+	if render2 == nil {
+		t.Fatal("no follow-up render after the dirty one returned")
+	}
+	msg := render2()
+	if _, ok := msg.(renderedMsg); !ok {
+		t.Fatalf("follow-up is %T, want a single render", msg)
+	}
+	m, c = m.Update(msg)
+	if c != nil {
+		t.Fatal("another render started after the latest one")
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "third") {
+		t.Fatalf("view:\n%s", v)
+	}
+}
+
 func TestSizeChangeRerendersOnNextUpdate(t *testing.T) {
 	m := newTest(t, imgrender.ProtoOff, t.TempDir())
 	m, _ = setContent(t, m, "n.md", strings.Repeat("word ", 30))
