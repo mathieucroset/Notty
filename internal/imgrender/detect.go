@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -97,11 +98,21 @@ var (
 // itself.
 //
 // Reads from tty are always bounded, so no Read is ever left pending after
-// Detect returns (the tty stays usable for Bubble Tea): a tty implementing
-// SetReadDeadline is read with a deadline; otherwise a tty exposing Fd() is
-// polled (poll(2), select(2) on macOS) before each Read. A tty offering
-// neither, or an fd on a platform without polling, is not queried at all and
-// only steps 1 and 2 apply.
+// Detect returns (the tty stays usable for Bubble Tea). In order of
+// preference:
+//
+//   - A file (*os.File, or anything with SyscallConn) has its raw fd polled
+//     through RawConn.Control before each Read, where polling is supported.
+//     Its read deadline is not used: once anything has called
+//     (*os.File).Fd(), the file is in blocking mode, and SetReadDeadline
+//     still returns nil but no longer bounds Read, which would then block
+//     forever. Control does not change the blocking mode.
+//   - Otherwise a tty implementing SetReadDeadline is read with a deadline.
+//   - Otherwise a tty exposing Fd() is polled (poll(2), select(2) on macOS)
+//     before each Read.
+//
+// A tty offering none of these, or an fd on a platform without polling, is
+// not queried at all and only steps 1 and 2 apply.
 func Detect(cfgProtocol string, env func(string) string, tty io.ReadWriter, run func(name string, args ...string) ([]byte, error)) Caps {
 	if env == nil {
 		env = func(string) string { return "" }
@@ -208,6 +219,11 @@ type fder interface {
 	Fd() uintptr
 }
 
+// syscallConner is implemented by *os.File (and types embedding it).
+type syscallConner interface {
+	SyscallConn() (syscall.RawConn, error)
+}
+
 // errReadTimeout reports that a bounded read reached its deadline.
 var errReadTimeout = errors.New("tty read timed out")
 
@@ -215,6 +231,28 @@ var errReadTimeout = errors.New("tty read timed out")
 // deadline instead of blocking, and a cleanup to call when done. It returns
 // nil when tty offers no way to bound a read.
 func boundedReader(tty io.Reader) (read func(p []byte, deadline time.Time) (int, error), cleanup func()) {
+	// Files first: a read deadline cannot be trusted on them (see Detect).
+	if sc, ok := tty.(syscallConner); ok && pollSupported {
+		if rc, err := sc.SyscallConn(); err == nil {
+			read = func(p []byte, deadline time.Time) (int, error) {
+				var ready bool
+				var perr error
+				if err := rc.Control(func(fd uintptr) {
+					ready, perr = waitReadable(fd, time.Until(deadline))
+				}); err != nil {
+					return 0, err //nolint:wrapcheck // internal
+				}
+				if perr != nil {
+					return 0, perr
+				}
+				if !ready {
+					return 0, errReadTimeout
+				}
+				return tty.Read(p) //nolint:wrapcheck // internal
+			}
+			return read, func() {}
+		}
+	}
 	if d, ok := tty.(readDeadliner); ok && d.SetReadDeadline(time.Now().Add(queryTimeout)) == nil {
 		read = func(p []byte, deadline time.Time) (int, error) {
 			if err := d.SetReadDeadline(deadline); err != nil {

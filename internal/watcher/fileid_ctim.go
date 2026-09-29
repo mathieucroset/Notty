@@ -15,5 +15,5 @@ func fileIDOf(info os.FileInfo) fileID {
 	if !ok {
 		return fileID{}
 	}
-	return fileID{ino: uint64(st.Ino), ctime: st.Ctim.Nano()}
+	return fileID{ino: st.Ino, ctime: st.Ctim.Nano()}
 }
