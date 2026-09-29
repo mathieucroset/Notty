@@ -84,7 +84,8 @@ const (
 	// StepCommitAll stages everything except Notty's ignored files and
 	// commits it with message Args[0] (nothing to commit is not an error).
 	StepCommitAll
-	// StepClone clones Args[0] into the vault folder.
+	// StepClone clones Args[0] into the vault folder, checking out branch
+	// Args[1] (the remote default, whatever the remote HEAD says).
 	StepClone
 	// StepRemoteAdd adds Args[0] as origin (skipped when origin already has
 	// that URL).
@@ -248,7 +249,7 @@ func Plan(req Request, vs VaultState, rs RemoteState) ([]Step, error) {
 		merge := step(StepMergeUnrelated, "Merging origin/"+def, "origin/"+def)
 		switch {
 		case !isRepo && vs != FilesNoRepo && rs.HasHistory:
-			add(step(StepClone, "Cloning "+req.URL, req.URL), ensure)
+			add(step(StepClone, "Cloning "+req.URL, req.URL, def), ensure)
 		case !isRepo && !rs.HasHistory:
 			newRepo("main")
 			add(remoteAdd, ensure, push)

@@ -66,7 +66,7 @@ func TestPlanRows(t *testing.T) {
 
 		{name: "missing + history", req: ex, vs: setup.Missing, rs: withHistory,
 			want:     []setup.StepKind{Clone, EGC},
-			wantArgs: map[int][]string{0: {url}, 1: {"Update .gitignore · box"}}},
+			wantArgs: map[int][]string{0: {url, "trunk"}, 1: {"Update .gitignore · box"}}},
 		{name: "empty + history", req: ex, vs: setup.Empty, rs: withHistory, want: []setup.StepKind{Clone, EGC}},
 		{name: "missing + empty", req: ex, vs: setup.Missing, rs: noHistory,
 			want:     []setup.StepKind{Init, WGI, Commit, Remote, EGC, Push},

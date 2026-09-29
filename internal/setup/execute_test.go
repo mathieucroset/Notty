@@ -178,6 +178,25 @@ func TestExecuteCloneMissingAddsGitignoreCommit(t *testing.T) {
 	}
 }
 
+func TestExecuteCloneUsesRemoteDefaultBranch(t *testing.T) {
+	gittest.Isolate(t)
+	remote := newRemote(t, "trunk", map[string]string{"remote.md": "r\n"})
+	identity(t)
+	// HEAD points to main, which does not exist; the content is on trunk.
+	gittest.Git(t, remote, "symbolic-ref", "HEAD", "refs/heads/main")
+	vault := filepath.Join(t.TempDir(), "Notes")
+
+	mustRun(t, setup.Request{Vault: vault, Choice: setup.ExistingURL, URL: remote, Host: "box"}, nil)
+
+	repo := gitsync.Open(vault)
+	if b, _ := repo.CurrentBranch(); b != "trunk" || !repo.HasUpstream() {
+		t.Errorf("branch = %q, upstream %v; want trunk with upstream", b, repo.HasUpstream())
+	}
+	if got := readFile(t, vault, "remote.md"); got != "r\n" {
+		t.Errorf("remote.md = %q", got)
+	}
+}
+
 func TestExecuteCloneKeepsGitignoreWhenComplete(t *testing.T) {
 	gittest.Isolate(t)
 	full := ".DS_Store\nThumbs.db\ndesktop.ini\n*.notty-tmp\n.notty/recovery/\n.notty/lock\n"

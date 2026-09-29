@@ -83,11 +83,18 @@ func Job(ctx context.Context, steps []Step, gh GH, progress Progress) func(*gits
 // runStep runs one step and returns the repo to use from now on (Init and
 // Clone produce a new one).
 func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.Repo, bool, error) {
+	want := 1
+	switch s.Kind {
+	case StepWriteGitignore, StepFetch, StepPush:
+		want = 0
+	case StepClone:
+		want = 2
+	}
+	if len(s.Args) != want || slices.Contains(s.Args, "") {
+		return repo, false, fmt.Errorf("step %v needs %d non-empty arguments, got %q", s.Kind, want, s.Args)
+	}
 	arg := ""
-	if s.Kind != StepWriteGitignore && s.Kind != StepFetch && s.Kind != StepPush {
-		if len(s.Args) != 1 || s.Args[0] == "" {
-			return repo, false, fmt.Errorf("step %v needs one argument, got %q", s.Kind, s.Args)
-		}
+	if want > 0 {
 		arg = s.Args[0]
 	}
 	dir := repo.Dir
@@ -108,7 +115,7 @@ func runStep(ctx context.Context, repo *gitsync.Repo, s Step, gh GH) (*gitsync.R
 		_, err := repo.Commit(arg)
 		return repo, false, err
 	case StepClone:
-		r, err := cloneInto(ctx, arg, dir)
+		r, err := cloneInto(ctx, arg, s.Args[1], dir)
 		if err != nil {
 			return repo, false, err
 		}
@@ -232,10 +239,10 @@ func addAllExceptJunk(ctx context.Context, repo *gitsync.Repo) (err error) {
 // .notty/ directory (plan A1): that directory is moved aside for the clone,
 // then its entries that the clone does not have are moved back; for entries
 // in both, the remote's version wins.
-func cloneInto(ctx context.Context, url, dir string) (*gitsync.Repo, error) {
+func cloneInto(ctx context.Context, url, branch, dir string) (*gitsync.Repo, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) || (err == nil && len(entries) == 0) {
-		return gitsync.Clone(ctx, url, dir)
+		return gitsync.CloneBranch(ctx, url, dir, branch)
 	}
 	if err != nil {
 		return nil, err
@@ -255,7 +262,7 @@ func cloneInto(ctx context.Context, url, dir string) (*gitsync.Repo, error) {
 		_ = os.Remove(aside)
 		return nil, err
 	}
-	repo, cerr := gitsync.Clone(ctx, url, dir)
+	repo, cerr := gitsync.CloneBranch(ctx, url, dir, branch)
 	if cerr != nil {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, errors.Join(cerr, fmt.Errorf("restore .notty (kept in %s): %w", aside, err))
