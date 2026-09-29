@@ -66,6 +66,9 @@ type Watcher struct {
 }
 
 // New starts watching root and every directory below it, except ignored ones.
+// Only a root that cannot be read or watched is an error; subdirectories that
+// cannot be (for example because of permissions) are skipped and reported on
+// Errors.
 func New(root string) (*Watcher, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
@@ -93,9 +96,13 @@ func New(root string) (*Watcher, error) {
 		pending:    map[string]bool{},
 		ready:      map[string]bool{},
 	}
-	if err := w.addTree(".", nil); err != nil {
+	errs, err := w.addTree(".", nil)
+	if err != nil {
 		_ = fsw.Close()
 		return nil, err
+	}
+	for _, e := range errs {
+		w.sendError(e) // buffered: delivered once the caller reads Errors
 	}
 	w.wg.Add(1)
 	go w.run()
@@ -105,8 +112,9 @@ func New(root string) (*Watcher, error) {
 // Events delivers debounced batches of changes. It is closed by Close.
 func (w *Watcher) Events() <-chan Event { return w.events }
 
-// Errors delivers non-fatal watcher errors (for example an event queue
-// overflow, after which a full re-index is advisable). It is closed by Close.
+// Errors delivers non-fatal watcher errors: directories that cannot be read or
+// watched, and event queue overflows (after which a full re-index is
+// advisable). It is closed by Close.
 func (w *Watcher) Errors() <-chan error { return w.errors }
 
 // NoteSelfWrite records that the app has just written rel (call it right after
@@ -242,7 +250,11 @@ func (w *Watcher) handle(fe fsnotify.Event) bool {
 			if !paused {
 				found = w.pending
 			}
-			if err := w.addTree(rel, found); err != nil {
+			errs, err := w.addTree(rel, found)
+			for _, e := range errs {
+				w.sendError(e)
+			}
+			if err != nil {
 				w.sendError(err)
 			}
 		}
@@ -272,18 +284,29 @@ func (w *Watcher) flush() {
 }
 
 // addTree watches rel and every non-ignored directory below it. When found is
-// non-nil, every path discovered below rel is added to it.
-func (w *Watcher) addTree(rel string, found map[string]bool) error {
-	return filepath.WalkDir(w.abs(rel), func(p string, d fs.DirEntry, err error) error {
+// non-nil, every path discovered below rel is added to it. A directory that
+// cannot be read or watched (permissions, inotify watch limit) is skipped and
+// its error collected in errs; fatal is non-nil only when the vault root itself
+// cannot be walked or watched.
+func (w *Watcher) addTree(rel string, found map[string]bool) (errs []error, fatal error) {
+	fatal = filepath.WalkDir(w.abs(rel), func(p string, d fs.DirEntry, err error) error {
 		sub, ok := w.rel(p)
 		if !ok {
 			return nil
 		}
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) && sub != "." {
-				return nil // vanished while walking
+			switch {
+			case sub == ".":
+				return fmt.Errorf("watcher: walk vault root: %w", err)
+			case errors.Is(err, fs.ErrNotExist):
+				// Vanished while walking.
+			default:
+				errs = append(errs, fmt.Errorf("watcher: walk %s: %w", sub, err))
 			}
-			return fmt.Errorf("watcher: walk %s: %w", sub, err)
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if sub != "." && ignored(sub) {
 			if d.IsDir() {
@@ -298,14 +321,20 @@ func (w *Watcher) addTree(rel string, found map[string]bool) error {
 			return nil
 		}
 		if err := w.fsw.Add(p); err != nil {
-			if errors.Is(err, fs.ErrNotExist) && sub != "." {
-				return filepath.SkipDir // vanished while walking
+			switch {
+			case sub == ".":
+				return fmt.Errorf("watcher: watch vault root: %w", err)
+			case errors.Is(err, fs.ErrNotExist):
+				// Vanished while walking.
+			default:
+				errs = append(errs, fmt.Errorf("watcher: watch %s: %w", sub, err))
 			}
-			return fmt.Errorf("watcher: watch %s: %w", sub, err)
+			return filepath.SkipDir
 		}
 		w.dirs[sub] = true
 		return nil
 	})
+	return errs, fatal
 }
 
 // unwatchTree drops the watches on rel and every directory below it. It must

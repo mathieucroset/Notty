@@ -3,6 +3,7 @@ package watcher
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -404,6 +405,64 @@ errorsClosed:
 	case <-time.After(waitTimeout):
 		t.Fatal("errors channel not closed after Close")
 	}
+}
+
+func TestUnreadableSubdirectoryIsNotFatal(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a non-root user on a POSIX system to deny directory access")
+	}
+	root := t.TempDir()
+	locked := filepath.Join(root, "locked")
+	mkdir(t, root, "locked/inner")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	w := newTestWatcher(t, root)
+
+	select {
+	case err := <-w.Errors():
+		if err == nil {
+			t.Fatal("nil error delivered")
+		}
+	case <-time.After(waitTimeout):
+		t.Fatal("no error reported for the unreadable directory")
+	}
+
+	writeFile(t, root, "a.md", "still watched")
+	ev := nextEvent(t, w) // also fails on any further error
+	if !slices.Equal(ev.Paths, []string{"a.md"}) {
+		t.Fatalf("paths = %v, want [a.md]", ev.Paths)
+	}
+}
+
+func TestUnreadableNewSubdirectoryIsNotFatal(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a non-root user on a POSIX system to deny directory access")
+	}
+	root := t.TempDir()
+	w := newTestWatcher(t, root)
+
+	// Created with no permissions at all, so the watcher cannot watch it.
+	locked := filepath.Join(root, "locked")
+	if err := os.Mkdir(locked, 0); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	select {
+	case err := <-w.Errors():
+		if err == nil {
+			t.Fatal("nil error delivered")
+		}
+	case <-time.After(waitTimeout):
+		t.Fatal("no error reported for the unreadable directory")
+	}
+	collectUntil(t, w, "locked")
+
+	writeFile(t, root, "sub/a.md", "still watched")
+	collectUntil(t, w, "sub/a.md")
 }
 
 func TestNewFailsOnMissingRoot(t *testing.T) {
