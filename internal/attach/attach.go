@@ -138,11 +138,22 @@ func Import(v *vault.Vault, noteRel string, data []byte, ext string, now time.Ti
 	return "", fmt.Errorf("attach: import into %q: no free name after %d attempts: %w", attachDir, maxNameAttempts, lastErr)
 }
 
+// linkFile creates a hard link (newname pointing at oldname's data). It is
+// a package variable, rather than a direct call to os.Link, so a test can
+// inject a non-fs.ErrExist failure and exercise writeExclusive's fallback
+// for filesystems that do not support hard links at all.
+var linkFile = os.Link
+
 // writeExclusive writes data to dst without ever overwriting an existing
 // file at dst: it writes to a uniquely-named temp file in the same
 // directory, fsyncs it, then links it to dst (which fails with fs.ErrExist,
 // leaving dst untouched, if something is already there) before removing
 // the temp file, which is otherwise just a second name for the same data.
+//
+// Some filesystems (exFAT, FAT, some network shares) do not support hard
+// links at all; there, linkFile fails with an error other than
+// fs.ErrExist, and writeExclusive falls back to writeExclusiveDirect,
+// which creates dst itself with an exclusive, existence-checking open.
 func writeExclusive(dst string, data []byte) error {
 	dir := filepath.Dir(dst)
 	tmp, err := os.CreateTemp(dir, ".attach-*"+tmpSuffix)
@@ -164,13 +175,45 @@ func writeExclusive(dst string, data []byte) error {
 		return err
 	}
 
-	if err := os.Link(tmpName, dst); err != nil {
+	if err := linkFile(tmpName, dst); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fs.ErrExist
+		}
+		return writeExclusiveDirect(dst, data)
+	}
+	syncDir(dir)
+	return nil
+}
+
+// writeExclusiveDirect writes data to dst by creating it exclusively
+// (O_CREATE|O_EXCL), for filesystems where linkFile does not work. Like
+// writeExclusive, it never overwrites: it returns fs.ErrExist, leaving dst
+// untouched, if something is already there. On any other failure it
+// removes the (partial) file it created, so a write error cannot leave a
+// corrupt file behind.
+func writeExclusiveDirect(dst string, data []byte) error {
+	f, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return fs.ErrExist
 		}
 		return err
 	}
-	syncDir(dir)
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(dst)
+		return err
+	}
+	syncDir(filepath.Dir(dst))
 	return nil
 }
 
