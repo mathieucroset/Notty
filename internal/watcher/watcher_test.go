@@ -600,15 +600,103 @@ func TestBarrierCompletesThroughSentinelEvent(t *testing.T) {
 }
 
 func TestPauseLeavesNoBarrierFileBehind(t *testing.T) {
-	root := t.TempDir()
-	w := newTestWatcher(t, root)
-
-	w.Pause()
-	w.Resume()
-	expectNoEvent(t, w)
-	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(barrierRel))); !os.IsNotExist(err) {
-		t.Fatalf("barrier file still present (stat err = %v)", err)
+	tests := []struct {
+		name    string
+		backend func(backend) backend
+	}{
+		{"system backend", nil},
+		// fsnotify's kqueue backend reports a path as created only once
+		// while it still tracks it: after Pause's barrier file is removed,
+		// a new file of the same name created before the removal was
+		// processed is never reported.
+		{"backend reporting each name once", newOnceBackend},
 	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.backend != nil {
+				withBackend(t, tc.backend)
+			}
+			root := t.TempDir()
+			w := newTestWatcher(t, root)
+
+			w.Pause()
+			w.Resume()
+			expectNoEvent(t, w)
+			if left := barrierFiles(t, root); len(left) > 0 {
+				t.Fatalf("barrier files still present: %v", left)
+			}
+		})
+	}
+}
+
+// barrierFiles lists the barrier sentinel files left in root's .notty.
+func barrierFiles(t *testing.T, root string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(root, nottyDir))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read .notty: %v", err)
+	}
+	var left []string
+	for _, e := range entries {
+		if _, ok := barrierSeqOf(nottyDir + "/" + e.Name()); ok {
+			left = append(left, e.Name())
+		}
+	}
+	return left
+}
+
+// withBackend makes the watchers created by the test use wrap's backend
+// around the system one.
+func withBackend(t *testing.T, wrap func(backend) backend) {
+	t.Helper()
+	prev := openBackend
+	openBackend = func(root string) (backend, error) {
+		b, err := prev(root)
+		if err != nil {
+			return nil, err
+		}
+		return wrap(b), nil
+	}
+	t.Cleanup(func() { openBackend = prev })
+}
+
+// onceBackend drops every Create event for a path already reported as
+// created, like fsnotify's kqueue backend does for a path it still tracks.
+type onceBackend struct {
+	backend
+	evC  chan fsnotify.Event
+	done chan struct{}
+	seen map[string]bool // owned by forward
+}
+
+func newOnceBackend(inner backend) backend {
+	b := &onceBackend{backend: inner, evC: make(chan fsnotify.Event), done: make(chan struct{}), seen: map[string]bool{}}
+	go b.forward()
+	return b
+}
+
+func (b *onceBackend) forward() {
+	defer close(b.done)
+	defer close(b.evC)
+	for e := range b.backend.events() {
+		if e.Has(fsnotify.Create) {
+			if b.seen[e.Name] {
+				continue
+			}
+			b.seen[e.Name] = true
+		}
+		b.evC <- e
+	}
+}
+
+func (b *onceBackend) events() <-chan fsnotify.Event { return b.evC }
+
+func (b *onceBackend) Close() error {
+	err := b.backend.Close()
+	for range b.evC { // unblock forward
+	}
+	<-b.done
+	return err
 }
 
 func TestFileInNewSubdirectoryDetected(t *testing.T) {

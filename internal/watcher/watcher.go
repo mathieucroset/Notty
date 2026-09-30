@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,10 +34,12 @@ const (
 	// Event: after it, the paths already quiet for debounce are delivered and
 	// the still-changing ones wait for their own quiet window.
 	maxDelay = time.Second
-	// barrierRel is the sentinel file Pause and Resume create to learn when
-	// the event loop has caught up with the kernel's event queue. Its name
-	// ends in .notty-tmp, so every other consumer ignores it.
-	barrierRel = ".notty/.watch-barrier.notty-tmp"
+	// barrierPrefix and barrierSuffix frame the names of the sentinel files
+	// Pause and Resume create to learn when the event loop has caught up
+	// with the kernel's event queue (see barrierRel). The names end in
+	// .notty-tmp, so every other consumer ignores them.
+	barrierPrefix = ".notty/.watch-barrier-"
+	barrierSuffix = ".notty-tmp"
 	// barrierTimeout bounds how long Pause and Resume wait for the barrier.
 	barrierTimeout = 200 * time.Millisecond
 	// nottyDir is the app's metadata directory. Its own entry is never
@@ -47,6 +51,37 @@ const (
 	// dropped while it is full.
 	errBuffer = 16
 )
+
+// openBackend creates the change notification source; tests wrap it.
+var openBackend = newBackend
+
+// barrierRel is the vault-relative name of barrier number seq's sentinel.
+// Every barrier has its own name: fsnotify's kqueue backend reports a path
+// as created only once while it still tracks it, so a sentinel created
+// under the name of one just removed might never be reported.
+func barrierRel(seq uint64) string {
+	return barrierPrefix + strconv.FormatUint(seq, 10) + barrierSuffix
+}
+
+// barrierSeqOf reports the barrier number of a sentinel's vault-relative
+// path, and whether rel is a sentinel at all.
+func barrierSeqOf(rel string) (uint64, bool) {
+	num, ok := strings.CutPrefix(rel, barrierPrefix)
+	if !ok {
+		return 0, false
+	}
+	if num, ok = strings.CutSuffix(num, barrierSuffix); !ok {
+		return 0, false
+	}
+	seq, err := strconv.ParseUint(num, 10, 64)
+	return seq, err == nil
+}
+
+// barrier is a request waiting for its sentinel's creation event.
+type barrier struct {
+	seq uint64
+	req chan struct{}
+}
 
 // ErrRootGone is delivered on Errors when the vault root itself is deleted or
 // renamed. The watcher reports nothing further; the caller should close it.
@@ -109,7 +144,8 @@ type Watcher struct {
 	urgent         []error              // errors delivered even when the Errors buffer is full
 	rootGone       bool                 // ErrRootGone already queued
 	overflowQueued bool                 // an overflow error is queued in urgent
-	barriers       []chan struct{}      // barrier requests awaiting the sentinel's event
+	barriers       []barrier            // barrier requests awaiting their sentinel's event
+	barrierSeq     uint64               // number of the latest barrier
 	trackGaps      bool                 // list the directories with a gap (kqueue), see gaps.go
 	gaps           map[string]gap       // directories with a gap -> their listing past the blocker
 }
@@ -146,7 +182,7 @@ func newWatcher(root string, log *slog.Logger) (*Watcher, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("watcher: root %q is not a directory", abs)
 	}
-	fsw, err := newBackend(abs)
+	fsw, err := openBackend(abs)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +202,7 @@ func newWatcher(root string, log *slog.Logger) (*Watcher, error) {
 		pending:    map[string]time.Time{},
 		ready:      map[string]bool{},
 	}
-	_ = os.Remove(w.abs(barrierRel)) // stale sentinel from a crash
+	w.removeStaleBarriers()
 	errs, err := w.addTree(".", nil)
 	if err != nil {
 		_ = fsw.Close()
@@ -292,7 +328,7 @@ func (w *Watcher) run() {
 	defer w.wg.Done()
 	defer close(w.errors)
 	defer close(w.events)
-	defer w.releaseBarriers()
+	defer w.releaseBarriers(math.MaxUint64)
 
 	timer := time.NewTimer(debounce)
 	timer.Stop()
@@ -402,10 +438,10 @@ func (w *Watcher) run() {
 	}
 }
 
-// startBarrier creates the sentinel file. req is closed when the sentinel's
-// creation event comes back through the loop, which proves every kernel event
-// queued before it has been handled. If the sentinel cannot be created, req is
-// closed at once.
+// startBarrier creates a new sentinel file. req is closed when the sentinel's
+// creation event (or a later sentinel's) comes back through the loop, which
+// proves every kernel event queued before it has been handled. If the
+// sentinel cannot be created, req is closed at once.
 func (w *Watcher) startBarrier(req chan struct{}) {
 	// Mkdir, not MkdirAll: never recreate a vault root that has been removed.
 	if err := os.Mkdir(w.abs(nottyDir), 0o755); w.rootGone || (err != nil && !errors.Is(err, fs.ErrExist)) {
@@ -422,11 +458,13 @@ func (w *Watcher) startBarrier(req chan struct{}) {
 			return
 		}
 	}
-	path := w.abs(barrierRel)
+	w.barrierSeq++
+	seq := w.barrierSeq
+	path := w.abs(barrierRel(seq))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if errors.Is(err, fs.ErrExist) {
-		// Left over from a barrier that timed out: recreate it so that a
-		// creation event is guaranteed.
+		// Left over from an earlier run: recreate it so that a creation
+		// event is guaranteed.
 		_ = os.Remove(path)
 		f, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	}
@@ -435,19 +473,39 @@ func (w *Watcher) startBarrier(req chan struct{}) {
 		return
 	}
 	_ = f.Close()
-	w.barriers = append(w.barriers, req)
+	w.barriers = append(w.barriers, barrier{seq: seq, req: req})
 }
 
-// releaseBarriers completes every waiting barrier and removes the sentinel.
-func (w *Watcher) releaseBarriers() {
-	if len(w.barriers) == 0 {
+// releaseBarriers completes the waiting barriers numbered up to seq, whose
+// sentinels were created before (or as) the one just seen, and removes
+// their sentinels.
+func (w *Watcher) releaseBarriers(seq uint64) {
+	kept := w.barriers[:0]
+	for _, b := range w.barriers {
+		if b.seq > seq {
+			kept = append(kept, b)
+			continue
+		}
+		_ = os.Remove(w.abs(barrierRel(b.seq)))
+		close(b.req)
+	}
+	clear(w.barriers[len(kept):])
+	w.barriers = kept
+}
+
+// removeStaleBarriers removes the sentinels left behind by a crash.
+func (w *Watcher) removeStaleBarriers() {
+	entries, err := os.ReadDir(w.abs(nottyDir))
+	if err != nil {
 		return
 	}
-	_ = os.Remove(w.abs(barrierRel))
-	for _, req := range w.barriers {
-		close(req)
+	for _, e := range entries {
+		name := e.Name()
+		// Also the single ".watch-barrier.notty-tmp" of older versions.
+		if strings.HasPrefix(name, ".watch-barrier") && strings.HasSuffix(name, barrierSuffix) {
+			_ = os.Remove(w.abs(nottyDir + "/" + name))
+		}
 	}
-	w.barriers = nil
 }
 
 // handleFSError forwards an fsnotify error. After a queue overflow, events
@@ -504,9 +562,9 @@ func (w *Watcher) handle(fe fsnotify.Event, now time.Time) bool {
 		}
 		return false
 	}
-	if rel == barrierRel {
+	if seq, ok := barrierSeqOf(rel); ok {
 		if fe.Has(fsnotify.Create) {
-			w.releaseBarriers()
+			w.releaseBarriers(seq)
 		}
 		return false
 	}
