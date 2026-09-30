@@ -286,12 +286,28 @@ func TestEditorCommand(t *testing.T) {
 	opts := testOptions(t)
 	opts.Config.Editor = "code -w"
 	m := start(t, opts, 120, 30)
-	cmd := m.editorCommand("/v/a.png")
+	cmd, err := m.editorCommand("/v/a.png")
+	if err != nil {
+		t.Fatalf("editorCommand: %v", err)
+	}
 	if !reflect.DeepEqual(cmd.Args, []string{"code", "-w", "/v/a.png"}) {
 		t.Errorf("editor args = %v", cmd.Args)
 	}
 	if _, c := m.Update(msgs.OpenFileExternalMsg{Path: "a.png"}); c == nil {
 		t.Error("OpenFileExternalMsg returned no command")
+	}
+}
+
+func TestBadEditorSettingToasts(t *testing.T) {
+	opts := testOptions(t)
+	opts.Config.Editor = `"/opt/my editor/ed -w`
+	m := start(t, opts, 120, 30)
+	run(t, m, msgs.OpenFileExternalMsg{Path: "ideas.md"})
+	if !hasToast(m, msgs.ToastError, "unterminated") {
+		t.Errorf("toasts = %v", toastTexts(m))
+	}
+	if m.host.editing.Load() {
+		t.Error("an external edit is still marked running")
 	}
 }
 
@@ -315,11 +331,17 @@ func TestSplitCommand(t *testing.T) {
 		{"quoted argument", `vim -c "set tw=80"`, "linux", []string{"vim", "-c", "set tw=80"}},
 		{"quote inside a word", `ed --opt="a b"`, "linux", []string{"ed", "--opt=a b"}},
 		{"empty quotes", `ed ""`, "linux", []string{"ed", ""}},
-		{"unterminated quote", `ed "a b`, "linux", []string{"ed", "a b"}},
+		{"unterminated double quote", `ed "a b`, "linux", nil},
+		{"unterminated single quote", `'/opt/my ed/ed -w`, "darwin", nil},
+		{"unterminated quote on windows", `"C:\Program Files\ed.exe -n`, "windows", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := splitCommand(tt.cmd, tt.goos); !reflect.DeepEqual(got, tt.want) {
+			got, err := splitCommand(tt.cmd, tt.goos)
+			if wantErr := tt.want == nil && strings.TrimSpace(tt.cmd) != ""; (err != nil) != wantErr {
+				t.Fatalf("splitCommand(%q, %s) error = %v, want error: %v", tt.cmd, tt.goos, err, wantErr)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("splitCommand(%q, %s) = %q, want %q", tt.cmd, tt.goos, got, tt.want)
 			}
 		})

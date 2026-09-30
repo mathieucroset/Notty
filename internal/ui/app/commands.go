@@ -315,8 +315,12 @@ func (m *Model) toggleLineNumbers() tea.Cmd {
 
 // openConfig opens config.toml in $EDITOR.
 func (m *Model) openConfig() tea.Cmd {
+	cmd, err := m.editorCommand(m.configPath())
+	if err != nil {
+		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not open the config file in the editor: %v", err))
+	}
 	m.beginExec()
-	return execProcess(m.editorCommand(m.configPath()), func(err error) tea.Msg {
+	return execProcess(cmd, func(err error) tea.Msg {
 		return configEditedMsg{err: err}
 	})
 }

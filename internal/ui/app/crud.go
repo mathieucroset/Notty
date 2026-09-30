@@ -368,20 +368,23 @@ func (m *Model) pathRemoved(p string, keepDirty bool) tea.Cmd {
 }
 
 // editorCommand builds the $EDITOR command for the file at abs.
-func (m *Model) editorCommand(abs string) *exec.Cmd {
-	fields := splitCommand(m.opts.Config.EditorCommand(os.Getenv, runtime.GOOS), runtime.GOOS)
+func (m *Model) editorCommand(abs string) (*exec.Cmd, error) {
+	fields, err := splitCommand(m.opts.Config.EditorCommand(os.Getenv, runtime.GOOS), runtime.GOOS)
+	if err != nil {
+		return nil, err
+	}
 	if len(fields) == 0 {
 		fields = []string{"nano"}
 	}
-	return exec.Command(fields[0], append(fields[1:], abs)...) //nolint:gosec // the user's own editor
+	return exec.Command(fields[0], append(fields[1:], abs)...), nil //nolint:gosec // the user's own editor
 }
 
 // splitCommand splits an editor setting into the program and its
 // arguments. Words are separated by blanks; double quotes, and on Unix
 // single quotes too, group a word holding blanks, such as
 // "C:\Program Files\Notepad++\notepad++.exe". Backslashes are kept as they
-// are: on Windows they separate paths.
-func splitCommand(s, goos string) []string {
+// are: on Windows they separate paths. A quote left open is an error.
+func splitCommand(s, goos string) ([]string, error) {
 	var (
 		args  []string
 		word  strings.Builder
@@ -409,10 +412,13 @@ func splitCommand(s, goos string) []string {
 			inArg = true
 		}
 	}
+	if quote != 0 {
+		return nil, fmt.Errorf("the editor setting has an unterminated %c quote: %s", quote, s)
+	}
 	if inArg {
 		args = append(args, word.String())
 	}
-	return args
+	return args, nil
 }
 
 // openExternal hands the vault file at rel to $EDITOR.
@@ -420,8 +426,12 @@ func (m *Model) openExternal(rel string) tea.Cmd {
 	if m.opts.Vault == nil || rel == "" {
 		return nil
 	}
+	cmd, err := m.editorCommand(m.opts.Vault.Abs(rel))
+	if err != nil {
+		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not open %s in the editor: %v", displayName(rel), err))
+	}
 	m.beginExec()
-	return execProcess(m.editorCommand(m.opts.Vault.Abs(rel)), func(err error) tea.Msg {
+	return execProcess(cmd, func(err error) tea.Msg {
 		return externalDoneMsg{path: rel, err: err}
 	})
 }

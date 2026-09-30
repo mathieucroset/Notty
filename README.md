@@ -157,7 +157,10 @@ vault = "~/Notes"            # where your notes live
 theme = "catppuccin-mocha"   # a built-in or your own theme (see Themes below); also settable live from the command palette
 vim = true                   # vim-style modal editing; false for a plain typing mode
 line_numbers = false         # show line numbers in the editor (relative, when on)
-editor = ""                  # command for ctrl+e (local config only); falls back to $VISUAL, then $EDITOR, then nano (notepad on Windows); quote a path with spaces: '"C:\Program Files\Notepad++\notepad++.exe" -multiInst'
+editor = ""                  # command for ctrl+e (local config only); falls back to $VISUAL, then $EDITOR, then nano (notepad on Windows)
+                             # it is split into words at blanks; "double quotes" (and 'single quotes', except on Windows) group a word
+                             # holding blanks, backslashes are kept as they are, and an unclosed quote is an error:
+                             # editor = '"C:\Program Files\Notepad++\notepad++.exe" -multiInst'
 autosave_ms = 1000           # idle delay before autosave, in milliseconds
 icons = "unicode"            # nerd | unicode | ascii — see below
 update_check = true          # tell you when a newer release is out — see below
