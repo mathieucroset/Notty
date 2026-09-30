@@ -46,6 +46,14 @@ Windows (amd64/arm64) from the
 brew install mathieucroset/tap/notty
 ```
 
+**Updating:** Notty tells you when a newer release is out (see
+`update_check` under [Configuration](#configuration)). To upgrade:
+
+- Go install: run the same `go install …@latest` command again.
+- From source: pull the latest changes, then `make install` again.
+- GitHub Releases: download the new binary and replace the old one.
+- Homebrew: `brew upgrade notty`.
+
 **Requirements:**
 - `git` — required for sync and per-note history. Without it, notes, trash,
   and restore still work, but sync and history are disabled.
@@ -145,6 +153,7 @@ line_numbers = false         # show line numbers in the editor (relative, when o
 editor = ""                  # command for ctrl+e; falls back to $VISUAL, then $EDITOR, then nano (notepad on Windows)
 autosave_ms = 1000           # idle delay before autosave, in milliseconds
 icons = "unicode"            # nerd | unicode | ascii — see below
+update_check = true          # tell you when a newer release is out — see below
 
 [sync]
 enabled = true                # false behaves like local-only: commits still happen, but no fetch or push
@@ -174,6 +183,15 @@ checkboxes, sync states, toasts and the like:
 
 Only icons change: pane borders and separators are box-drawing characters
 in every set. Any other value is an error at startup.
+
+`update_check` lets Notty tell you when a newer release is out: a one-time
+toast saying how to upgrade (for the way you installed it), then a
+`↑ v0.2.0` marker in the status bar until you do. To find out, Notty sends
+one anonymous HTTPS request to `api.github.com` at most once a day, with a
+`notty/<version>` User-Agent and nothing about you or your notes. It never
+slows down startup, and a failed check stays silent. Turn it off with
+`update_check = false`, or with the environment variable
+`NOTTY_NO_UPDATE_CHECK=1`. Development builds and `notty sync` never check.
 
 ### Themes
 
