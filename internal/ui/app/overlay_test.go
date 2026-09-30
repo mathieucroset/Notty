@@ -17,6 +17,14 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if mode := os.Getenv(fakeEditorEnv); mode != "" {
+		// Run as $EDITOR by a test (testBinaryEditor).
+		if err := runFakeEditor(mode, os.Args[1:]); err != nil {
+			_, _ = os.Stderr.WriteString("fake editor: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	// Info and warning toasts expire through a 4s tick, which would stall
 	// the synchronous command loop in run.
 	toastTimer = func(tea.Cmd) tea.Cmd { return nil }

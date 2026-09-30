@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,18 +30,54 @@ func syncExec(t *testing.T) {
 	t.Cleanup(func() { execProcess, execCommand = oldProc, oldCmd })
 }
 
-// fakeEditor writes a script that appends a line to the file it edits and
-// records the content it was given.
-func fakeEditor(t *testing.T) (cmd, seenPath string) {
+// fakeEditorEnv, when set, makes the test binary act as $EDITOR in the
+// mode it names (see TestMain and runFakeEditor).
+const fakeEditorEnv = "NOTTY_TEST_FAKE_EDITOR"
+
+// testBinaryEditor returns an editor command that runs this test binary
+// as a fake editor in mode. Unlike a shell script, it runs on Windows too.
+func testBinaryEditor(t *testing.T, mode string) string {
 	t.Helper()
-	dir := t.TempDir()
-	seenPath = filepath.Join(dir, "seen.txt")
-	script := filepath.Join(dir, "editor.sh")
-	body := "#!/bin/sh\ncp \"$1\" " + seenPath + "\nprintf 'appended by editor\\n' >> \"$1\"\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+	exe, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
-	return script, seenPath
+	t.Setenv(fakeEditorEnv, mode)
+	return `"` + exe + `"`
+}
+
+// runFakeEditor is the test binary's main when it runs as $EDITOR on the
+// file named by its last argument:
+//
+//   - "append:<seen>" copies the file to <seen>, then appends a line;
+//   - "truncate" replaces the file's content with one line.
+func runFakeEditor(mode string, args []string) error {
+	if len(args) == 0 {
+		return errors.New("no file to edit")
+	}
+	file := args[len(args)-1]
+	if seen, ok := strings.CutPrefix(mode, "append:"); ok {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(seen, b, 0o644); err != nil {
+			return err
+		}
+		return os.WriteFile(file, append(b, "appended by editor\n"...), 0o644)
+	}
+	if mode == "truncate" {
+		return os.WriteFile(file, []byte("one line\n"), 0o644)
+	}
+	return fmt.Errorf("unknown mode %q", mode)
+}
+
+// fakeEditor returns an editor command that appends a line to the file it
+// edits and records the content it was given at seenPath.
+func fakeEditor(t *testing.T) (cmd, seenPath string) {
+	t.Helper()
+	seenPath = filepath.Join(t.TempDir(), "seen.txt")
+	return testBinaryEditor(t, "append:"+seenPath), seenPath
 }
 
 func TestCtrlESavesRunsEditorAndReloads(t *testing.T) {
@@ -81,12 +119,7 @@ func TestCtrlESavesRunsEditorAndReloads(t *testing.T) {
 func TestCtrlEClampsCursorWhenTheFileShrinks(t *testing.T) {
 	syncExec(t)
 	opts := testOptions(t)
-	dir := t.TempDir()
-	script := filepath.Join(dir, "truncate.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'one line\\n' > \"$1\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	opts.Config.Editor = script
+	opts.Config.Editor = testBinaryEditor(t, "truncate")
 	m := openNote(t, opts, "ideas.md")
 	pressKeys(t, m, "G", "$")
 	run(t, m, keyMsg("ctrl+e"))
