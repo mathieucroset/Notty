@@ -52,6 +52,12 @@ type env struct {
 	// images.protocol setting (amendment A5).
 	detectCaps func(protocol string) imgrender.Caps
 	runTUI     func(app.Options) error
+	// getwd returns the working directory, whose name prefixes a quick
+	// note.
+	getwd func() (string, error)
+	// startBackground starts this executable with args, detached, without
+	// waiting for it (notty -q's background sync).
+	startBackground func(args []string) error
 }
 
 func main() {
@@ -66,6 +72,14 @@ func main() {
 		lockWait:   10 * time.Second,
 		detectCaps: detectTerminalCaps,
 		runTUI:     runProgram,
+		getwd:      os.Getwd,
+		startBackground: func(args []string) error {
+			exe, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("find notty: %w", err)
+			}
+			return startDetached(exe, args...)
+		},
 	}))
 }
 
@@ -158,17 +172,29 @@ func run(args []string, e env) int {
 	flags.SetOutput(e.stderr)
 	vaultFlag := flags.String("vault", "", "vault `path` (overrides the configured vault)")
 	showVersion := flags.Bool("version", false, "print the version and exit")
+	quick, folderFlag := quickFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return 2
 	}
-	if *showVersion && flags.NArg() == 0 {
+	if *showVersion && flags.NArg() == 0 && !*quick {
 		_, _ = fmt.Fprintln(e.stdout, "notty "+version)
 		return 0
 	}
+	if !*quick && flagSet(flags, "folder") {
+		_, _ = fmt.Fprintf(e.stderr, "notty: --folder goes with -q, or after new\n%s", usage)
+		return 2
+	}
 	defer setupLogging(e)()
+	if *quick {
+		// With -q every argument left is the note's text (and its
+		// flags); a "--" ending the global flags makes them all text.
+		consumed := len(args) - flags.NArg()
+		afterDash := consumed > 0 && args[consumed-1] == "--"
+		return runQuick(flags.Args(), afterDash, *vaultFlag, *folderFlag, e)
+	}
 	if flags.NArg() > 0 {
 		return runSubcommand(flags.Args(), *vaultFlag, e)
 	}

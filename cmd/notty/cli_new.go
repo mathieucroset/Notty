@@ -10,6 +10,8 @@ const usage = `usage:
   notty [--vault <path>]                          open the TUI
   notty [--vault <path>] new "<title>" [--folder <folder>]
                                                   create a note and open it
+  notty [--vault <path>] -q <text…> [--folder <folder>]
+                                                  add a line to <folder>/Inbox.md
   notty [--vault <path>] sync [--quiet] [--wait <duration>]
                                                   run one sync cycle and exit
   notty theme matugen                             set up a matugen-generated theme

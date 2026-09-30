@@ -29,6 +29,12 @@ type fixture struct {
 	during     func() // runs while the TUI would be running
 	// detectedWith records the protocol setting each detection ran with.
 	detectedWith []string
+	// cwd is the working directory getwd reports ("" means dir).
+	cwd string
+	// started records the arguments of each background notty started;
+	// startErr is what starting returns.
+	started  [][]string
+	startErr error
 }
 
 // setHome makes dir the user's home directory for os.UserHomeDir, which
@@ -96,6 +102,16 @@ func (f *fixture) env() env {
 				f.during()
 			}
 			return f.tuiErr
+		},
+		getwd: func() (string, error) {
+			if f.cwd == "" {
+				return f.dir, nil
+			}
+			return f.cwd, nil
+		},
+		startBackground: func(args []string) error {
+			f.started = append(f.started, args)
+			return f.startErr
 		},
 	}
 }

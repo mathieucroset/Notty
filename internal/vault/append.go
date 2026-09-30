@@ -31,7 +31,7 @@ func ValidateFolderPath(rel string) (string, error) {
 	segs := strings.Split(s, "/")
 	for _, seg := range segs {
 		if seg == "" || seg == "." || seg == ".." || sanitizeName(seg) != seg {
-			return "", fmt.Errorf("vault: folder %q: invalid name %q: %w", rel, seg, ErrInvalidName)
+			return "", fmt.Errorf("vault: folder %q: %w %q", rel, ErrInvalidName, seg)
 		}
 	}
 	folder := strings.Join(segs, "/")
