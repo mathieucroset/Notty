@@ -50,6 +50,13 @@ type deleteMovedLinesMsg struct {
 // isMoveLinesKey reports whether k is alt+m.
 func isMoveLinesKey(k tea.KeyPressMsg) bool { return k.Keystroke() == "alt+m" }
 
+// isMoveNoteKey reports whether k is alt+shift+m ("alt+M" in the help):
+// terminals report it either way.
+func isMoveNoteKey(k tea.KeyPressMsg) bool {
+	s := k.Keystroke()
+	return s == "alt+shift+m" || s == "alt+M"
+}
+
 // startMoveLines captures the lines to move (the selection's lines, or the
 // cursor line) and opens the finder to pick the note they go to.
 func (m *Model) startMoveLines() tea.Cmd {

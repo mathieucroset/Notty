@@ -13,7 +13,8 @@
 │   #todo 1                ││ │  New note                                   n · sidebar  │                             │
 │                          ││ │  New folder                                 N · sidebar  │                             │
 │  ☐ Tasks (1)             ││ │  Move line to note…             alt+m · editor · normal  │                             │
-│  ⌫ Trash (0)             ││ │  Switch theme                                            │                             │
+│  ⌫ Trash (0)             ││ │  Move note to folder…           alt+M · editor · normal  │                             │
+│                          ││ │  Switch theme                                            │                             │
 │                          ││ │  Toggle vim                                              │                             │
 │                          ││ │  Toggle line numbers                                     │                             │
 │                          ││ │  Sync now                                                │                             │
@@ -28,7 +29,6 @@
 │                          ││ │  Quit                                            ctrl+q  │                             │
 │                          ││ │                                                          │                             │
 │                          ││ ╰──────────────────────────────────────────────────────────╯                             │
-│                          ││                                                                                          │
 │                          ││                                                                                          │
 │                          ││                                                                                          │
 │                          ││                                                                                          │

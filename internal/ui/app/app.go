@@ -573,6 +573,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.requestMove(msg.Path)
 	case msgs.RequestTrash:
 		return m, m.requestTrash(msg.Path)
+	case msgs.MoveOpenNoteMsg:
+		return m, m.moveOpenNote()
 	case msgs.MoveLinesToNoteMsg:
 		return m, m.startMoveLines()
 	case finder.PickedMsg:

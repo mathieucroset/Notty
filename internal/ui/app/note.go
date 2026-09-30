@@ -264,12 +264,14 @@ func (m *Model) handleEditorKey(k tea.KeyPressMsg) tea.Cmd {
 		m.dismissToast()
 		return nil
 	}
-	if isMoveLinesKey(k) {
+	if moveLines, moveNote := isMoveLinesKey(k), isMoveNoteKey(k); moveLines || moveNote {
 		switch {
 		case m.editor.ModeName() == "READ-ONLY":
 			return m.pushToast(msgs.ToastWarn, conflictRefusal(m.note.path))
-		case m.editor.KeysIdle():
+		case m.editor.KeysIdle() && moveLines:
 			return m.startMoveLines()
+		case m.editor.KeysIdle():
+			return m.moveOpenNote()
 		}
 	}
 	m.editorStatus = ""

@@ -163,20 +163,26 @@ func TestMoveWithFolderSuggestions(t *testing.T) {
 	}
 }
 
-func TestMoveRejectsUnknownFolder(t *testing.T) {
+// An unknown folder (a typo, say) is never created without asking; esc on
+// the question moves nothing.
+func TestMoveToUnknownFolderAsksFirst(t *testing.T) {
 	opts := testOptions(t)
 	m := start(t, opts, 120, 30)
 	run(t, m, msgs.RequestMove{Path: "ideas.md"})
 	typeText(t, m, "Nope")
 	run(t, m, keyMsg("enter"))
-	if !m.overlayOpen() {
-		t.Fatal("move to an unknown folder was accepted")
-	}
-	if s := screen(m); !strings.Contains(s, "No such folder") {
-		t.Errorf("validation error missing:\n%s", s)
+	if o := m.topOverlay(); o == nil || o.dialog.ID() != dlgMoveConfirm {
+		t.Fatalf("move to an unknown folder was not confirmed first:\n%s", screen(m))
 	}
 	if exists(opts.Vault, "Nope") || !exists(opts.Vault, "ideas.md") {
-		t.Error("the note moved or a folder was created")
+		t.Error("the note moved or a folder was created before the answer")
+	}
+	run(t, m, keyMsg("esc"))
+	if m.overlayOpen() {
+		t.Error("esc did not close the question")
+	}
+	if exists(opts.Vault, "Nope") || !exists(opts.Vault, "ideas.md") {
+		t.Error("the note moved or a folder was created after esc")
 	}
 }
 

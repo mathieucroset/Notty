@@ -26,6 +26,8 @@ const (
 	dlgRename    = "rename"
 	dlgMove      = "move"
 	dlgTrash     = "trash"
+	// dlgMoveConfirm confirms a move into a folder it creates.
+	dlgMoveConfirm = "move-confirm"
 )
 
 // fileOpMsg reports a finished vault operation. path is the resulting path
@@ -158,17 +160,102 @@ func (m *Model) requestMove(p string) tea.Cmd {
 		}
 		return append(starts, contains...)
 	}
-	// Only existing folders: a typo must not silently create a folder.
+	// A folder that does not exist yet is accepted: runPending asks before
+	// creating it, so a typo never silently creates a folder.
 	validate := func(s string) error {
-		dest := strings.Trim(strings.TrimSpace(s), "/")
-		if dest == "" || slices.Contains(folders, dest) || dest == parentOf(p) {
-			return nil
-		}
-		return validationError("No such folder")
+		_, err := m.moveDest(p, s)
+		return err
 	}
 	d := dialog.NewInput(dlgMove, "Move '"+displayName(p)+"' to", "Folder (empty for the vault root)",
-		parentOf(p), validate, m.opts.Styles).WithSuggestions(suggest)
+		parentOf(p), validate, m.opts.Styles).
+		WithSuggestions(suggest).
+		WithHint("A folder that does not exist yet is created, once you confirm.")
 	m.openDialog(d, pendingOp{kind: opMove, path: p})
+	return nil
+}
+
+// moveOpenNote shows the move dialog for the open note (alt+M, palette).
+func (m *Model) moveOpenNote() tea.Cmd {
+	if m.note.path == "" {
+		return m.pushToast(msgs.ToastInfo, textNoNoteOpen)
+	}
+	return m.requestMove(m.note.path)
+}
+
+// moveDest checks the folder typed in the move dialog for p and returns it
+// in clean form, spelled like the existing folders it names (they are
+// matched ignoring case). It need not exist, but it must be a valid folder
+// name (the rules of vault.ValidateFolderPath), not a file or below one,
+// and not p itself or inside it.
+func (m *Model) moveDest(p, typed string) (string, error) {
+	dest, err := vault.ValidateFolderPath(typed)
+	if err != nil {
+		return "", validationError("Not a valid folder name")
+	}
+	dest = m.folderCase(dest)
+	if m.opts.Vault != nil {
+		cur := ""
+		for _, seg := range strings.Split(dest, "/") {
+			if seg == "" {
+				break
+			}
+			cur = path.Join(cur, seg)
+			if fi, err := os.Stat(m.opts.Vault.Abs(cur)); err == nil && !fi.IsDir() {
+				return "", validationError("Not a folder: " + cur)
+			}
+		}
+	}
+	if isUnderFold(dest, p) {
+		return "", validationError("A folder cannot move into itself")
+	}
+	return dest, nil
+}
+
+// folderCase returns the clean folder path dest with each leading segment
+// that names an existing folder of the tree (ignoring case, an exact match
+// first) spelled as that folder is. The rest is kept as typed.
+func (m *Model) folderCase(dest string) string {
+	if dest == "" || m.tree == nil {
+		return dest
+	}
+	segs := strings.Split(dest, "/")
+	n := m.tree
+	for i, seg := range segs {
+		var match *vault.Node
+		for _, c := range n.Children {
+			if !c.IsDir {
+				continue
+			}
+			if c.Name == seg {
+				match = c
+				break
+			}
+			if match == nil && strings.EqualFold(c.Name, seg) {
+				match = c
+			}
+		}
+		if match == nil {
+			break
+		}
+		segs[i] = match.Name
+		n = match
+	}
+	return strings.Join(segs, "/")
+}
+
+// isUnderFold is isUnder ignoring case, as case-insensitive filesystems
+// would.
+func isUnderFold(p, target string) bool {
+	return strings.EqualFold(p, target) || (len(p) > len(target) && strings.EqualFold(p[:len(target)+1], target+"/"))
+}
+
+// confirmMoveToNewFolder asks before op moves its entry into a folder that
+// does not exist yet (amendment A9).
+func (m *Model) confirmMoveToNewFolder(op pendingOp) tea.Cmd {
+	d := dialog.NewConfirm(dlgMoveConfirm, "Create folder",
+		fmt.Sprintf("Create folder %q and move %q there?", op.dest, displayName(op.path)),
+		"Create and move", "Cancel", false, m.opts.Styles)
+	m.openDialog(d, pendingOp{kind: opMoveConfirm, path: op.path, dest: op.dest})
 	return nil
 }
 

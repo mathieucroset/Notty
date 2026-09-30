@@ -9,12 +9,12 @@
 │    │  New note                                   n · sidebar  │    │
 │ ## │  New folder                                 N · sidebar  │    │
 │    │  Move line to note…             alt+m · editor · normal  │    │
-│ Pla│  Switch theme                                            │    │
+│ Pla│  Move note to folder…           alt+M · editor · normal  │    │
+│    │  Switch theme                                            │    │
 │    │  Toggle vim                                              │    │
 │    │  Toggle line numbers                                     │    │
 │    │  Sync now                                                │    │
 │    │  Set up sync                                             │    │
-│    │  Resolve conflicts                          c · sidebar  │    │
 │    │                                                          │    │
 │    ╰──────────────────────────────────────────────────────────╯    │
 │                                                                    │

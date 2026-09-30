@@ -97,6 +97,9 @@ type RequestMove struct {
 	Path string
 }
 
+// MoveOpenNoteMsg asks the app to show the move dialog for the open note.
+type MoveOpenNoteMsg struct{}
+
 // MoveLinesToNoteMsg asks the app to move the open note's selected lines
 // (or its cursor line) to the end of another note, chosen in the finder.
 type MoveLinesToNoteMsg struct{}

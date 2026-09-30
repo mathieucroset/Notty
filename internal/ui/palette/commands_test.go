@@ -15,6 +15,7 @@ var wantCommands = []string{
 	"new note",
 	"new folder",
 	"move line to note…",
+	"move note to folder…",
 	"switch theme",
 	"toggle vim",
 	"toggle line numbers",
@@ -89,6 +90,7 @@ func TestDefaultCommandsEmitExpectedMessages(t *testing.T) {
 	check("new-note", msgs.RequestNewNote{})
 	check("new-folder", msgs.RequestNewFolder{})
 	check("move-lines", msgs.MoveLinesToNoteMsg{})
+	check("move-note", msgs.MoveOpenNoteMsg{})
 	check("toggle-vim", ToggleVimMsg{})
 	check("toggle-line-numbers", ToggleLineNumbersMsg{})
 	check("sync-now", SyncNowMsg{})
@@ -176,6 +178,9 @@ func TestDefaultCommandsDeriveKeysFromKeyTables(t *testing.T) {
 
 	if got, want := byID["move-lines"].Key, findKey(t, keys.EditorNormal, "move lines to note")+" · editor · normal"; got != want {
 		t.Errorf("move-lines: Key = %q, want %q", got, want)
+	}
+	if got, want := byID["move-note"].Key, findKey(t, keys.EditorNormal, "move note to folder")+" · editor · normal"; got != want {
+		t.Errorf("move-note: Key = %q, want %q", got, want)
 	}
 
 	if got := byID["tasks"].Key; got != "" {

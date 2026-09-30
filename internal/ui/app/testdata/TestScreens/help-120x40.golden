@@ -5,34 +5,34 @@
 │  N O│                                                                                                          │     │
 │  ▸ P│  Keyboard shortcuts  j/k scroll · esc close                                                              │     │
 │  ▾ W│                                                                                                          │     │
-│    •│  G L O B A L                                        E D I T O R   ·   R E A D - O N L Y                  │     │
-│  • i│  ctrl+p fuzzy finder                                motions move and scroll                              │     │
-│     │  ctrl+f full-text search                            /       search                                       │     │
-│  T A│  ctrl+k command palette                             y       yank / copy                                  │     │
-│   #d│  ctrl+b toggle sidebar (zen layout)                 tab     focus sidebar                                │     │
-│   #t│  ctrl+g cycle editor / split / preview              c       open resolver on this file                   │     │
-│     │  ctrl+s save                                                                                             │     │
-│  ☐ T│  ctrl+e open note in $EDITOR                        P R E V I E W                                        │     │
-│  ⌫ T│  ctrl+q quit                                        j/k      scroll                                      │     │
-│     │  F1     help                                        ctrl+d/u half-page down / up                         │     │
-│     │                                                     gg G     top / bottom                                │     │
-│     │  S I D E B A R                                      ]t [t    next / previous task                        │     │
-│     │  j/↓   move down                                    space    toggle highlighted task                     │     │
-│     │  k/↑   move up                                      ]i [i    next / previous image                       │     │
-│     │  h/←   collapse folder / go to parent               enter    open image viewer                           │     │
-│     │  l/→   expand folder                                tab      focus sidebar                               │     │
-│     │  enter open note, toggle folder, open entry         ?        help                                        │     │
-│     │  tab   focus main pane                                                                                   │     │
-│     │  n     new note                                     T A S K S                                            │     │
-│     │  N     new folder                                   j/k   move                                           │     │
-│     │  r     rename                                       space toggle task                                    │     │
-│     │  m     move                                         enter open note at task                              │     │
-│     │  d     delete (move to trash)                       tab   focus sidebar                                  │     │
-│     │  p     pin / unpin                                  esc   back to note                                   │     │
-│     │  H     note history                                                                                      │     │
-│     │  #     filter by tag                                T R A S H                                            │     │
-│     │  esc   clear tag filter                             j/k   move                                           │     │
-│     │  c     open resolver                                enter restore                                        │     │
+│    •│  G L O B A L                                        E D I T O R   ·   V I M   O F F                      │     │
+│  • i│  ctrl+p fuzzy finder                                tab          indent                                  │     │
+│     │  ctrl+f full-text search                            shift+tab    outdent                                 │     │
+│  T A│  ctrl+k command palette                             ctrl+t       toggle task                             │     │
+│   #d│  ctrl+b toggle sidebar (zen layout)                 ctrl+v       paste image or text                     │     │
+│   #t│  ctrl+g cycle editor / split / preview              ctrl+c       copy                                    │     │
+│     │  ctrl+s save                                        ctrl+x       cut                                     │     │
+│  ☐ T│  ctrl+e open note in $EDITOR                        ctrl+z       undo                                    │     │
+│  ⌫ T│  ctrl+q quit                                        ctrl+y       redo                                    │     │
+│     │  F1     help                                        shift+arrows select text                             │     │
+│     │                                                     alt+m        move lines to note                      │     │
+│     │  S I D E B A R                                      alt+M        move note to folder                     │     │
+│     │  j/↓   move down                                    esc          focus sidebar                           │     │
+│     │  k/↑   move up                                                                                           │     │
+│     │  h/←   collapse folder / go to parent               E D I T O R   ·   R E A D - O N L Y                  │     │
+│     │  l/→   expand folder                                motions move and scroll                              │     │
+│     │  enter open note, toggle folder, open entry         /       search                                       │     │
+│     │  tab   focus main pane                              y       yank / copy                                  │     │
+│     │  n     new note                                     tab     focus sidebar                                │     │
+│     │  N     new folder                                   c       open resolver on this file                   │     │
+│     │  r     rename                                                                                            │     │
+│     │  m     move                                         P R E V I E W                                        │     │
+│     │  d     delete (move to trash)                       j/k      scroll                                      │     │
+│     │  p     pin / unpin                                  ctrl+d/u half-page down / up                         │     │
+│     │  H     note history                                 gg G     top / bottom                                │     │
+│     │  #     filter by tag                                ]t [t    next / previous task                        │     │
+│     │  esc   clear tag filter                             space    toggle highlighted task                     │     │
+│     │  c     open resolver                                ]i [i    next / previous image                       │     │
 │     │                                                                                                          │     │
 │     ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────╯     │
 │                          ││                                                                                          │

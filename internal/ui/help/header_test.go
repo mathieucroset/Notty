@@ -17,7 +17,7 @@ func TestViewHasATitleAndKeyHint(t *testing.T) {
 		wantScroll bool
 	}{
 		{"cramped", 80, 24, true},
-		{"roomy", 240, 120, false},
+		{"roomy", 240, 160, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

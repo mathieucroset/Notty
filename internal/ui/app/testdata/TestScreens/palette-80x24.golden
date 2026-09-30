@@ -9,12 +9,12 @@
 │  • ideas│  New note                                   n · sidebar  │         │
 │         │  New folder                                 N · sidebar  │         │
 │  T A G S│  Move line to note…             alt+m · editor · normal  │         │
-│   #desig│  Switch theme                                            │         │
-│   #todo │  Toggle vim                                              │         │
-│         │  Toggle line numbers                                     │         │
-│  ☐ Tasks│  Sync now                                                │         │
-│  ⌫ Trash│  Set up sync                                             │         │
-│         │  Resolve conflicts                          c · sidebar  │         │
+│   #desig│  Move note to folder…           alt+M · editor · normal  │         │
+│   #todo │  Switch theme                                            │         │
+│         │  Toggle vim                                              │         │
+│  ☐ Tasks│  Toggle line numbers                                     │         │
+│  ⌫ Trash│  Sync now                                                │         │
+│         │  Set up sync                                             │         │
 │         │                                                          │         │
 │         ╰──────────────────────────────────────────────────────────╯         │
 │                          ││                                                  │

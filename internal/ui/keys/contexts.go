@@ -245,6 +245,7 @@ var contextBindings = map[Context][]key.Binding{
 		bind([]string{"\"+"}, "\"+", "system clipboard register"),
 		bind([]string{"space"}, "space", "toggle task"),
 		bind([]string{"alt+m"}, "alt+m", "move lines to note"),
+		bind([]string{"alt+shift+m", "alt+M"}, "alt+M", "move note to folder"),
 		bind([]string{"tab"}, "tab", "focus sidebar"),
 		bind([]string{"ctrl+w h", "ctrl+w l"}, "ctrl+w h/l", "focus sidebar / main pane"),
 	},
@@ -264,6 +265,7 @@ var contextBindings = map[Context][]key.Binding{
 		bind([]string{"y"}, "y", "yank selection"),
 		bind([]string{">", "<"}, "> <", "indent / outdent"),
 		bind([]string{"alt+m"}, "alt+m", "move lines to note"),
+		bind([]string{"alt+shift+m", "alt+M"}, "alt+M", "move note to folder"),
 		bind([]string{"esc"}, "esc", "normal mode"),
 	},
 	EditorCommand: {
@@ -287,6 +289,7 @@ var contextBindings = map[Context][]key.Binding{
 		bind([]string{"ctrl+y"}, "ctrl+y", "redo"),
 		bind([]string{"shift+left", "shift+right", "shift+up", "shift+down"}, "shift+arrows", "select text"),
 		bind([]string{"alt+m"}, "alt+m", "move lines to note"),
+		bind([]string{"alt+shift+m", "alt+M"}, "alt+M", "move note to folder"),
 		bind([]string{"esc"}, "esc", "focus sidebar"),
 	},
 	EditorReadOnly: {
