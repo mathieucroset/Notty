@@ -79,6 +79,32 @@ func TestSelectedLines(t *testing.T) {
 	}
 }
 
+// A selection reaching an empty last line takes it: the line is wholly
+// selected, having no text and no line break after it.
+func TestSelectedLinesEmptyLastLine(t *testing.T) {
+	tests := []struct {
+		name string
+		vim  bool
+		keys []string
+	}{
+		{"vim charwise", true, []string{"v", "j"}},
+		{"vim linewise", true, []string{"V", "j"}},
+		{"plain selection", false, []string{"shift+down"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := testOptions(t)
+			opts.Vim = tt.vim
+			m := newModel(t, opts, "a\nb\n\n", buffer.Pos{Line: 1}, 40, 10)
+			m, _ = typeKeys(m, tt.keys...)
+			start, end, text := m.SelectedLines()
+			if start != 1 || end != 2 || !slices.Equal(text, []string{"b", ""}) {
+				t.Errorf("SelectedLines() = %d..%d %q, want 1..2 [b \"\"]", start, end, text)
+			}
+		})
+	}
+}
+
 func TestDeleteLines(t *testing.T) {
 	tests := []struct {
 		name       string

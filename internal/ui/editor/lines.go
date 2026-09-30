@@ -28,13 +28,19 @@ func (m Model) KeysIdle() bool {
 // selection touches, and their text: every line of a vim visual selection
 // (charwise or linewise) or of a Plain shift-selection, or the cursor line
 // when nothing is selected. A selection ending at column 0 of a line (an
-// exclusive end) does not include that line.
+// exclusive end) does not include that line, unless it is an empty last
+// line.
 func (m Model) SelectedLines() (start, end int, text []string) {
 	start, end = m.buf.Cursor().Line, m.buf.Cursor().Line
 	if sel, ok := m.ed.Selection(m.buf); ok {
 		sel = sel.Normalized()
 		start, end = sel.Start.Line, sel.End.Line
-		if sel.End.Col == 0 && end > start {
+		// An end at column 0 is past the previous line's break, and takes
+		// nothing of its own line; except at the very end of the text, on
+		// an empty last line, which is then wholly selected.
+		last := m.buf.LineCount() - 1
+		atTextEnd := end == last && m.buf.LineLen(last) == 0
+		if sel.End.Col == 0 && end > start && !atTextEnd {
 			end--
 		}
 		end = min(end, m.buf.LineCount()-1)
