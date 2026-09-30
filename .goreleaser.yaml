@@ -35,6 +35,11 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+# Tags like v1.0.0-rc1 are marked pre-release on GitHub, so the update
+# check (the "latest release" endpoint) never offers them.
+release:
+  prerelease: auto
+
 changelog:
   use: git
   sort: asc

@@ -1,6 +1,6 @@
 // Package statusbar renders Notty's one-row status bar: the editor mode
-// pill, the note path, the word count, the sync state (spec §4.3), and the
-// help hint.
+// pill, the note path, the word count, a newer release marker, the sync
+// state (spec §4.3), and the help hint.
 package statusbar
 
 import (
@@ -30,6 +30,9 @@ type Model struct {
 	// Busy is a short background-work label such as "indexing…", shown
 	// before the sync state; "" for none.
 	Busy string
+	// Update is the version of a newer release ("v0.2.0"), shown with an
+	// arrow before the sync state; "" for none.
+	Update string
 
 	styles theme.Styles
 	width  int
@@ -120,11 +123,18 @@ func (m Model) View() string {
 	if m.Busy != "" {
 		syncText = strings.TrimSpace(m.Busy + "   " + syncText)
 	}
-	showSync, showHelp := syncText != "", true
+	updateText := ""
+	if m.Update != "" {
+		updateText = m.styles.Icons.Update + " " + m.Update
+	}
+	showUpdate, showSync, showHelp := updateText != "", syncText != "", true
 
 	// right builds the right-hand segment for the current choices.
 	right := func() (string, int) {
 		var parts []string
+		if showUpdate {
+			parts = append(parts, on(m.styles.Accent).Render(updateText))
+		}
 		if showSync {
 			parts = append(parts, on(m.syncStyle()).Render(syncText))
 		}
@@ -138,19 +148,26 @@ func (m Model) View() string {
 		return s, lipgloss.Width(s)
 	}
 
-	// Drop the help hint, then the sync text, until at least a short path
-	// (or, with no path, a one-column gap) fits. Conflict and error states
-	// need attention, so their text stays and the path gives way instead.
+	// Drop the update marker, then the help hint, then the sync text,
+	// until at least a short path (or, with no path, a one-column gap)
+	// fits. The marker also gives way to the path: it stays only while the
+	// path keeps min(its width, 24) columns. Conflict and error states need
+	// attention, so their text stays and the path gives way instead.
 	urgent := m.Sync.State == msgs.SyncConflict || m.Sync.State == msgs.SyncError
-	minMiddle := 1
+	pathW := ansi.StringWidth(m.Path)
+	minMiddle, updateMiddle := 1, 1
 	if m.Path != "" {
-		minMiddle = min(ansi.StringWidth(m.Path), 8) + 1
+		minMiddle = min(pathW, 8) + 1
+		updateMiddle = min(pathW, 24) + 1
 	}
 	var r string
 	var rw int
 	fits := func() bool {
 		r, rw = right()
 		return leftW+rw+minMiddle <= m.width
+	}
+	if _, w := right(); leftW+w+updateMiddle > m.width {
+		showUpdate = false
 	}
 	if !fits() {
 		showHelp = false

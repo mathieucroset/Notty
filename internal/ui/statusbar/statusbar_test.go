@@ -200,3 +200,130 @@ func TestViewBusy(t *testing.T) {
 		t.Errorf("busy label not before the sync state: %q", got)
 	}
 }
+
+func TestViewUpdateMarker(t *testing.T) {
+	ascii, _ := icons.Get("ascii")
+	nerd, _ := icons.Get("nerd")
+	tests := []struct {
+		name string
+		set  icons.Set
+		busy string
+		want string
+	}{
+		{"unicode", icons.Default(), "", "↑ v0.2.0   ✓ synced   F1 help"},
+		{"ascii", ascii, "", "^ v0.2.0   + synced   F1 help"},
+		{"nerd", nerd, "", nerd.Update + " v0.2.0   " + nerd.Synced + " synced   F1 help"},
+		{"before busy and sync", icons.Default(), "indexing…", "↑ v0.2.0   indexing…   ✓ synced   F1 help"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := styles(t).WithIcons(tt.set)
+			m := New(st)
+			m.SetSize(120)
+			m.Path = "Work/Standup notes.md"
+			m.Words = 3
+			m.Busy = tt.busy
+			m.Sync = msgs.SyncStatusMsg{State: msgs.SyncSynced}
+			m.Update = "v0.2.0"
+			view := m.View()
+			got := ansi.Strip(view)
+			if w := ansi.StringWidth(got); w != 120 {
+				t.Errorf("width = %d, want 120: %q", w, got)
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("view %q lacks %q", got, tt.want)
+			}
+			accent := st.Accent.Inherit(st.StatusBar).Render(tt.set.Update + " v0.2.0")
+			if !strings.Contains(view, accent) {
+				t.Errorf("marker not drawn in the accent style: %q", view)
+			}
+		})
+	}
+}
+
+func TestViewNoUpdateMarkerWhenEmpty(t *testing.T) {
+	m := New(styles(t))
+	m.SetSize(80)
+	m.Sync = msgs.SyncStatusMsg{State: msgs.SyncSynced}
+	if got := ansi.Strip(m.View()); strings.Contains(got, "↑") {
+		t.Errorf("marker shown without an update: %q", got)
+	}
+}
+
+// TestViewUpdateMarkerDropsFirst checks that the marker is the first thing
+// to give way, before the help hint and the sync text: it is only shown
+// while the path still gets min(path width, 24) columns, and the bar never
+// overflows.
+func TestViewUpdateMarkerDropsFirst(t *testing.T) {
+	long := "Projects/Clients/Acme Corporation/Quarterly planning/Meeting notes 2026.md"
+	longName := "Notes/Quarterly planning and meeting notes for Acme 2026.md"
+	short := "a.md"
+	offline := msgs.SyncStatusMsg{State: msgs.SyncOffline, Pending: 3}
+	synced := msgs.SyncStatusMsg{State: msgs.SyncSynced}
+	conflict := msgs.SyncStatusMsg{State: msgs.SyncConflict, Conflicts: 2}
+	tests := []struct {
+		width      int
+		path       string
+		busy       string
+		st         msgs.SyncStatusMsg
+		wantUpdate bool
+		wantHelp   bool
+		wantSync   bool
+	}{
+		{80, long, "", synced, true, true, true},
+		{70, long, "", synced, true, true, true},
+		{80, long, "", offline, true, true, true},
+		// The marker would leave the path fewer than 24 columns.
+		{70, long, "", offline, false, true, true},
+		{70, longName, "", offline, false, true, true},
+		{80, longName, "", offline, true, true, true},
+		{80, long, "indexing…", offline, false, true, true},
+		{100, long, "indexing…", offline, true, true, true},
+		{45, long, "", synced, false, true, true},
+		{36, long, "", synced, false, false, true},
+		{24, long, "", synced, false, false, false},
+		{40, long, "", conflict, false, false, true},
+		{24, long, "", conflict, false, false, true},
+		// A short path only needs its own width.
+		{44, short, "", synced, true, true, true},
+		{43, short, "", synced, false, true, true},
+	}
+	for _, tt := range tests {
+		m := New(styles(t))
+		m.SetSize(tt.width)
+		m.Mode = "NORMAL"
+		m.Path = tt.path
+		m.Words = 7
+		m.Busy = tt.busy
+		m.Sync = tt.st
+		m.Update = "v0.2.0"
+		got := ansi.Strip(m.View())
+		if w := ansi.StringWidth(got); w != tt.width {
+			t.Errorf("width %d: rendered width %d: %q", tt.width, w, got)
+		}
+		for _, c := range []struct {
+			text string
+			want bool
+		}{
+			{"↑ v0.2.0", tt.wantUpdate},
+			{"F1 help", tt.wantHelp},
+			{SyncText(icons.Default(), tt.st), tt.wantSync},
+		} {
+			if strings.Contains(got, c.text) != c.want {
+				t.Errorf("width %d, %s, %s, busy %q: shows %q = %v, want %v: %q",
+					tt.width, tt.path, tt.st.State, tt.busy, c.text, !c.want, c.want, got)
+			}
+		}
+		if !strings.Contains(got, "NORMAL") {
+			t.Errorf("width %d: pill missing: %q", tt.width, got)
+		}
+		// With the marker shown, the path keeps at least 24 columns: its
+		// last 23 characters after the "…", or all of it.
+		if strings.Contains(got, "↑ v0.2.0") {
+			tail := tt.path[max(len(tt.path)-23, 0):]
+			if !strings.Contains(got, tail) {
+				t.Errorf("width %d: path cut below 24 columns for the marker: %q", tt.width, got)
+			}
+		}
+	}
+}

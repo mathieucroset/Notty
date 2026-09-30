@@ -25,6 +25,9 @@ type Config struct {
 	// Icons is the glyph set the UI draws with: "nerd" (needs a Nerd
 	// Font), "unicode" (the default), or "ascii".
 	Icons string `toml:"icons"`
+	// UpdateCheck lets the app check, at most once a day, whether a newer
+	// release is published.
+	UpdateCheck bool `toml:"update_check"`
 
 	Sync struct {
 		Enabled        bool `toml:"enabled"`
@@ -57,6 +60,7 @@ func Default() Config {
 	c.Editor = ""
 	c.AutosaveMS = 1000
 	c.Icons = "unicode"
+	c.UpdateCheck = true
 	c.Sync.Enabled = true
 	c.Sync.CommitDelayS = 5
 	c.Sync.FetchIntervalM = 5
@@ -106,6 +110,7 @@ type overlay struct {
 	Editor      *string
 	AutosaveMS  *int    `toml:"autosave_ms"`
 	Icons       *string `toml:"icons"`
+	UpdateCheck *bool   `toml:"update_check"`
 
 	Sync struct {
 		Enabled        *bool `toml:"enabled"`
@@ -151,6 +156,9 @@ func applyOverlay(c *Config, ov overlay) {
 	}
 	if ov.Icons != nil {
 		c.Icons = *ov.Icons
+	}
+	if ov.UpdateCheck != nil {
+		c.UpdateCheck = *ov.UpdateCheck
 	}
 	if ov.Sync.Enabled != nil {
 		c.Sync.Enabled = *ov.Sync.Enabled
@@ -240,6 +248,7 @@ var validConfigKeys = map[string]bool{
 	"editor":                true,
 	"autosave_ms":           true,
 	"icons":                 true,
+	"update_check":          true,
 	"sync.enabled":          true,
 	"sync.commit_delay_s":   true,
 	"sync.fetch_interval_m": true,

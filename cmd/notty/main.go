@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -30,7 +31,9 @@ import (
 	"github.com/mathieucroset/notty/internal/watcher"
 )
 
-// version is set at build time with -ldflags "-X main.version=...".
+// version is set at build time with -ldflags "-X main.version=...";
+// without it, main takes the module version of a go install build (see
+// resolveVersion).
 var version = "dev"
 
 const fallbackTheme = "catppuccin-mocha"
@@ -52,6 +55,8 @@ type env struct {
 }
 
 func main() {
+	info, ok := debug.ReadBuildInfo()
+	version = resolveVersion(version, info, ok)
 	os.Exit(run(os.Args[1:], env{
 		stdout:     os.Stdout,
 		stderr:     os.Stderr,
@@ -245,6 +250,10 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 		LockWait:        e.lockWait,
 		Catalog:         cat,
 		StartupWarnings: warnings,
+		// Every TUI start checks for a newer release, the first run
+		// included; notty sync never does.
+		Version:     version,
+		UpdateCheck: updateCheckOptions(e.stateDir),
 	}
 	// Sync and history need git (spec §7): without it the app says so once.
 	if _, err := e.lookPath("git"); err != nil {
