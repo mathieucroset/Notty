@@ -127,6 +127,42 @@ func TestExternalWriteProducesOneEvent(t *testing.T) {
 	expectNoEvent(t, w)
 }
 
+// TestDirectoryWriteNotRecorded: Windows (like kqueue) reports a Write on
+// a directory whose entries changed. The entries' own events carry the
+// change, so the directory itself is not reported.
+func TestDirectoryWriteNotRecorded(t *testing.T) {
+	tests := []struct {
+		name string
+		rel  string
+		op   fsnotify.Op
+		want bool
+	}{
+		{"write on a directory", "Work", fsnotify.Write, false},
+		{"write on a file", "a.md", fsnotify.Write, true},
+		{"write on a deleted path", "gone.md", fsnotify.Write, true},
+		{"creation of a directory", "Work", fsnotify.Create, true},
+		{"removal and write on a directory", "Work", fsnotify.Remove | fsnotify.Write, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "Work/Standup.md", "x")
+			writeFile(t, root, "a.md", "x")
+			w, err := newWatcher(root) // event loop not started
+			if err != nil {
+				t.Fatalf("newWatcher: %v", err)
+			}
+			t.Cleanup(func() { _ = w.Close() })
+
+			ev := fsnotify.Event{Name: filepath.Join(w.root, filepath.FromSlash(tc.rel)), Op: tc.op}
+			got := w.handle(ev, time.Now())
+			if _, pending := w.pending[tc.rel]; got != tc.want || pending != tc.want {
+				t.Fatalf("handle(%v) = %v, pending %v; want %v", ev, got, pending, tc.want)
+			}
+		})
+	}
+}
+
 func TestExternalWriteToExistingFileInSubdir(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "Work/Standup.md", "v1")

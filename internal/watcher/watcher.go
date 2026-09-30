@@ -478,6 +478,13 @@ func (w *Watcher) handle(fe fsnotify.Event, now time.Time) bool {
 	if fe.Op == fsnotify.Chmod {
 		return false
 	}
+	// Windows reports a Write on a directory whose entries changed; the
+	// entries have their own events.
+	if fe.Op == fsnotify.Write {
+		if info, err := os.Lstat(fe.Name); err == nil && info.IsDir() {
+			return false
+		}
+	}
 	paused := w.isPaused()
 	recorded := false
 
