@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"golang.org/x/sys/windows"
@@ -18,6 +20,9 @@ import (
 // rdcwBufSize is the size of each ReadDirectoryChangesW buffer. 64 KiB is
 // also the most a network share accepts.
 const rdcwBufSize = 64 * 1024
+
+// setEvent signals an event object; tests make it fail.
+var setEvent = windows.SetEvent
 
 // rdcwBackend watches the whole vault with one recursive
 // ReadDirectoryChangesW watch on the root.
@@ -31,17 +36,22 @@ const rdcwBufSize = 64 * 1024
 // A directory's own watch never reports that directory being removed or
 // renamed, so the root's parent is also watched (for directory names only)
 // to learn that the vault root went away.
+//
+// Each watch runs on its own goroutine, locked to its OS thread: Windows
+// cancels an overlapped read when the thread that issued it exits.
 type rdcwBackend struct {
 	root string
 	evC  chan fsnotify.Event
 	errC chan error
 	done chan struct{}  // closed by Close
 	stop windows.Handle // manual-reset event, set by Close
-	wg   sync.WaitGroup // the running dirWatch goroutines
+	wg   sync.WaitGroup // the running watch goroutines
 
 	mu      sync.Mutex
-	started bool
-	closed  bool
+	started bool               // the root's watch is running
+	parent  bool               // the parent's watch is running
+	closed  bool               // Close was called
+	running map[*dirWatch]bool // the open watches, for Close to cancel
 }
 
 // dirWatch is one pending ReadDirectoryChangesW call. It lives on the heap,
@@ -61,40 +71,40 @@ func newBackend(root string) (backend, error) {
 		return nil, fmt.Errorf("watcher: create stop event: %w", os.NewSyscallError("CreateEvent", err))
 	}
 	return &rdcwBackend{
-		root: root,
-		evC:  make(chan fsnotify.Event, 64),
-		errC: make(chan error),
-		done: make(chan struct{}),
-		stop: stop,
+		root:    root,
+		evC:     make(chan fsnotify.Event, 64),
+		errC:    make(chan error),
+		done:    make(chan struct{}),
+		stop:    stop,
+		running: map[*dirWatch]bool{},
 	}, nil
 }
 
 func (b *rdcwBackend) events() <-chan fsnotify.Event { return b.evC }
 func (b *rdcwBackend) errors() <-chan error          { return b.errC }
 
-// Add starts the recursive watch of the root on its first call. That watch
-// covers every directory below, so later calls do nothing.
+// Add starts the recursive watch of the root, unless it is running. That
+// watch covers every directory and file below, so Add ignores its
+// argument. It returns once the watch is set up: from then on, the kernel
+// records the root's changes. A root watch that stopped (reported with
+// ErrWatchStopped) is started again by the next Add.
 func (b *rdcwBackend) Add(string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
-		return fmt.Errorf("watcher: watch %s: %w", b.root, fsnotify.ErrClosed)
+		return fsnotify.ErrClosed
 	}
 	if b.started {
 		return nil
 	}
-	w, err := b.open(b.root, true)
-	if err != nil {
+	if err := b.start(b.root, true); err != nil {
 		return err
 	}
 	b.started = true
-	b.wg.Add(1)
-	go b.watch(w)
-	if parent := filepath.Dir(b.root); parent != b.root {
+	if parent := filepath.Dir(b.root); parent != b.root && !b.parent {
 		// Best effort: without it, only a deleted root is noticed.
-		if pw, err := b.open(parent, false); err == nil {
-			b.wg.Add(1)
-			go b.watch(pw)
+		if b.start(parent, false) == nil {
+			b.parent = true
 		}
 	}
 	return nil
@@ -113,39 +123,108 @@ func (b *rdcwBackend) Close() error {
 	b.closed = true
 	b.mu.Unlock()
 	close(b.done)
-	if err := windows.SetEvent(b.stop); err != nil {
-		return fmt.Errorf("watcher: close: %w", os.NewSyscallError("SetEvent", err))
+	var err error
+	if serr := setEvent(b.stop); serr != nil {
+		err = fmt.Errorf("watcher: close: %w", os.NewSyscallError("SetEvent", serr))
+		// The watches never see the stop event: cancel their reads until
+		// they have all noticed done.
+		b.cancelUntilDone()
 	}
 	b.wg.Wait()
 	_ = windows.CloseHandle(b.stop)
 	close(b.evC)
 	close(b.errC)
-	return nil
+	return err
+}
+
+// cancelUntilDone cancels the pending reads of the running watches, again
+// and again (a watch may issue a new read before it sees done), until every
+// watch goroutine has ended.
+func (b *rdcwBackend) cancelUntilDone() {
+	ended := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(ended)
+	}()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		b.mu.Lock()
+		for w := range b.running {
+			_ = windows.CancelIoEx(w.h, nil)
+		}
+		b.mu.Unlock()
+		select {
+		case <-ended:
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+// start runs a watch of dir on a new goroutine and returns once its first
+// read is pending, or with the error that prevented it. b.mu is held.
+func (b *rdcwBackend) start(dir string, root bool) error {
+	ready := make(chan error, 1)
+	b.wg.Add(1)
+	go b.run(dir, root, ready)
+	return <-ready
+}
+
+// run is a watch's goroutine: it opens dir, issues the first read (sending
+// the outcome on ready), and delivers dir's changes until Close, until the
+// directory is gone, or until the watch fails.
+func (b *rdcwBackend) run(dir string, root bool, ready chan<- error) {
+	defer b.wg.Done()
+	// Every read of this watch is issued from this goroutine, and the
+	// thread that issued a read must outlive it.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	w, err := b.open(dir, root)
+	ready <- err
+	if err != nil {
+		return
+	}
+	err = b.watch(w)
+	b.mu.Lock()
+	delete(b.running, w)
+	if root {
+		b.started = false // the next Add starts it again
+	} else {
+		b.parent = false
+	}
+	b.mu.Unlock()
+	w.close()
+	if err != nil {
+		b.fail(w, err)
+	}
 }
 
 // open opens dir and issues its first read, from which on the kernel
-// records dir's changes.
+// records dir's changes. b.mu is held (by start's caller).
 func (b *rdcwBackend) open(dir string, root bool) (*dirWatch, error) {
 	p, err := windows.UTF16PtrFromString(dir)
 	if err != nil {
-		return nil, fmt.Errorf("watcher: watch %s: %w", dir, err)
+		return nil, &os.PathError{Op: "open", Path: dir, Err: err}
 	}
 	h, err := windows.CreateFile(p, windows.FILE_LIST_DIRECTORY,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OVERLAPPED, 0)
 	if err != nil {
-		return nil, fmt.Errorf("watcher: watch %w", &os.PathError{Op: "open", Path: dir, Err: err})
+		return nil, &os.PathError{Op: "open", Path: dir, Err: err}
 	}
 	ev, err := windows.CreateEvent(nil, 1, 0, nil)
 	if err != nil {
 		_ = windows.CloseHandle(h)
-		return nil, fmt.Errorf("watcher: watch %s: %w", dir, os.NewSyscallError("CreateEvent", err))
+		return nil, fmt.Errorf("%s: %w", dir, os.NewSyscallError("CreateEvent", err))
 	}
 	w := &dirWatch{h: h, ev: ev, dir: dir, root: root}
 	if err := w.read(); err != nil {
 		w.close()
-		return nil, fmt.Errorf("watcher: watch %s: %w", dir, err)
+		return nil, fmt.Errorf("%s: %w", dir, err)
 	}
+	b.running[w] = true
 	return w, nil
 }
 
@@ -171,29 +250,29 @@ func (w *dirWatch) close() {
 	_ = windows.CloseHandle(w.h)
 }
 
-// watch delivers w's changes until Close, or until its directory is gone.
-// w's first read has been issued.
-func (b *rdcwBackend) watch(w *dirWatch) {
-	defer b.wg.Done()
-	defer w.close()
-	for first := true; ; first = false {
-		if !first {
-			if err := w.read(); err != nil {
-				b.fail(w, err)
-				return
-			}
-		}
+// closing reports whether Close was called.
+func (b *rdcwBackend) closing() bool {
+	select {
+	case <-b.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// watch delivers w's changes until Close or until the root is gone, and
+// then returns nil; otherwise it returns the error that stopped the watch.
+// w's first read has been issued, and no read is pending when it returns.
+func (b *rdcwBackend) watch(w *dirWatch) error {
+	for {
 		fired, err := windows.WaitForMultipleObjects([]windows.Handle{w.ev, b.stop}, false, windows.INFINITE)
 		if err != nil || fired != windows.WAIT_OBJECT_0 {
-			// Closing (or the wait failed): cancel the read and wait until
-			// the kernel no longer uses w's buffer.
-			_ = windows.CancelIoEx(w.h, &w.ov)
-			var n uint32
-			_ = windows.GetOverlappedResult(w.h, &w.ov, &n, true)
-			if err != nil {
-				b.fail(w, os.NewSyscallError("WaitForMultipleObjects", err))
+			// Closing (or the wait failed).
+			w.cancelRead()
+			if err != nil && !b.closing() {
+				return os.NewSyscallError("WaitForMultipleObjects", err)
 			}
-			return
+			return nil
 		}
 		var n uint32
 		switch err := windows.GetOverlappedResult(w.h, &w.ov, &n, false); {
@@ -201,27 +280,48 @@ func (b *rdcwBackend) watch(w *dirWatch) {
 		case errors.Is(err, windows.ERROR_NOTIFY_ENUM_DIR):
 			n = 0 // more changes than the buffer holds
 		case errors.Is(err, windows.ERROR_OPERATION_ABORTED):
-			return
+			// Close cancels reads only when it cannot signal the stop
+			// event; any other cancellation stops the watch.
+			if b.closing() {
+				return nil
+			}
+			return fmt.Errorf("read cancelled: %w", os.NewSyscallError("ReadDirectoryChanges", err))
 		default:
-			b.fail(w, os.NewSyscallError("ReadDirectoryChanges", err))
-			return
+			return os.NewSyscallError("ReadDirectoryChanges", err)
 		}
-		if n == 0 {
-			if !w.root {
-				continue
-			}
-			if b.rootGone() {
-				return
-			}
-			if !b.sendError(fsnotify.ErrEventOverflow) {
-				return
-			}
-			continue
+		// Copy the records and issue the next read at once, so the kernel
+		// has a buffer again while they are delivered.
+		var batch []byte
+		if n > 0 {
+			batch = append([]byte(nil), w.buf[:n]...)
 		}
-		if !b.deliver(w, w.buf[:n]) {
-			return
+		rerr := w.read()
+		ok := true
+		switch {
+		case n > 0:
+			ok = b.deliver(w, batch)
+		case w.root:
+			ok = !b.rootGone() && b.sendError(fsnotify.ErrEventOverflow)
+		}
+		if !ok {
+			// Closed, or the root is gone.
+			if rerr == nil {
+				w.cancelRead()
+			}
+			return nil
+		}
+		if rerr != nil {
+			return rerr
 		}
 	}
+}
+
+// cancelRead cancels w's pending read and waits until the kernel no longer
+// uses w's buffer.
+func (w *dirWatch) cancelRead() {
+	_ = windows.CancelIoEx(w.h, &w.ov)
+	var n uint32
+	_ = windows.GetOverlappedResult(w.h, &w.ov, &n, true)
 }
 
 // deliver sends the events in buf, a list of FILE_NOTIFY_INFORMATION
@@ -279,12 +379,13 @@ func opOf(action uint32) fsnotify.Op {
 
 // fail reports a watch that stopped on err. A root watch that failed
 // because the root is gone reports the root removed instead; the parent's
-// watch is best effort and fails silently.
+// watch is best effort and fails silently. Any other root failure is
+// reported as ErrWatchStopped, on which the watcher restarts the watch.
 func (b *rdcwBackend) fail(w *dirWatch, err error) {
 	if !w.root || b.rootGone() {
 		return
 	}
-	b.sendError(fmt.Errorf("watcher: watch %s: %w", w.dir, err))
+	b.sendError(fmt.Errorf("%w: %s: %w", ErrWatchStopped, w.dir, err))
 }
 
 // rootGone reports whether the root no longer exists, sending its removal
