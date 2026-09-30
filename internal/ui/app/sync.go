@@ -356,9 +356,12 @@ func (m *Model) handleHostMsg(msg tea.Msg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// flushNow saves the open buffer synchronously for the syncer (Host.Flush).
-// A read-only (conflicted) note is never written.
+// flushNow saves the open buffer synchronously for the syncer (Host.Flush),
+// once the writes still running (saves, lines moved to a note) are done,
+// so a commit or merge that follows sees them. A read-only (conflicted)
+// note is never written.
 func (m *Model) flushNow() error {
+	m.waitSaves()
 	if m.note.path == "" || !m.editor.Dirty() || m.extConflict == m.editor.Path() {
 		return nil
 	}

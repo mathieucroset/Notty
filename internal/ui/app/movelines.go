@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -108,13 +109,17 @@ func (m *Model) moveLines(msg moveLinesMsg) tea.Cmd {
 	if cmd, refused := m.refuseConflicted(msg.target); refused {
 		return cmd
 	}
-	return appendLinesCmd(v, m.opts.Watcher, m.ix, msg)
+	return appendLinesCmd(v, m.opts.Watcher, m.ix, m.inflight, msg)
 }
 
-// appendLinesCmd appends msg's lines to its target and re-indexes it.
-func appendLinesCmd(v *vault.Vault, w *watcher.Watcher, ix *index.Index, msg moveLinesMsg) tea.Cmd {
+// appendLinesCmd appends msg's lines to its target and re-indexes it. The
+// append counts in inflight like a save, so quitting and the syncer's
+// flush wait for it.
+func appendLinesCmd(v *vault.Vault, w *watcher.Watcher, ix *index.Index, inflight *sync.WaitGroup, msg moveLinesMsg) tea.Cmd {
 	text := strings.Join(msg.move.text, "\n") + "\n"
+	inflight.Add(1)
 	return func() tea.Msg {
+		defer inflight.Done()
 		defer lockFile(v.Abs(msg.target))()
 		if err := v.AppendToNote(msg.target, text); err != nil {
 			return linesAppendedMsg{move: msg.move, target: msg.target, err: err}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -276,6 +277,56 @@ func TestMoveLinesStaleBuffer(t *testing.T) {
 	}
 	if !hasToast(m, msgs.ToastWarn, "Copied to Work/Standup notes.md; left here because the note changed") {
 		t.Errorf("toasts = %v", toastTexts(m))
+	}
+}
+
+// The append counts as a save in flight: quitting, or the syncer's flush,
+// waits for it.
+func TestMoveLinesAppendIsInflight(t *testing.T) {
+	m, opts := moveLinesSetup(t, true, 3)
+	cmd := m.moveLines(moveLinesMsg{move: lineMove{path: "src.md", start: 3, end: 3, text: []string{"two"}}, target: targetPath})
+	if cmd == nil {
+		t.Fatal("no append command")
+	}
+	done := make(chan struct{})
+	go func() {
+		m.inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("the pending append is not counted in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if _, ok := cmd().(linesAppendedMsg); !ok {
+		t.Fatal("the command did not append")
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the append stayed in flight after it finished")
+	}
+	if got := readFile(t, opts.Vault, targetPath); got != targetNote+"two\n" {
+		t.Errorf("target = %q", got)
+	}
+
+	// The syncer's flush, which runs before a sync merge, waits too.
+	cmd = m.moveLines(moveLinesMsg{move: lineMove{path: "src.md", start: 2, end: 2, text: []string{"one"}}, target: targetPath})
+	flushed := make(chan struct{})
+	go func() {
+		_ = m.flushNow()
+		close(flushed)
+	}()
+	select {
+	case <-flushed:
+		t.Fatal("the flush did not wait for the pending append")
+	case <-time.After(50 * time.Millisecond):
+	}
+	cmd()
+	select {
+	case <-flushed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the flush never returned")
 	}
 }
 
