@@ -249,3 +249,31 @@ func TestLateSaveReportKeepsNewerBaseline(t *testing.T) {
 		t.Fatalf("save refused: file %q, overlays %v", got, m.overlays)
 	}
 }
+
+// TestQuitWarnsAgainOnNewExternalChange: after a quit was refused because
+// the note changed on disk, keeping the edits while the file changed once
+// more asks again; quitting then must warn again, not discard silently.
+func TestQuitWarnsAgainOnNewExternalChange(t *testing.T) {
+	opts := testOptions(t)
+	m := openNote(t, opts, "ideas.md")
+	insertText(t, m, "mine ")
+	writeFile(t, opts.Vault, "ideas.md", external)
+	if hasQuit(run(t, m, keyMsg("ctrl+q"))) {
+		t.Fatal("quit although the save was refused")
+	}
+	const again = "# Ideas\n\nchanged once more\n"
+	writeFile(t, opts.Vault, "ideas.md", again)
+	run(t, m, keyMsg("enter")) // Keep mine: refused again, asks again
+	if o := m.topOverlay(); o == nil || o.kind != overlayDialog || o.dialog.ID() != dlgExternalChange {
+		t.Fatalf("no second dialog; overlays = %v", m.overlays)
+	}
+	if hasQuit(run(t, m, keyMsg("ctrl+q"))) {
+		t.Fatal("ctrl+q during the second dialog discarded the edits without a new warning")
+	}
+	if got := readFile(t, opts.Vault, "ideas.md"); got != again {
+		t.Errorf("file = %q, want the external change kept", got)
+	}
+	if !hasQuit(run(t, m, keyMsg("ctrl+q"))) {
+		t.Error("quitting again after the new warning did not quit")
+	}
+}

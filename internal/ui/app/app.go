@@ -671,8 +671,8 @@ func (m *Model) quit() tea.Cmd {
 // handleQuitSaved quits once the buffer is saved.
 func (m *Model) handleQuitSaved(msg quitSavedMsg) tea.Cmd {
 	if msg.saved.err != nil {
+		ask, _ := m.changedOnDisk(msg.saved) // may clear discardOnQuit: set it after
 		m.discardOnQuit = true
-		ask, _ := m.changedOnDisk(msg.saved)
 		return tea.Batch(m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s: %v. Quit again to discard your edits.",
 			msg.saved.path, msg.saved.err)), ask)
 	}

@@ -116,6 +116,9 @@ func (m *Model) setBaseline(content string) {
 // whose file now holds disk, and holds its saves until the user chooses.
 func (m *Model) askExternalChange(p, disk string) tea.Cmd {
 	m.extDisk = disk
+	// A quit refused earlier warned about an older version of the file:
+	// quitting now must warn again before discarding anything.
+	m.discardOnQuit = false
 	if m.extConflict == p {
 		if o := m.topOverlay(); o != nil && o.kind == overlayDialog && o.dialog.ID() == dlgExternalChange {
 			return nil // already asking; the choice re-reads the file
@@ -135,6 +138,7 @@ func (m *Model) askExternalChange(p, disk string) tea.Cmd {
 // buffer, or keep the buffer, which then overwrites the file as the dialog
 // saw it (a file changed again since asks again).
 func (m *Model) resolveExternalChange(p string, choice int) tea.Cmd {
+	m.discardOnQuit = false // the answer is news the next quit warns about
 	if choice == choiceReload && m.opts.Vault != nil && p == m.editor.Path() {
 		v := m.opts.Vault
 		return func() tea.Msg {
