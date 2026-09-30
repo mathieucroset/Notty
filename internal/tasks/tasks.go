@@ -1,8 +1,6 @@
 // Package tasks implements parsing and toggling of GitHub-flavored markdown
 // task list items ("- [ ] text" / "- [x] text"), as used by Notty's editor,
-// preview, and Tasks view (see docs/superpowers/specs/2026-09-29-notty-design.md
-// §5 "Todo editing" and "Toggling a task from outside the editor", and §8
-// "Tasks view").
+// preview, and Tasks view.
 package tasks
 
 import (

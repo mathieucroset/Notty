@@ -1,6 +1,5 @@
 // Package links implements parsing, resolution, and rewriting of markdown
-// image links, as used by Notty's preview and attachment handling (see
-// docs/superpowers/specs/2026-09-29-notty-design.md §6.2 "Adding images").
+// image links, as used by Notty's preview and attachment handling.
 package links
 
 import (

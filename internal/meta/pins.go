@@ -1,6 +1,6 @@
 // Package meta manages Notty's synced vault metadata: pinned notes stored in
 // .notty/state.json. The file is small enough to merge with a three-way set
-// merge when it conflicts during git sync (see docs/superpowers/specs, §7).
+// merge when it conflicts during git sync.
 package meta
 
 import (

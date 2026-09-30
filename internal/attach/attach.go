@@ -1,8 +1,6 @@
 // Package attach implements importing images into a vault's attachments/
 // folder (from a clipboard paste, a pasted/dragged file path, or `:img
-// <path>`) and scanning for attachments no longer referenced by any note,
-// per docs/superpowers/specs/2026-09-29-notty-design.md §6.2 ("Adding
-// images", "Storage", "Links", "Clean unused attachments").
+// <path>`) and scanning for attachments no longer referenced by any note.
 package attach
 
 import (
