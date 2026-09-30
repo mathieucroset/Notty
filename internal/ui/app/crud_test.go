@@ -298,6 +298,52 @@ func TestEditorCommand(t *testing.T) {
 	}
 }
 
+// TestEditorArgv: a batch-file editor on Windows runs through cmd.exe,
+// which parses the command line again; Go does not escape &, |, % and the
+// like for it, so a file name holding them must not reach such an editor.
+func TestEditorArgv(t *testing.T) {
+	look := func(resolved string) func(string) (string, error) {
+		return func(string) (string, error) {
+			if resolved == "" {
+				return "", errors.New("not found")
+			}
+			return resolved, nil
+		}
+	}
+	tests := []struct {
+		name, setting, file, goos, resolved string
+		want                                []string // nil: refused
+	}{
+		{"unix editor", "vim", "/v/a & b.md", "linux", "/usr/bin/vim", []string{"vim", "/v/a & b.md"}},
+		{"windows program", "notepad", `C:\v\a&b.md`, "windows", `C:\Windows\notepad.exe`,
+			[]string{"notepad", `C:\v\a&b.md`}},
+		{"batch editor, plain name", "code", `C:\v\My note.md`, "windows", `C:\bin\code.cmd`,
+			[]string{"code", `C:\v\My note.md`}},
+		{"batch editor, parentheses", "code", `C:\v\Draft (2).md`, "windows", `C:\bin\code.cmd`,
+			[]string{"code", `C:\v\Draft (2).md`}},
+		{"batch editor, ampersand", "code -w", `C:\v\a&calc.md`, "windows", `C:\bin\code.cmd`, nil},
+		{"batch editor, pipe", "code", `C:\v\a|b.md`, "windows", `C:\bin\code.CMD`, nil},
+		{"batch editor, percent", "ed", `C:\v\100%PATH%.md`, "windows", `C:\bin\ed.bat`, nil},
+		{"batch editor, caret", "ed", `C:\v\a^b.md`, "windows", `C:\bin\ed.Bat`, nil},
+		{"batch editor, bang", "ed", `C:\v\wow!.md`, "windows", `C:\bin\ed.bat`, nil},
+		{"batch editor, redirection", "ed", `C:\v\a>b.md`, "windows", `C:\bin\ed.bat`, nil},
+		{"editor not found", "ed", `C:\v\a&b.md`, "windows", "", []string{"ed", `C:\v\a&b.md`}},
+		{"batch-like name off windows", "ed.cmd", "/v/a&b.md", "linux", "/bin/ed.cmd", []string{"ed.cmd", "/v/a&b.md"}},
+		{"blank setting", "  ", "/v/a.md", "linux", "/usr/bin/nano", []string{"nano", "/v/a.md"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := editorArgv(tt.setting, tt.file, tt.goos, look(tt.resolved))
+			if (err != nil) != (tt.want == nil) {
+				t.Fatalf("editorArgv error = %v, want refused: %v", err, tt.want == nil)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("editorArgv = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBadEditorSettingToasts(t *testing.T) {
 	opts := testOptions(t)
 	opts.Config.Editor = `"/opt/my editor/ed -w`

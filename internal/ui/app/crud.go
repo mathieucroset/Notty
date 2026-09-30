@@ -369,14 +369,53 @@ func (m *Model) pathRemoved(p string, keepDirty bool) tea.Cmd {
 
 // editorCommand builds the $EDITOR command for the file at abs.
 func (m *Model) editorCommand(abs string) (*exec.Cmd, error) {
-	fields, err := splitCommand(m.opts.Config.EditorCommand(os.Getenv, runtime.GOOS), runtime.GOOS)
+	argv, err := editorArgv(m.opts.Config.EditorCommand(os.Getenv, runtime.GOOS), abs, runtime.GOOS, exec.LookPath)
+	if err != nil {
+		return nil, err
+	}
+	return exec.Command(argv[0], argv[1:]...), nil //nolint:gosec // the user's own editor
+}
+
+// cmdMetachars are the characters cmd.exe interprets in a command line,
+// even inside double quotes for % and !.
+const cmdMetachars = "&|<>^%!\"\r\n"
+
+// editorArgv returns the program and arguments that open file with the
+// editor setting, on goos; lookPath resolves the program as exec.Command
+// would.
+//
+// On Windows a batch-file editor (.bat, .cmd) runs through cmd.exe, which
+// parses the command line again, and Go does not escape it for cmd.exe: a
+// file name holding & or | would run a command of its own (a note named
+// "a&calc.md", pulled from a shared vault, say). Such a file is refused.
+func editorArgv(setting, file, goos string, lookPath func(string) (string, error)) ([]string, error) {
+	fields, err := splitCommand(setting, goos)
 	if err != nil {
 		return nil, err
 	}
 	if len(fields) == 0 {
 		fields = []string{"nano"}
 	}
-	return exec.Command(fields[0], append(fields[1:], abs)...), nil //nolint:gosec // the user's own editor
+	if goos == "windows" {
+		if prog, err := lookPath(fields[0]); err == nil && isBatchFile(prog) {
+			if i := strings.IndexAny(file, cmdMetachars); i >= 0 {
+				return nil, fmt.Errorf("the editor %s is a batch file, which cmd.exe runs, and it would interpret the %q in %s; "+
+					"rename the file, or set editor to the program the batch file starts", prog, file[i], file)
+			}
+		}
+	}
+	return append(fields, file), nil
+}
+
+// isBatchFile reports whether the Windows path p names a .bat or .cmd file.
+func isBatchFile(p string) bool {
+	name := p[strings.LastIndexAny(p, `\/`)+1:]
+	dot := strings.LastIndexByte(name, '.')
+	if dot < 0 {
+		return false
+	}
+	ext := name[dot:]
+	return strings.EqualFold(ext, ".bat") || strings.EqualFold(ext, ".cmd")
 }
 
 // splitCommand splits an editor setting into the program and its
