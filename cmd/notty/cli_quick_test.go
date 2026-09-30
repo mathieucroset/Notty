@@ -376,6 +376,32 @@ func TestQuickWithoutGitStartsNothing(t *testing.T) {
 	}
 }
 
+// During a merge whose conflicts cannot be listed, the Inbox may be one of
+// them: the capture is refused rather than risk writing into it.
+func TestQuickRefusesWhenConflictsUnknown(t *testing.T) {
+	f, g := quickRepoFixture(t)
+	head := gittest.Git(t, g.Laptop.Dir, "rev-parse", "HEAD")
+	gitDir := filepath.Join(g.Laptop.Dir, ".git")
+	if err := os.WriteFile(filepath.Join(gitDir, "MERGE_HEAD"), []byte(head+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "index"), []byte("not an index"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"-q", "hi"}, f.env()); code != 1 {
+		t.Fatalf("exit code %d, want 1; stderr %q", code, f.stderr.String())
+	}
+	if !strings.Contains(f.stderr.String(), "could not check") {
+		t.Errorf("stderr = %q", f.stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(f.vaultDir, "Inbox.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Inbox.md written: %v", err)
+	}
+	if len(f.started) != 0 {
+		t.Errorf("started %q", f.started)
+	}
+}
+
 // An Inbox left conflicted by an unfinished merge is not touched: the
 // capture is refused until the conflict is resolved in Notty.
 func TestQuickRefusesConflictedInbox(t *testing.T) {

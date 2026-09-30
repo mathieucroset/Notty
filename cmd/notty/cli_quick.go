@@ -75,9 +75,16 @@ func runQuick(rest []string, afterDash bool, vaultFlag, folderFlag string, e env
 	// An Inbox conflicted in an unfinished merge is left alone: appending
 	// to its conflict markers would confuse the resolver (amendment B5).
 	target := path.Join(dir, vault.InboxName)
-	if repo != nil && inConflict(repo, target) {
-		_, _ = fmt.Fprintf(e.stderr, "notty: %s has an unresolved sync conflict; open Notty to resolve it\n", target)
-		return 1
+	if repo != nil {
+		conflicted, err := inConflict(repo, target)
+		if err != nil {
+			_, _ = fmt.Fprintf(e.stderr, "notty: could not check %s for sync conflicts: %v\n", target, err)
+			return 1
+		}
+		if conflicted {
+			_, _ = fmt.Fprintf(e.stderr, "notty: %s has an unresolved sync conflict; open Notty to resolve it\n", target)
+			return 1
+		}
 	}
 
 	var cwd string
@@ -111,22 +118,22 @@ func runQuick(rest []string, afterDash bool, vaultFlag, folderFlag string, e env
 }
 
 // inConflict reports whether rel is an unmerged path of a merge in
-// progress in repo.
-func inConflict(repo *gitsync.Repo, rel string) bool {
+// progress in repo. During a merge whose conflicts cannot be listed it
+// returns the error: rel may be one of them.
+func inConflict(repo *gitsync.Repo, rel string) (bool, error) {
 	if !repo.MergeInProgress() {
-		return false
+		return false, nil
 	}
 	conflicts, err := repo.ConflictedFiles()
 	if err != nil {
-		slog.Warn("listing conflicts failed", "err", err)
-		return false
+		return false, err
 	}
 	for _, c := range conflicts {
 		if c.Path == rel || (caseInsensitiveFS() && strings.EqualFold(c.Path, rel)) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // caseInsensitiveFS reports whether file names usually ignore case here
