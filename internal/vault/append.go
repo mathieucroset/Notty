@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // InboxName is the file quick notes are appended to, in the chosen folder.
@@ -160,6 +161,19 @@ func (v *Vault) createNew(rel, content string) (bool, error) {
 	return true, nil
 }
 
+// appendLocks serializes the appends to each file (by absolute path)
+// within this process.
+var appendLocks sync.Map // abs path -> *sync.Mutex
+
+// lockAppend locks the appends to the file at abs and returns the unlock
+// func.
+func lockAppend(abs string) (unlock func()) {
+	mu, _ := appendLocks.LoadOrStore(abs, &sync.Mutex{})
+	l := mu.(*sync.Mutex)
+	l.Lock()
+	return l.Unlock
+}
+
 // createTemp creates a new, uniquely named temp file next to abs, with the
 // permissions of a new note (0644 filtered by the umask, where os.CreateTemp
 // would use 0600). Its name ends in tmpSuffix, which the tree, the watcher
@@ -198,6 +212,10 @@ func (v *Vault) AppendToNote(rel, text string) error {
 // non-empty and does not end with one; then it syncs the file.
 func (v *Vault) appendText(rel, text string) error {
 	abs := v.Abs(rel)
+	// Appends in this process go one at a time, so two of them cannot both
+	// see a missing final newline and each add one (a blank line). Across
+	// processes that can still happen, rarely; no line is lost either way.
+	defer lockAppend(abs)()
 	before, err := os.Lstat(abs)
 	if err != nil {
 		return fmt.Errorf("vault: append to %q: %w", rel, err)

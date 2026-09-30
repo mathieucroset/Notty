@@ -383,6 +383,33 @@ func appendConcurrently(t *testing.T, existing bool, n int) {
 	assertNoTmp(t, v.Root)
 }
 
+// Appenders racing on a note without a final newline add just one: no
+// blank line appears between their lines.
+func TestAppendToNoteConcurrentNoBlankLine(t *testing.T) {
+	const n = 20
+	for range 20 {
+		v := openVault(t)
+		if err := os.WriteFile(v.Abs("N.md"), []byte("# N\n\nbody"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		for i := range n {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := v.AppendToNote("N.md", fmt.Sprintf("line %d\n", i)); err != nil {
+					t.Errorf("AppendToNote: %v", err)
+				}
+			}()
+		}
+		wg.Wait()
+		got := readFile(t, v, "N.md")
+		if c := strings.Count(got, "\n\n"); c != 1 {
+			t.Fatalf("%d blank lines in %q, want only the one after the heading", c, got)
+		}
+	}
+}
+
 func TestAppendToNoteConcurrent(t *testing.T) {
 	const n = 20
 	v := openVault(t)
