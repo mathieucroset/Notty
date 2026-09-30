@@ -48,6 +48,7 @@ type gap struct {
 // existence matters: its own watch reports what happens inside.
 type gapEntry struct {
 	dir   bool
+	link  bool // a symlink, never watched itself
 	mtime int64
 	size  int64
 	id    fileID
@@ -57,7 +58,7 @@ func gapEntryOf(info fs.FileInfo) gapEntry {
 	if info.IsDir() {
 		return gapEntry{dir: true}
 	}
-	return gapEntry{mtime: info.ModTime().UnixNano(), size: info.Size(), id: fileIDOf(info)}
+	return gapEntry{link: info.Mode()&fs.ModeSymlink != 0, mtime: info.ModTime().UnixNano(), size: info.Size(), id: fileIDOf(info)}
 }
 
 // listGap lists dir and returns its gap, or false when every entry can be
@@ -127,8 +128,10 @@ func (w *Watcher) scanGap(dir string, now time.Time, record bool) bool {
 					w.sendError(err)
 				}
 			}
-		} else {
+		} else if !e.link {
 			// fsnotify never listed it, so it does not watch it either.
+			// A symlink is skipped: Add would follow it, possibly out of
+			// the vault.
 			_ = w.fsw.Add(w.abs(sub))
 		}
 		mark(sub)

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -246,5 +247,62 @@ func TestGapClosesWhenTheBlockerGoes(t *testing.T) {
 				t.Fatalf("gaps = %v, want none", w.gaps)
 			}
 		})
+	}
+}
+
+// addRecordingBackend records the paths watches are added on.
+type addRecordingBackend struct {
+	backend
+	mu   sync.Mutex
+	adds []string
+}
+
+func (b *addRecordingBackend) Add(p string) error {
+	b.mu.Lock()
+	b.adds = append(b.adds, p)
+	b.mu.Unlock()
+	return b.backend.Add(p)
+}
+
+// TestGapDoesNotWatchSymlinks: an entry after the blocker is watched with
+// the backend's Add, which follows a symlink (possibly out of the vault);
+// symlinks are skipped.
+func TestGapDoesNotWatchSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks needs a privilege on Windows")
+	}
+	var rec *addRecordingBackend
+	withBackend(t, func(b backend) backend {
+		rec = &addRecordingBackend{backend: b}
+		return rec
+	})
+	dangling := func(t *testing.T, root, rel string) {
+		t.Helper()
+		if err := os.Symlink(filepath.Join(root, "missing"), filepath.Join(root, rel)); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+	}
+	w, root := newGapWatcher(t, dangling)
+	writeFile(t, root, "d.md", "d")
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "e-link.md")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	rec.mu.Lock()
+	rec.adds = nil
+	rec.mu.Unlock()
+
+	w.pollGaps(time.Now())
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if !slices.Contains(rec.adds, filepath.Join(w.root, "d.md")) {
+		t.Errorf("new note after the blocker not watched; adds = %v", rec.adds)
+	}
+	if slices.Contains(rec.adds, filepath.Join(w.root, "e-link.md")) {
+		t.Errorf("symlink after the blocker watched; adds = %v", rec.adds)
 	}
 }
