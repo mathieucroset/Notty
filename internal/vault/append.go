@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +18,14 @@ const InboxName = "Inbox.md"
 
 // inboxHeader starts a new Inbox note.
 const inboxHeader = "# Inbox\n\n"
+
+// linkFile hard-links a new Inbox into place; tests make it fail as on
+// filesystems without hard links. inboxAppeared runs as soon as a new
+// Inbox is visible under its name; tests append to it then.
+var (
+	linkFile      = os.Link
+	inboxAppeared = func() {}
+)
 
 // ValidateFolderPath checks a user-typed vault-relative folder path and
 // returns it in clean "/"-separated form ("" is the vault root). Each
@@ -96,26 +106,73 @@ func (v *Vault) AppendToInbox(folder, line string) (string, error) {
 	}
 	rel := path.Join(dir, InboxName)
 	text := strings.TrimSuffix(line, "\n") + "\n"
-	// O_EXCL creates the Inbox only if nobody else has; O_APPEND keeps a
-	// line appended by a concurrent caller in between from being
-	// overwritten.
-	f, err := os.OpenFile(v.Abs(rel), os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_APPEND, 0o644)
-	switch {
-	case err == nil:
-		if err := writeClose(f, inboxHeader+text); err != nil {
-			return "", fmt.Errorf("vault: append to %q: %w", rel, err)
-		}
-		syncDir(filepath.Dir(v.Abs(rel)))
-		return rel, nil
-	case errors.Is(err, fs.ErrExist):
-		return rel, v.appendText(rel, text)
-	default:
-		// On Windows a folder in the way fails with "Access is denied".
-		if fi, serr := os.Lstat(v.Abs(rel)); serr == nil && !fi.Mode().IsRegular() {
-			return "", fmt.Errorf("vault: append to %q: not a regular file: %w", rel, ErrInvalidPath)
-		}
+	created, err := v.createNew(rel, inboxHeader+text)
+	if err != nil {
 		return "", fmt.Errorf("vault: append to %q: %w", rel, err)
 	}
+	if created {
+		return rel, nil
+	}
+	return rel, v.appendText(rel, text)
+}
+
+// createNew creates the file at the clean path rel holding content, unless
+// something already exists there (it then reports false). The file is
+// written to a temp file first and hard-linked into place, so it appears
+// complete: a line appended by a concurrent caller always lands after
+// content. Where hard links are not supported it is created in place with
+// O_EXCL; O_APPEND then keeps a concurrent line from being overwritten,
+// though it may land before content.
+func (v *Vault) createNew(rel, content string) (bool, error) {
+	abs := v.Abs(rel)
+	dir := filepath.Dir(abs)
+	if tmp, err := createTemp(abs); err == nil {
+		name := tmp.Name()
+		// Removing the temp name after the link keeps the linked file.
+		defer func() { _ = os.Remove(name) }()
+		if err := writeClose(tmp, content); err != nil {
+			return false, err
+		}
+		err := linkFile(name, abs)
+		if err == nil {
+			inboxAppeared()
+			syncDir(dir)
+			return true, nil
+		}
+		if _, serr := os.Lstat(abs); serr == nil || errors.Is(err, fs.ErrExist) {
+			return false, nil // taken: appendText checks what is there
+		}
+		// No hard links here: create it in place.
+	}
+	f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_APPEND, 0o644)
+	if err != nil {
+		// On Windows a folder in the way fails with "Access is denied".
+		if _, serr := os.Lstat(abs); serr == nil || errors.Is(err, fs.ErrExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	inboxAppeared()
+	if err := writeClose(f, content); err != nil {
+		return false, err
+	}
+	syncDir(dir)
+	return true, nil
+}
+
+// createTemp creates a new, uniquely named temp file next to abs, with the
+// permissions of a new note (0644 filtered by the umask, where os.CreateTemp
+// would use 0600). Its name ends in tmpSuffix, which the tree, the watcher
+// and git ignore.
+func createTemp(abs string) (*os.File, error) {
+	for range 10 {
+		name := abs + "." + strconv.FormatUint(rand.Uint64(), 36) + tmpSuffix
+		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if !errors.Is(err, fs.ErrExist) {
+			return f, err
+		}
+	}
+	return nil, fmt.Errorf("no free temp name for %s: %w", abs, ErrExists)
 }
 
 // AppendToNote appends text (a "\n" is added if it does not end with one)

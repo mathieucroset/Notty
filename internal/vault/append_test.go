@@ -268,39 +268,119 @@ func TestAppendToInboxConcurrent(t *testing.T) {
 	const n = 20
 	for _, existing := range []bool{true, false} {
 		t.Run(fmt.Sprintf("existing=%v", existing), func(t *testing.T) {
-			v := openVault(t)
-			if existing {
-				if err := os.WriteFile(v.Abs("Inbox.md"), []byte("# Inbox\n\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
+			// A missing Inbox is raced for many times: the heading must
+			// always come first, whoever creates it.
+			rounds := 1
+			if !existing {
+				rounds = 40
 			}
-			var wg sync.WaitGroup
-			errs := make(chan error, n)
-			for i := range n {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					if _, err := v.AppendToInbox("", fmt.Sprintf("- line %d", i)); err != nil {
-						errs <- err
-					}
-				}()
-			}
-			wg.Wait()
-			close(errs)
-			for err := range errs {
-				t.Errorf("AppendToInbox: %v", err)
-			}
-			got := readFile(t, v, "Inbox.md")
-			if c := strings.Count(got, "# Inbox\n"); c != 1 {
-				t.Errorf("%d headers in %q, want 1", c, got)
-			}
-			for i := range n {
-				if !strings.Contains(got, fmt.Sprintf("- line %d\n", i)) {
-					t.Errorf("line %d missing from %q", i, got)
-				}
+			for range rounds {
+				appendConcurrently(t, existing, n)
 			}
 		})
 	}
+}
+
+// A line appended the moment a new Inbox appears lands after its heading:
+// the Inbox appears with its heading already written.
+func TestAppendToInboxHeadingFirst(t *testing.T) {
+	v := openVault(t)
+	old := inboxAppeared
+	t.Cleanup(func() { inboxAppeared = old })
+	inboxAppeared = func() {
+		inboxAppeared = func() {}
+		if err := v.AppendToNote(InboxName, "- other\n"); err != nil {
+			t.Errorf("AppendToNote: %v", err)
+		}
+	}
+	if _, err := v.AppendToInbox("", "- hi"); err != nil {
+		t.Fatalf("AppendToInbox: %v", err)
+	}
+	if got, want := readFile(t, v, InboxName), "# Inbox\n\n- hi\n- other\n"; got != want {
+		t.Errorf("Inbox = %q, want %q", got, want)
+	}
+	assertNoTmp(t, v.Root)
+}
+
+// A new Inbox gets the permissions of any new note, not a temp file's.
+func TestAppendToInboxPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no permission bits beyond read-only")
+	}
+	v := openVault(t)
+	note, err := v.CreateNote("", "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.AppendToInbox("", "- hi"); err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.Stat(v.Abs(note))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.Stat(v.Abs(InboxName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Mode().Perm() != want.Mode().Perm() {
+		t.Errorf("Inbox mode = %v, want %v like a new note", got.Mode().Perm(), want.Mode().Perm())
+	}
+}
+
+// Where hard links are not supported, the Inbox is created in place.
+func TestAppendToInboxWithoutHardLinks(t *testing.T) {
+	old := linkFile
+	linkFile = func(string, string) error { return errors.ErrUnsupported }
+	t.Cleanup(func() { linkFile = old })
+	v := openVault(t)
+	for _, line := range []string{"- one", "- two"} {
+		if _, err := v.AppendToInbox("Work", line); err != nil {
+			t.Fatalf("AppendToInbox: %v", err)
+		}
+	}
+	if got, want := readFile(t, v, "Work/Inbox.md"), "# Inbox\n\n- one\n- two\n"; got != want {
+		t.Errorf("Inbox = %q, want %q", got, want)
+	}
+	assertNoTmp(t, v.Root)
+}
+
+// appendConcurrently has n goroutines append a line each to the Inbox,
+// existing or not, and checks that every line landed after one heading.
+func appendConcurrently(t *testing.T, existing bool, n int) {
+	t.Helper()
+	v := openVault(t)
+	if existing {
+		if err := os.WriteFile(v.Abs("Inbox.md"), []byte("# Inbox\n\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := v.AppendToInbox("", fmt.Sprintf("- line %d", i)); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("AppendToInbox: %v", err)
+	}
+	got := readFile(t, v, "Inbox.md")
+	if !strings.HasPrefix(got, "# Inbox\n\n") || strings.Count(got, "# Inbox\n") != 1 {
+		t.Errorf("Inbox = %q, want one heading, first", got)
+	}
+	for i := range n {
+		if !strings.Contains(got, fmt.Sprintf("- line %d\n", i)) {
+			t.Errorf("line %d missing from %q", i, got)
+		}
+	}
+	assertNoTmp(t, v.Root)
 }
 
 func TestAppendToNoteConcurrent(t *testing.T) {
