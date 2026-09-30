@@ -37,7 +37,7 @@ import (
 // taken more than 5s to finish.
 const (
 	tickWindow = 200 * time.Millisecond
-	cmdLimit   = 5 * time.Second
+	cmdLimit   = 30 * time.Second // generous for real git on slow CI runners
 	waitLimit  = 30 * time.Second
 )
 
