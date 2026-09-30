@@ -68,3 +68,11 @@ homebrew_casks:
     homepage: "https://github.com/mathieucroset/notty"
     description: "Terminal markdown notes app"
     license: "MIT"
+    # The binary isn't signed or notarized: clear the quarantine flag so
+    # Gatekeeper doesn't block it after a Homebrew install.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/notty"]
+          end
