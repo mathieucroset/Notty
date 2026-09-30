@@ -97,6 +97,11 @@ type Options struct {
 	// StartupWarnings are shown once as warning toasts when the app starts,
 	// e.g. a configured theme that could not be loaded.
 	StartupWarnings []string
+	// Version is the running version (main's version), sent with the
+	// release check and compared with the latest release.
+	Version string
+	// UpdateCheck configures the check for a newer release.
+	UpdateCheck UpdateCheckOptions
 }
 
 // Focus is the pane with keyboard focus.
@@ -161,6 +166,11 @@ type Model struct {
 	// themesStarted is set once Init tried to start it.
 	themes        *themeWatcher
 	themesStarted bool
+	// updateStarted is set once Init considered the release check;
+	// updateVersion is the newer release found, shown in the status bar,
+	// or "".
+	updateStarted bool
+	updateVersion string
 
 	width, height  int
 	sidebarVisible bool
@@ -355,7 +365,7 @@ func (m *Model) NotePath() string { return m.note.path }
 // Init loads the vault tree and builds the index, and shows each of
 // Options.StartupWarnings as a warning toast, once (also over the wizard).
 // It starts the theme watcher, once: Init runs again when the wizard has
-// opened the vault.
+// opened the vault. With a vault open it starts the release check, once.
 func (m *Model) Init() tea.Cmd {
 	warnings := tea.Batch(m.startupWarningsCmd(), m.startThemeWatcher())
 	if m.wizard != nil {
@@ -367,7 +377,7 @@ func (m *Model) Init() tea.Cmd {
 	m.indexing = true
 	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault), m.startupTrashCmd(),
 		listenWatcherCmd(m.opts.Watcher), m.reopenLastNoteCmd(), m.readyTickCmd(), m.startSyncCmds(),
-		listRecoveredCmd(m.opts.Vault), warnings)
+		listRecoveredCmd(m.opts.Vault), m.startUpdateCheck(), warnings)
 }
 
 // startupWarningsCmd shows each of Options.StartupWarnings as a warning
@@ -519,6 +529,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sidebar.SetPins(msg.pins)
 	case msgs.ToastMsg:
 		return m, m.pushToast(msg.Level, msg.Text)
+	case updateResultMsg:
+		return m, m.handleUpdateResult(msg)
 	case recoveredListMsg:
 		return m, m.handleRecoveredList(msg)
 	case recoveredDoneMsg:

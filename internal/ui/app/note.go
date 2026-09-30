@@ -316,6 +316,7 @@ func (m *Model) statusRow() string {
 	}
 	status.Words = m.note.words
 	status.Sync = m.sync
+	status.Update = m.updateVersion
 	return status.View()
 }
 

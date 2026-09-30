@@ -245,6 +245,10 @@ func prepare(vaultFlag string, e env) (app.Options, func(), error) {
 		LockWait:        e.lockWait,
 		Catalog:         cat,
 		StartupWarnings: warnings,
+		// Every TUI start checks for a newer release, the first run
+		// included; notty sync never does.
+		Version:     version,
+		UpdateCheck: updateCheckOptions(e.stateDir),
 	}
 	// Sync and history need git (spec §7): without it the app says so once.
 	if _, err := e.lookPath("git"); err != nil {
