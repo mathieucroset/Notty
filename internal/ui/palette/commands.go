@@ -87,6 +87,12 @@ func DefaultCommands() []Command {
 			Msg:  func() tea.Msg { return msgs.RequestNewFolder{} },
 		},
 		{
+			ID:   "move-lines",
+			Name: "Move line to note…",
+			Key:  keyFor(keys.EditorNormal, "move lines to note"),
+			Msg:  func() tea.Msg { return msgs.MoveLinesToNoteMsg{} },
+		},
+		{
 			ID:   idSwitchTheme,
 			Name: "Switch theme",
 			// Msg is nil: the palette opens its internal theme picker

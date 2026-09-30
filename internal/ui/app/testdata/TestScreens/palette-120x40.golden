@@ -7,12 +7,12 @@
 │  ▾ Work                  ││                                                                                          │
 │    • Standup notes       ││ ▎ Keep it short.                                                                         │
 │  • ideas                 ││                                                                                          │
-│                          ││ ## Next                                                                                  │
-│  T A G S                 ││ ╭──────────────────────────────────────────────────────────╮                             │
-│   #design 1   #life 1    ││ │                                                          │                             │
-│   #todo 1                ││ │  › ▏                                                     │                             │
-│                          ││ │  New note                                   n · sidebar  │                             │
-│  ☐ Tasks (1)             ││ │  New folder                                 N · sidebar  │                             │
+│                          ││ ╭──────────────────────────────────────────────────────────╮                             │
+│  T A G S                 ││ │                                                          │                             │
+│   #design 1   #life 1    ││ │  › ▏                                                     │                             │
+│   #todo 1                ││ │  New note                                   n · sidebar  │                             │
+│                          ││ │  New folder                                 N · sidebar  │                             │
+│  ☐ Tasks (1)             ││ │  Move line to note…             alt+m · editor · normal  │                             │
 │  ⌫ Trash (0)             ││ │  Switch theme                                            │                             │
 │                          ││ │  Toggle vim                                              │                             │
 │                          ││ │  Toggle line numbers                                     │                             │

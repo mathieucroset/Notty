@@ -97,6 +97,10 @@ type RequestMove struct {
 	Path string
 }
 
+// MoveLinesToNoteMsg asks the app to move the open note's selected lines
+// (or its cursor line) to the end of another note, chosen in the finder.
+type MoveLinesToNoteMsg struct{}
+
 // RequestTrash asks the app to move Path to the trash (after confirmation).
 type RequestTrash struct {
 	Path string

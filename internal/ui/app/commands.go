@@ -81,6 +81,7 @@ func (m *Model) openFinder(fullText bool) tea.Cmd {
 	f := finder.New(mode, notes, slices.Clone(m.opts.Local.Recents), m.opts.Styles, m.opts.Palette).
 		SetSize(m.width, m.height)
 	f, cmd := f.Init()
+	m.lineMove = nil
 	m.openOverlay(&overlayState{kind: overlayFinder, finder: f})
 	return cmd
 }
@@ -433,6 +434,7 @@ func (m *Model) updateCommandMsg(msg tea.Msg) (tea.Cmd, bool) {
 		return m.openFinder(msg.FullText), true
 	case finder.CloseMsg:
 		m.closeOverlayKind(overlayFinder)
+		m.lineMove = nil // a move's picker cancelled
 	case palette.CleanAttachmentsMsg:
 		if m.opts.Vault == nil {
 			return nil, true

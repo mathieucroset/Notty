@@ -8,13 +8,13 @@
 │ ▎ K│  › ▏                                                     │    │
 │    │  New note                                   n · sidebar  │    │
 │ ## │  New folder                                 N · sidebar  │    │
-│    │  Switch theme                                            │    │
-│ Pla│  Toggle vim                                              │    │
+│    │  Move line to note…             alt+m · editor · normal  │    │
+│ Pla│  Switch theme                                            │    │
+│    │  Toggle vim                                              │    │
 │    │  Toggle line numbers                                     │    │
 │    │  Sync now                                                │    │
 │    │  Set up sync                                             │    │
 │    │  Resolve conflicts                          c · sidebar  │    │
-│    │  Open Tasks                                              │    │
 │    │                                                          │    │
 │    ╰──────────────────────────────────────────────────────────╯    │
 │                                                                    │

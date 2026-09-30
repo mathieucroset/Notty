@@ -255,12 +255,22 @@ func (m *Model) editorContext() keys.Context {
 
 // handleEditorKey sends a key to the editor. In vim normal mode with
 // nothing pending, esc dismisses the newest sticky error first; it never
-// does while typing.
+// does while typing. The app's own editor keys (alt+m) are taken between
+// commands only: in insert mode, or after an operator, they go to the
+// editor (amendments A8, B1).
 func (m *Model) handleEditorKey(k tea.KeyPressMsg) tea.Cmd {
 	if k.String() == "esc" && m.stickyErrors > 0 && m.editor.CanLeave() &&
 		(m.editor.ModeName() == "NORMAL" || m.editor.ModeName() == "READ-ONLY") {
 		m.dismissToast()
 		return nil
+	}
+	if isMoveLinesKey(k) {
+		switch {
+		case m.editor.ModeName() == "READ-ONLY":
+			return m.pushToast(msgs.ToastWarn, conflictRefusal(m.note.path))
+		case m.editor.KeysIdle():
+			return m.startMoveLines()
+		}
 	}
 	m.editorStatus = ""
 	cmd := m.updateEditor(k)

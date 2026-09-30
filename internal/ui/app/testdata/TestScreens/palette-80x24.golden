@@ -8,13 +8,13 @@
 │    • Sta│  › ▏                                                     │         │
 │  • ideas│  New note                                   n · sidebar  │         │
 │         │  New folder                                 N · sidebar  │         │
-│  T A G S│  Switch theme                                            │         │
-│   #desig│  Toggle vim                                              │         │
-│   #todo │  Toggle line numbers                                     │         │
-│         │  Sync now                                                │         │
-│  ☐ Tasks│  Set up sync                                             │         │
-│  ⌫ Trash│  Resolve conflicts                          c · sidebar  │         │
-│         │  Open Tasks                                              │         │
+│  T A G S│  Move line to note…             alt+m · editor · normal  │         │
+│   #desig│  Switch theme                                            │         │
+│   #todo │  Toggle vim                                              │         │
+│         │  Toggle line numbers                                     │         │
+│  ☐ Tasks│  Sync now                                                │         │
+│  ⌫ Trash│  Set up sync                                             │         │
+│         │  Resolve conflicts                          c · sidebar  │         │
 │         │                                                          │         │
 │         ╰──────────────────────────────────────────────────────────╯         │
 │                          ││                                                  │

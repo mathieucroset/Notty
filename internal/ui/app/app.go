@@ -27,6 +27,7 @@ import (
 	"github.com/mathieucroset/notty/internal/syncer"
 	"github.com/mathieucroset/notty/internal/ui/dialog"
 	"github.com/mathieucroset/notty/internal/ui/editor"
+	"github.com/mathieucroset/notty/internal/ui/finder"
 	"github.com/mathieucroset/notty/internal/ui/history"
 	"github.com/mathieucroset/notty/internal/ui/icons"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
@@ -223,6 +224,9 @@ type Model struct {
 	note        note
 	openSeq     int // number of the latest open request
 	sync        msgs.SyncStatusMsg
+	// lineMove is the "move lines to note" waiting for its target note to
+	// be picked, or nil.
+	lineMove *lineMove
 
 	// editor holds the open note's buffer.
 	editor editor.Model
@@ -569,6 +573,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.requestMove(msg.Path)
 	case msgs.RequestTrash:
 		return m, m.requestTrash(msg.Path)
+	case msgs.MoveLinesToNoteMsg:
+		return m, m.startMoveLines()
+	case finder.PickedMsg:
+		return m, m.pickedMoveTarget(msg.Path)
+	case moveLinesMsg:
+		return m, m.moveLines(msg)
+	case linesAppendedMsg:
+		return m, m.handleLinesAppended(msg)
+	case deleteMovedLinesMsg:
+		return m, m.deleteMovedLines(msg)
 	case fileOpMsg:
 		return m, m.handleFileOp(msg)
 	case msgs.OpenFileExternalMsg:
