@@ -109,6 +109,8 @@ type Watcher struct {
 	rootGone       bool                 // ErrRootGone already queued
 	overflowQueued bool                 // an overflow error is queued in urgent
 	barriers       []chan struct{}      // barrier requests awaiting the sentinel's event
+	trackGaps      bool                 // list the directories with a gap (kqueue), see gaps.go
+	gaps           map[string]gap       // directories with a gap -> their listing past the blocker
 }
 
 // New starts watching root and every directory below it, except ignored ones.
@@ -158,6 +160,8 @@ func newWatcher(root string, log *slog.Logger) (*Watcher, error) {
 		selfWrites: map[string]fileStamp{},
 		dirs:       map[string]bool{},
 		skipped:    map[string]bool{},
+		trackGaps:  usesKqueue(),
+		gaps:       map[string]gap{},
 		pending:    map[string]time.Time{},
 		ready:      map[string]bool{},
 	}
@@ -292,6 +296,10 @@ func (w *Watcher) run() {
 	timer := time.NewTimer(debounce)
 	timer.Stop()
 	defer timer.Stop()
+	poll := time.NewTicker(gapPoll)
+	poll.Stop()
+	defer poll.Stop()
+	var pollC <-chan time.Time // nil while no directory has a gap
 	var (
 		timerC       <-chan time.Time // nil while nothing is pending
 		firstPending time.Time        // first change of the current batch
@@ -314,7 +322,23 @@ func (w *Watcher) run() {
 		timer.Reset(max(deadline.Sub(now), 0))
 		timerC = timer.C
 	}
+	// changed restarts the quiet window after a recorded change.
+	changed := func(wasIdle bool, now time.Time) {
+		if wasIdle {
+			firstPending = now
+		}
+		lastChange = now
+		arm(now)
+	}
 	for {
+		switch {
+		case len(w.gaps) > 0 && pollC == nil:
+			poll.Reset(gapPoll)
+			pollC = poll.C
+		case len(w.gaps) == 0 && pollC != nil:
+			poll.Stop()
+			pollC = nil
+		}
 		var (
 			errOut    chan error // nil while no urgent error is queued
 			urgentErr error
@@ -333,15 +357,16 @@ func (w *Watcher) run() {
 			}
 			wasIdle := len(w.pending) == 0
 			now := time.Now()
-			if !w.handle(fe, now) {
-				continue
+			if w.handle(fe, now) {
+				changed(wasIdle, now)
 			}
-			// Every recorded change restarts the quiet window.
-			if wasIdle {
-				firstPending = now
+
+		case <-pollC:
+			wasIdle := len(w.pending) == 0
+			now := time.Now()
+			if w.pollGaps(now) {
+				changed(wasIdle, now)
 			}
-			lastChange = now
-			arm(now)
 
 		case err, ok := <-w.fsw.Errors:
 			if !ok {
@@ -453,6 +478,7 @@ func (w *Watcher) resync() {
 		}
 	}
 	clear(w.dirs) // re-adding an existing watch is harmless
+	clear(w.gaps) // listed again while adding the watches
 	errs, err := w.addTree(".", nil)
 	for _, e := range errs {
 		w.sendError(e)
@@ -492,6 +518,15 @@ func (w *Watcher) handle(fe fsnotify.Event, now time.Time) bool {
 	}
 	paused := w.isPaused()
 	recorded := false
+	if w.trackGaps {
+		repeat, r := w.gapEvent(rel, fe.Has(fsnotify.Create), now, !paused)
+		if repeat {
+			// kqueue reports a blocker as created on every change to its
+			// directory: only the listing was news.
+			return r
+		}
+		recorded = r
+	}
 
 	if fe.Has(fsnotify.Remove) || fe.Has(fsnotify.Rename) {
 		w.unwatchTree(rel)
@@ -593,10 +628,16 @@ func (w *Watcher) addTree(rel string, found func(string)) (errs []error, fatal e
 		if found != nil && sub != rel {
 			found(sub)
 		}
+		if w.trackGaps && sub != "." && !d.IsDir() && blocks(p, d.Type()) {
+			w.markGap(sub)
+		}
 		if !d.IsDir() || w.dirs[sub] {
 			return nil
 		}
 		if err := w.fsw.Add(p); err != nil {
+			if w.trackGaps && sub != "." {
+				w.markGap(sub)
+			}
 			switch {
 			case sub == ".":
 				return fmt.Errorf("watcher: watch vault root: %w", err)
@@ -627,9 +668,9 @@ func (w *Watcher) skip(rel string, err error) {
 }
 
 // unwatchTree drops the watches on rel and every directory below it, and
-// forgets the skipped directories there. It must run before a directory
-// renamed within the vault is watched again under its new name, because the
-// kernel keeps the old watch on the moved directory.
+// forgets the skipped directories and the gaps there. It must run before a
+// directory renamed within the vault is watched again under its new name,
+// because the kernel keeps the old watch on the moved directory.
 func (w *Watcher) unwatchTree(rel string) {
 	prefix := rel + "/"
 	for d := range w.dirs {
@@ -641,6 +682,11 @@ func (w *Watcher) unwatchTree(rel string) {
 	for d := range w.skipped {
 		if d == rel || strings.HasPrefix(d, prefix) {
 			delete(w.skipped, d)
+		}
+	}
+	for d := range w.gaps {
+		if d == rel || strings.HasPrefix(d, prefix) {
+			delete(w.gaps, d)
 		}
 	}
 }
