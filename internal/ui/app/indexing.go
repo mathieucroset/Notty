@@ -34,9 +34,15 @@ func buildIndexCmd(v *vault.Vault, gen int) tea.Cmd {
 
 // rebuildIndex indexes the whole vault again, after the watcher lost
 // events. The current index serves until the new one lands; the changes
-// seen meanwhile are replayed on it.
+// seen meanwhile are replayed on it. While a build (the startup one or a
+// rebuild) runs, it only asks for one more once that build lands: the
+// running build may have read files before the events were lost.
 func (m *Model) rebuildIndex() tea.Cmd {
 	if m.opts.Vault == nil {
+		return nil
+	}
+	if m.indexing {
+		m.rebuildAgain = true
 		return nil
 	}
 	m.indexGen++
@@ -46,12 +52,24 @@ func (m *Model) rebuildIndex() tea.Cmd {
 
 // handleIndexBuilt installs a freshly built index and replays the changes
 // seen while it was built. It warns once, at startup, about per-file
-// problems; after a rebuild it forgets the notes that are gone.
+// problems; after a rebuild it forgets the notes that are gone. A failed
+// rebuild keeps the current index. A rebuild asked for meanwhile starts
+// now.
 func (m *Model) handleIndexBuilt(msg indexBuiltMsg) tea.Cmd {
 	if msg.gen != m.indexGen {
-		return nil // superseded by a newer build
+		return nil // not the build in flight
 	}
 	m.indexing = false
+	cmd := m.installIndex(msg)
+	if m.rebuildAgain {
+		m.rebuildAgain = false
+		cmd = tea.Batch(cmd, m.rebuildIndex())
+	}
+	return cmd
+}
+
+// installIndex installs a built index, or reports why it failed.
+func (m *Model) installIndex(msg indexBuiltMsg) tea.Cmd {
 	if msg.err != nil {
 		if msg.gen > 0 {
 			m.pendingIndex = nil // the current index was kept up to date

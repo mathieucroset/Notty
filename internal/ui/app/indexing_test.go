@@ -172,3 +172,59 @@ func TestPinAndFilterFlow(t *testing.T) {
 		t.Errorf("saved pins = %v", saved.Pins)
 	}
 }
+
+// TestRebuildRequestsDoNotPileUp: lost events reported while a rebuild
+// runs ask for one more rebuild once it lands, not a full build each.
+func TestRebuildRequestsDoNotPileUp(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	first := m.rebuildIndex()
+	if first == nil {
+		t.Fatal("no rebuild started")
+	}
+	for range 3 {
+		if m.rebuildIndex() != nil {
+			t.Fatal("a second full build started while one runs")
+		}
+	}
+	run(t, m, first())
+	if m.indexGen != 2 {
+		t.Errorf("builds after the first = %d, want 1 more", m.indexGen-1)
+	}
+	if m.indexing || m.rebuildAgain {
+		t.Errorf("indexing %v, rebuild again %v after the builds landed", m.indexing, m.rebuildAgain)
+	}
+}
+
+// TestRebuildDuringStartupKeepsStartupIndex: a rebuild asked for while the
+// startup build runs waits for it, so a failed rebuild never leaves the app
+// without an index.
+func TestRebuildDuringStartupKeepsStartupIndex(t *testing.T) {
+	opts := testOptions(t)
+	m := New(opts)
+	run(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	startup := execCmd(t, m, m.Init())
+	if cmd := m.rebuildIndex(); cmd != nil {
+		t.Fatal("rebuild started while the startup build runs")
+	}
+	var built indexBuiltMsg
+	for _, msg := range startup {
+		if b, ok := msg.(indexBuiltMsg); ok {
+			built = b
+		}
+	}
+	if built.ix == nil {
+		t.Fatal("startup build produced no index")
+	}
+	next := m.handleIndexBuilt(built)
+	if m.ix != built.ix {
+		t.Fatal("startup index dropped")
+	}
+	if next == nil || !m.indexing {
+		t.Fatal("the asked-for rebuild did not start after the startup build")
+	}
+	// The rebuild fails: the startup index stays.
+	m.handleIndexBuilt(indexBuiltMsg{err: os.ErrPermission, gen: m.indexGen})
+	if m.ix != built.ix || m.indexing {
+		t.Errorf("after a failed rebuild: index kept %v, indexing %v", m.ix == built.ix, m.indexing)
+	}
+}

@@ -196,8 +196,10 @@ type Model struct {
 	ix       *index.Index
 	indexing bool
 	// indexGen numbers the index builds: 0 at startup, then one per
-	// rebuild; only the newest build is installed.
-	indexGen int
+	// rebuild. One build runs at a time; rebuildAgain asks for another
+	// once it lands.
+	indexGen     int
+	rebuildAgain bool
 	// pendingIndex holds paths changed while an index was building;
 	// they are re-read once it lands.
 	pendingIndex []string
