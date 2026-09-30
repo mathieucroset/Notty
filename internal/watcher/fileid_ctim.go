@@ -9,6 +9,12 @@ import (
 
 const haveFileID = true
 
+// fileID is a file's inode and status-change time.
+type fileID struct {
+	ino   uint64
+	ctime int64 // nanoseconds
+}
+
 // fileIDOf returns the inode and status-change time of info.
 func fileIDOf(info os.FileInfo) fileID {
 	st, ok := info.Sys().(*syscall.Stat_t)

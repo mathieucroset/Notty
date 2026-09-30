@@ -110,13 +110,6 @@ var ErrWatchStopped = errors.New("watcher: stopped watching the vault")
 // reported under the old name); the consumer checks existence.
 type Event struct{ Paths []string }
 
-// fileID is a file's inode and status-change time, where the platform
-// provides them (see fileIDOf); the zero value otherwise.
-type fileID struct {
-	ino   uint64
-	ctime int64 // nanoseconds
-}
-
 // fileStamp identifies the content of a file the app wrote itself.
 type fileStamp struct {
 	mtime    time.Time

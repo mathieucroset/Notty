@@ -8,4 +8,7 @@ import "os"
 // Windows): self-writes are then identified by mtime and size only.
 const haveFileID = false
 
+// fileID is empty where the platform has no inode and status-change time.
+type fileID struct{}
+
 func fileIDOf(os.FileInfo) fileID { return fileID{} }
