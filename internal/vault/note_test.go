@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -70,6 +71,9 @@ func TestSaveAndRead(t *testing.T) {
 }
 
 func TestSavePreservesMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no permission bits beyond read-only: every writable file reports 0666")
+	}
 	v := openVault(t)
 	mkfiles(t, v.Root, "m.md")
 	if err := os.Chmod(v.Abs("m.md"), 0o600); err != nil {
