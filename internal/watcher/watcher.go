@@ -50,6 +50,9 @@ const (
 	// errBuffer is the capacity of the Errors channel; further errors are
 	// dropped while it is full.
 	errBuffer = 16
+	// restartWindow is how long after restarting a stopped watch another
+	// stop is taken as final.
+	restartWindow = time.Minute
 )
 
 // openBackend creates the change notification source; tests wrap it.
@@ -86,6 +89,13 @@ type barrier struct {
 // ErrRootGone is delivered on Errors when the vault root itself is deleted or
 // renamed. The watcher reports nothing further; the caller should close it.
 var ErrRootGone = errors.New("watcher: vault root was removed or renamed")
+
+// ErrWatchStopped is delivered on Errors when the operating system stopped
+// reporting changes (on Windows, the vault's watch failed) and restarting
+// the watch did not work: changes made outside the app are no longer
+// noticed. A watch that restarts is reported as lost events instead (see
+// Errors).
+var ErrWatchStopped = errors.New("watcher: stopped watching the vault")
 
 // Event is one debounced batch of changed paths. Paths are vault-relative,
 // use "/" separators, and are deduplicated and sorted. A path may name a
@@ -144,6 +154,8 @@ type Watcher struct {
 	urgent         []error              // errors delivered even when the Errors buffer is full
 	rootGone       bool                 // ErrRootGone already queued
 	overflowQueued bool                 // an overflow error is queued in urgent
+	stoppedQueued  bool                 // ErrWatchStopped already queued
+	lastRestart    time.Time            // when a stopped watch was last restarted
 	barriers       []barrier            // barrier requests awaiting their sentinel's event
 	barrierSeq     uint64               // number of the latest barrier
 	trackGaps      bool                 // list the directories with a gap (kqueue), see gaps.go
@@ -222,10 +234,12 @@ func (w *Watcher) start() {
 // Events delivers debounced batches of changes. It is closed by Close.
 func (w *Watcher) Events() <-chan Event { return w.events }
 
-// Errors delivers non-fatal watcher errors: directories that cannot be read or
-// watched (except for lack of permission, which is only logged), and event
-// queue overflows (after which a full re-index is advisable). It is closed by
-// Close.
+// Errors delivers watcher errors: directories that cannot be read or watched
+// (except for lack of permission, which is only logged); lost events, as an
+// error matching fsnotify.ErrEventOverflow, after which the caller should
+// re-index the whole vault (never while paused: the caller re-indexes after
+// the git operation anyway); ErrWatchStopped; and ErrRootGone. It is closed
+// by Close.
 func (w *Watcher) Errors() <-chan error { return w.errors }
 
 // NoteSelfWrite records that the app has just written rel (call it right after
@@ -508,26 +522,64 @@ func (w *Watcher) removeStaleBarriers() {
 	}
 }
 
-// handleFSError forwards an fsnotify error. After a queue overflow, events
-// (including directory creations and removals) were lost: the overflow is
-// queued for guaranteed delivery, once until delivered, and the directory
-// watches are rebuilt.
+// handleFSError forwards a backend error.
+//
+// After a queue overflow, events (including directory creations and
+// removals) were lost: the directory watches are rebuilt, and unless paused
+// the loss is queued for guaranteed delivery, once until delivered.
+//
+// A stopped watch (ErrWatchStopped) is restarted by rebuilding the watches,
+// and the events missed meanwhile are reported as lost. When the restart
+// fails, or the watch stops again within restartWindow of a restart, the
+// stop is queued for guaranteed delivery instead.
 func (w *Watcher) handleFSError(err error) {
-	if !errors.Is(err, fsnotify.ErrEventOverflow) {
+	switch {
+	case errors.Is(err, ErrWatchStopped):
+		if w.lastRestart.IsZero() || time.Since(w.lastRestart) > restartWindow {
+			w.lastRestart = time.Now()
+			rerr := w.resync()
+			if rerr == nil {
+				w.log.Warn("watcher: the vault's watch stopped and was restarted", "err", err)
+				w.eventsLost(err)
+				return
+			}
+			w.log.Warn("watcher: could not restart the vault's watch", "err", rerr)
+		}
+		if !w.stoppedQueued {
+			w.stoppedQueued = true
+			w.urgent = append(w.urgent, err)
+		}
+	case errors.Is(err, fsnotify.ErrEventOverflow):
+		if rerr := w.resync(); rerr != nil {
+			w.sendError(rerr)
+		}
+		w.eventsLost(err)
+	default:
 		w.sendError(fmt.Errorf("watcher: %w", err))
+	}
+}
+
+// eventsLost queues the loss of events for guaranteed delivery, once until
+// delivered, unless paused: the caller re-indexes after a pause anyway.
+func (w *Watcher) eventsLost(cause error) {
+	if w.overflowQueued || w.isPaused() {
 		return
 	}
-	if !w.overflowQueued {
-		w.overflowQueued = true
-		w.urgent = append(w.urgent, fmt.Errorf("watcher: events lost, re-index the vault: %w", err))
+	w.overflowQueued = true
+	if errors.Is(cause, fsnotify.ErrEventOverflow) {
+		w.urgent = append(w.urgent, fmt.Errorf("watcher: events lost: %w", cause))
+		return
 	}
-	w.resync()
+	// Not wrapped: the watch works again, and the error must not match
+	// ErrWatchStopped.
+	w.urgent = append(w.urgent, fmt.Errorf("watcher: events lost: %w (%s)", fsnotify.ErrEventOverflow, cause.Error()))
 }
 
 // resync rebuilds the directory watches from disk: it drops watches on
 // directories that no longer exist (or were renamed away) and watches every
-// directory currently present.
-func (w *Watcher) resync() {
+// directory currently present. It returns the error of a vault root that
+// cannot be watched.
+func (w *Watcher) resync() error {
 	for d := range w.dirs {
 		if d == "." {
 			continue
@@ -542,9 +594,7 @@ func (w *Watcher) resync() {
 	for _, e := range errs {
 		w.sendError(e)
 	}
-	if err != nil {
-		w.sendError(err)
-	}
+	return err
 }
 
 // handle updates the directory watches for one fsnotify event and records the

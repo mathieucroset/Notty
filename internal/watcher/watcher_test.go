@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1002,6 +1003,88 @@ func TestOverflowDeliveredWhenErrorBufferFullAndWatchesResynced(t *testing.T) {
 	ev := nextEvent(t, w)
 	if !slices.Equal(ev.Paths, []string{"missed/a.md"}) {
 		t.Fatalf("paths = %v, want [missed/a.md]", ev.Paths)
+	}
+}
+
+// addCountingBackend counts the watches added on the vault root and can
+// refuse them.
+type addCountingBackend struct {
+	backend
+	root string
+
+	mu       sync.Mutex
+	rootAdds int
+	failRoot bool
+}
+
+func (b *addCountingBackend) Add(p string) error {
+	if p == b.root {
+		b.mu.Lock()
+		b.rootAdds++
+		fail := b.failRoot
+		b.mu.Unlock()
+		if fail {
+			return errors.New("cannot watch the root")
+		}
+	}
+	return b.backend.Add(p)
+}
+
+func TestBackendErrorRecovery(t *testing.T) {
+	stopped := fmt.Errorf("%w: read failed", ErrWatchStopped)
+	tests := []struct {
+		name       string
+		errs       []error
+		paused     bool
+		failRoot   bool
+		wantUrgent []error // matched with errors.Is, in order
+		wantAdds   int     // watches added on the root while recovering
+	}{
+		{"overflow", []error{fsnotify.ErrEventOverflow}, false, false, []error{fsnotify.ErrEventOverflow}, 1},
+		{"overflow twice", []error{fsnotify.ErrEventOverflow, fsnotify.ErrEventOverflow}, false, false, []error{fsnotify.ErrEventOverflow}, 2},
+		{"overflow while paused", []error{fsnotify.ErrEventOverflow}, true, false, nil, 1},
+		{"watch stopped, restarted", []error{stopped}, false, false, []error{fsnotify.ErrEventOverflow}, 1},
+		{"watch stopped while paused, restarted", []error{stopped}, true, false, nil, 1},
+		{"watch stopped, restart fails", []error{stopped}, false, true, []error{ErrWatchStopped}, 1},
+		{"watch stopped again soon after a restart", []error{stopped, stopped}, false, false, []error{fsnotify.ErrEventOverflow, ErrWatchStopped}, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var fake *addCountingBackend
+			withBackend(t, func(b backend) backend {
+				fake = &addCountingBackend{backend: b}
+				return fake
+			})
+			root := t.TempDir()
+			w, err := newWatcher(root, (&logBuffer{}).logger()) // event loop not started
+			if err != nil {
+				t.Fatalf("newWatcher: %v", err)
+			}
+			t.Cleanup(func() { _ = w.Close() })
+			fake.mu.Lock()
+			fake.root, fake.rootAdds, fake.failRoot = w.root, 0, tc.failRoot
+			fake.mu.Unlock()
+			if tc.paused {
+				w.pauses = 1
+			}
+
+			for _, e := range tc.errs {
+				w.handleFSError(e)
+			}
+			if len(w.urgent) != len(tc.wantUrgent) {
+				t.Fatalf("urgent errors = %v, want %v", w.urgent, tc.wantUrgent)
+			}
+			for i, want := range tc.wantUrgent {
+				if !errors.Is(w.urgent[i], want) || (!errors.Is(want, ErrWatchStopped) && errors.Is(w.urgent[i], ErrWatchStopped)) {
+					t.Fatalf("urgent error %d = %v, want %v", i, w.urgent[i], want)
+				}
+			}
+			fake.mu.Lock()
+			defer fake.mu.Unlock()
+			if fake.rootAdds != tc.wantAdds {
+				t.Fatalf("root watches added = %d, want %d", fake.rootAdds, tc.wantAdds)
+			}
+		})
 	}
 }
 
