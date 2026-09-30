@@ -31,6 +31,8 @@ type Set struct {
 
 	// Sync states in the status bar (spec §4.3).
 	Synced, Syncing, Offline, SyncConflict, SyncError, LocalOnly string
+	// Update precedes a newer release's version in the status bar.
+	Update string
 
 	// Toast and error log levels.
 	Info, Warn, Error string
@@ -69,6 +71,7 @@ var nerd = Set{
 	SyncConflict:     "\uf071",     // nf-fa-exclamation_triangle
 	SyncError:        "\uf057",     // nf-fa-times_circle
 	LocalOnly:        "\uf0a0",     // nf-fa-hdd_o
+	Update:           "\uf0aa",     // nf-fa-arrow_circle_up
 	Info:             "\uf05a",     // nf-fa-info_circle
 	Warn:             "\uf071",     // nf-fa-exclamation_triangle
 	Error:            "\uf057",     // nf-fa-times_circle
@@ -103,6 +106,7 @@ var unicode = Set{
 	SyncConflict:     "⚠",
 	SyncError:        "✗",
 	LocalOnly:        "○",
+	Update:           "↑",
 	Info:             "ℹ",
 	Warn:             "⚠",
 	Error:            "✗",
@@ -137,6 +141,7 @@ var ascii = Set{
 	SyncConflict:     "!",
 	SyncError:        "x",
 	LocalOnly:        "o",
+	Update:           "^",
 	Info:             "i",
 	Warn:             "!",
 	Error:            "x",
