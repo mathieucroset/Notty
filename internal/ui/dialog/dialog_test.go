@@ -291,6 +291,24 @@ func TestViewSnapshotInput(t *testing.T) {
 	}
 }
 
+func TestInputHint(t *testing.T) {
+	styles := testStyles(t)
+	const hint = "A folder that does not exist yet is created, after you confirm."
+	m := NewInput("move", "Move 'ideas' to", "Folder", "Work", nil, styles).WithHint(hint)
+	got := strip(m.View())
+	if !strings.Contains(strings.Join(strings.Fields(strings.ReplaceAll(got, "│", "")), " "), hint) {
+		t.Fatalf("hint missing from the view:\n%s", got)
+	}
+	for _, l := range strings.Split(got, "\n") {
+		if w := ansi.StringWidth(l); w != m.Width() {
+			t.Fatalf("line %q is %d wide, want %d", l, w, m.Width())
+		}
+	}
+	if strings.Contains(strip(NewInput("move", "Move", "Folder", "", nil, styles).View()), "confirm") {
+		t.Error("a dialog without a hint shows one")
+	}
+}
+
 func TestViewSnapshotConfirm(t *testing.T) {
 	styles := testStyles(t)
 	m := NewConfirm("trash", "Delete note?", "This moves the note to trash.", "Delete", "Cancel", true, styles)

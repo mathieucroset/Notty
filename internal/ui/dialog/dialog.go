@@ -75,6 +75,7 @@ type Model struct {
 	suggestFn   SuggestFunc
 	suggestions []string
 	sugIndex    int // -1 when nothing is highlighted
+	hint        string
 
 	// Confirm.
 	message  string
@@ -120,6 +121,12 @@ func NewInput(id, title, placeholder, initial string, validate func(string) erro
 func (m Model) WithSuggestions(fn SuggestFunc) Model {
 	m.suggestFn = fn
 	m.refreshSuggestions()
+	return m
+}
+
+// WithHint adds a dim line of help under an Input dialog's field.
+func (m Model) WithHint(hint string) Model {
+	m.hint = hint
 	return m
 }
 
@@ -400,6 +407,12 @@ func (m Model) View() string {
 		if m.errMsg != "" {
 			for _, l := range textutil.Wrap(m.errMsg, inner) {
 				lines = append(lines, m.styles.Error.Render(textutil.PadLine(l, inner)))
+			}
+		}
+		if m.hint != "" {
+			lines = append(lines, "")
+			for _, l := range textutil.Wrap(m.hint, inner) {
+				lines = append(lines, m.styles.Muted.Render(textutil.PadLine(l, inner)))
 			}
 		}
 		if len(m.suggestions) > 0 {
