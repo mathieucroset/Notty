@@ -222,6 +222,31 @@ func TestQuickAppendsToExistingInbox(t *testing.T) {
 	}
 }
 
+// --folder names an existing folder in any case, as a case-insensitive
+// filesystem would, and the Inbox path is reported in the folder's case.
+func TestQuickFolderMatchesExistingCase(t *testing.T) {
+	f := quickFixture(t)
+	if err := os.MkdirAll(filepath.Join(f.vaultDir, "Work", "Clients"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"-q", "hi", "--folder", "work/clients"}, f.env()); code != 0 {
+		t.Fatalf("exit code %d, stderr %q", code, f.stderr.String())
+	}
+	if got := readVault(t, f, "Work/Clients/Inbox.md"); got != "# Inbox\n\n- (proj) hi\n" {
+		t.Errorf("Work/Clients/Inbox.md = %q", got)
+	}
+	if got := f.stdout.String(); got != "✓ Added to Work/Clients/Inbox.md\n" {
+		t.Errorf("stdout = %q", got)
+	}
+	entries, err := os.ReadDir(f.vaultDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("vault root holds %d entries, want only Work", len(entries))
+	}
+}
+
 func TestQuickErrors(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -360,6 +385,7 @@ func TestQuickRefusesConflictedInbox(t *testing.T) {
 	}{
 		{"conflicted inbox", "", "Inbox.md", 1},
 		{"conflicted folder inbox", "Work", "Work/Inbox.md", 1},
+		{"conflicted folder inbox typed in another case", "work", "Work/Inbox.md", 1},
 		{"another inbox conflicted", "", "Work/Inbox.md", 0},
 	}
 	for _, tt := range tests {

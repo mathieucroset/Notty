@@ -41,6 +41,45 @@ func ValidateFolderPath(rel string) (string, error) {
 	return folder, nil
 }
 
+// RealFolderCase returns the clean folder path rel with each leading
+// segment that names an existing folder (ignoring case, an exact match
+// first) spelled as that folder is on disk; the rest is kept as given.
+// Symlinks and files never match. It lets a folder typed in another case
+// name the folder a case-insensitive filesystem would open.
+func (v *Vault) RealFolderCase(rel string) string {
+	c := clean(rel)
+	if c == "" {
+		return ""
+	}
+	segs := strings.Split(c, "/")
+	cur := ""
+	for i, seg := range segs {
+		entries, err := os.ReadDir(v.Abs(cur))
+		if err != nil {
+			break
+		}
+		match := ""
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			if e.Name() == seg {
+				match = seg
+				break
+			}
+			if match == "" && strings.EqualFold(e.Name(), seg) {
+				match = e.Name()
+			}
+		}
+		if match == "" {
+			break
+		}
+		segs[i] = match
+		cur = path.Join(cur, match)
+	}
+	return strings.Join(segs, "/")
+}
+
 // AppendToInbox appends line to <folder>/Inbox.md and returns that note's
 // path. folder is validated with ValidateFolderPath and created if missing;
 // a missing Inbox is created with an "# Inbox" heading. The line is added

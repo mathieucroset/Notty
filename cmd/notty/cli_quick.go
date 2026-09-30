@@ -62,6 +62,9 @@ func runQuick(rest []string, afterDash bool, vaultFlag, folderFlag string, e env
 		_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
 		return 1
 	}
+	// An existing folder typed in another case is that folder, as on a
+	// case-insensitive filesystem: use its real case for the Inbox path.
+	dir = v.RealFolderCase(dir)
 
 	var repo *gitsync.Repo
 	if _, err := e.lookPath("git"); err == nil {
@@ -119,12 +122,17 @@ func inConflict(repo *gitsync.Repo, rel string) bool {
 		return false
 	}
 	for _, c := range conflicts {
-		if c.Path == rel {
+		if c.Path == rel || (caseInsensitiveFS() && strings.EqualFold(c.Path, rel)) {
 			return true
 		}
 	}
 	return false
 }
+
+// caseInsensitiveFS reports whether file names usually ignore case here
+// (Windows and macOS by default), so paths differing only in case name the
+// same file.
+func caseInsensitiveFS() bool { return runtime.GOOS == "windows" || runtime.GOOS == "darwin" }
 
 // quickText joins the words of a quick note with single spaces into one
 // line: line breaks become spaces, and surrounding whitespace is trimmed.

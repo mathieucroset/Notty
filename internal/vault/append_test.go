@@ -68,6 +68,49 @@ func TestValidateFolderPathBackslash(t *testing.T) {
 	}
 }
 
+func TestRealFolderCase(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"root", "", ""},
+		{"exact", "Work", "Work"},
+		{"other case", "work", "Work"},
+		{"nested", "WORK/clients", "Work/Clients"},
+		{"missing tail keeps its case", "work/New/sub", "Work/New/sub"},
+		{"missing", "Nope", "Nope"},
+		{"a file is not a folder", "NOTES.MD/x", "NOTES.MD/x"},
+		{"a symlink is not a folder", "EXT", "EXT"},
+	}
+	v := openVault(t)
+	mkfiles(t, v.Root, "Work/Clients/", "notes.md")
+	symlinks := os.Symlink(t.TempDir(), v.Abs("ext")) == nil
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.in == "EXT" && !symlinks {
+				t.Skip("symlinks unsupported")
+			}
+			if got := v.RealFolderCase(tt.in); got != tt.want {
+				t.Errorf("RealFolderCase(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// With folders differing only in case (case-sensitive filesystems), the
+// exact spelling wins.
+func TestRealFolderCasePrefersExact(t *testing.T) {
+	v := openVault(t)
+	mkfiles(t, v.Root, "Work/", "work/")
+	if entries, _ := os.ReadDir(v.Root); len(entries) != 2 {
+		t.Skip("case-insensitive filesystem")
+	}
+	for _, name := range []string{"Work", "work"} {
+		if got := v.RealFolderCase(name); got != name {
+			t.Errorf("RealFolderCase(%q) = %q", name, got)
+		}
+	}
+}
+
 func TestAppendToInbox(t *testing.T) {
 	tests := []struct {
 		name     string
