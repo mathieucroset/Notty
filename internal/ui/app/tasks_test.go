@@ -115,7 +115,7 @@ func TestTasksViewOpenAndBack(t *testing.T) {
 // TestTasksToggleFlow toggles a task from the Tasks view in a real program.
 func TestTasksToggleFlow(t *testing.T) {
 	opts := tasksOptions(t)
-	tm := teatest.NewTestModel(t, New(opts), teatest.WithInitialTermSize(120, 30))
+	tm := newProgram(t, opts)
 	waitScreen(t, tm, "N O T E S")
 	tm.Send(msgs.ActivateEntryMsg{Entry: msgs.EntryTasks})
 	waitScreen(t, tm, "O V E R D U E", "write report")
@@ -125,7 +125,7 @@ func TestTasksToggleFlow(t *testing.T) {
 	})
 	tm.Send(keyMsg("ctrl+q"))
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
-	if got := tm.FinalModel(t).(*Model).tasks.Title(); got != "Tasks · 1 open" {
+	if got := finalModel(t, tm).tasks.Title(); got != "Tasks · 1 open" {
 		t.Errorf("tasks title = %q", got)
 	}
 }

@@ -140,7 +140,7 @@ func TestTrashPurgedAtStartup(t *testing.T) {
 // program.
 func TestTrashRestoreFlow(t *testing.T) {
 	opts := trashedOptions(t)
-	tm := teatest.NewTestModel(t, New(opts), teatest.WithInitialTermSize(120, 30))
+	tm := newProgram(t, opts)
 	waitScreen(t, tm, "N O T E S")
 	tm.Send(msgs.ActivateEntryMsg{Entry: msgs.EntryTrash})
 	waitScreen(t, tm, "Trash · 1 item")
