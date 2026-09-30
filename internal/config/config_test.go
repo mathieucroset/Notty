@@ -56,6 +56,44 @@ func TestDefault(t *testing.T) {
 	if c.Icons != "unicode" {
 		t.Errorf("Icons = %q, want unicode", c.Icons)
 	}
+	if !c.UpdateCheck {
+		t.Error("UpdateCheck = false, want true")
+	}
+}
+
+func TestLoadUpdateCheck(t *testing.T) {
+	tests := []struct {
+		name  string
+		local string
+		vault string
+		want  bool
+	}{
+		{name: "default", want: true},
+		{name: "off locally", local: "update_check = false", want: false},
+		{name: "off in the vault", vault: "update_check = false", want: false},
+		{name: "local wins over the vault", local: "update_check = true", vault: "update_check = false", want: true},
+		{name: "vault off, local unrelated", local: `theme = "dracula"`, vault: "update_check = false", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			local := filepath.Join(dir, "config.toml")
+			vaultRoot := filepath.Join(dir, "vault")
+			if tt.local != "" {
+				writeFile(t, local, tt.local+"\n")
+			}
+			if tt.vault != "" {
+				writeFile(t, filepath.Join(vaultRoot, ".notty", "settings.toml"), tt.vault+"\n")
+			}
+			c, err := Load(local, vaultRoot)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if c.UpdateCheck != tt.want {
+				t.Errorf("UpdateCheck = %v, want %v", c.UpdateCheck, tt.want)
+			}
+		})
+	}
 }
 
 func TestLoadIcons(t *testing.T) {
@@ -333,6 +371,24 @@ func TestSetKey(t *testing.T) {
 		}
 		if c.Icons != "nerd" {
 			t.Errorf("Icons = %q, want nerd", c.Icons)
+		}
+	})
+
+	t.Run("update_check key", func(t *testing.T) {
+		local := filepath.Join(t.TempDir(), "config.toml")
+		writeFile(t, local, "[sync]\nenabled = true\n")
+		if err := SetKey(local, "update_check", false); err != nil {
+			t.Fatalf("SetKey: %v", err)
+		}
+		c, err := Load(local, "")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if c.UpdateCheck {
+			t.Error("UpdateCheck = true, want false")
+		}
+		if !c.Sync.Enabled {
+			t.Error("Sync.Enabled lost")
 		}
 	})
 
