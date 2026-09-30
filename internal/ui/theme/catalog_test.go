@@ -3,6 +3,7 @@ package theme
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -16,7 +17,12 @@ func TestCatalogNames(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []string{".toml", ".hidden.toml", `back\slash.toml`} { // not plain names: skipped
+	odd := []string{".toml", ".hidden.toml"} // not plain names: skipped
+	if runtime.GOOS != "windows" {
+		// On Windows "\" separates paths, so no file has it in its name.
+		odd = append(odd, `back\slash.toml`)
+	}
+	for _, n := range odd {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte(fullTheme), 0o600); err != nil {
 			t.Fatal(err)
 		}
