@@ -260,7 +260,8 @@ notty theme matugen
 
 It writes Notty's matugen template to `~/.config/notty/matugen-template.toml`
 (an existing file is never overwritten) and prints the entry to add to your
-matugen config — for Noctalia, to its `user-templates.toml`:
+matugen config. With matugen itself, or Noctalia 4 (its
+`user-templates.toml`):
 
 ```toml
 [templates.notty]
@@ -268,7 +269,17 @@ input_path  = "~/.config/notty/matugen-template.toml"
 output_path = "~/.config/notty/themes/matugen.toml"
 ```
 
-(The printed paths are the real ones on your machine.) Then set
+Noctalia 5 renders templates with its own engine and reads user templates
+from a different table, in the same `user-templates.toml`:
+
+```toml
+[theme.templates.user.notty]
+input_path  = "~/.config/notty/matugen-template.toml"
+output_path = "~/.config/notty/themes/matugen.toml"
+```
+
+`noctalia theme --list-templates` should then list `notty` under "User
+templates". (The printed paths are the real ones on your machine.) Then set
 `theme = "matugen"` in `config.toml`, or pick `matugen` with **Switch theme**
 once the file exists. From then on, every time matugen renders the template
 — a new wallpaper, a light/dark switch — Notty picks the new colors up by

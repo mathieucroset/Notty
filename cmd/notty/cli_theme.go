@@ -13,8 +13,9 @@ import (
 
 // runTheme runs `notty theme <sub>` (user themes spec §2). `theme matugen`
 // writes the matugen template next to the config file, unless it already
-// exists, and prints the matugen config snippet that renders it into
-// <ConfigDir>/themes/matugen.toml.
+// exists, and prints the config entries that render it into
+// <ConfigDir>/themes/matugen.toml: matugen's own (also Noctalia 4's) and
+// Noctalia 5's, which moved user templates to [theme.templates.user.<name>].
 func runTheme(args []string, e env) int {
 	if len(args) != 1 || args[0] != "matugen" {
 		_, _ = fmt.Fprintln(e.stderr, "usage: notty theme matugen")
@@ -36,10 +37,13 @@ func runTheme(args []string, e env) int {
 		_, _ = fmt.Fprintf(e.stderr, "notty: %v\n", err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(e.stdout, "Add this to your matugen config (Noctalia: user-templates.toml):\n\n"+
-		"[templates.notty]\ninput_path  = %q\noutput_path = %q\n\n"+
+	entry := fmt.Sprintf("input_path  = %q\noutput_path = %q\n", tildePath(tpl), tildePath(out))
+	_, _ = fmt.Fprintf(e.stdout, "Add this to your matugen config (Noctalia 4: user-templates.toml):\n\n"+
+		"[templates.notty]\n%s\n"+
+		"Noctalia 5 reads user templates from another table; in its user-templates.toml use:\n\n"+
+		"[theme.templates.user.notty]\n%s\n"+
 		"Then set in %s:\n\ntheme = \"matugen\"\n",
-		tildePath(tpl), tildePath(out), tildePath(e.configPath))
+		entry, entry, tildePath(e.configPath))
 	return 0
 }
 

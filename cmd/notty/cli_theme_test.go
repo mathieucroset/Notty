@@ -27,7 +27,8 @@ func TestThemeCommand(t *testing.T) {
 			wantCode: 0,
 			wantTpl:  theme.MatugenTemplate(),
 			wantStdout: []string{
-				"[templates.notty]", "input_path", "output_path",
+				"[templates.notty]", "Noctalia 5", "[theme.templates.user.notty]",
+				"input_path", "output_path",
 				"{dir}/matugen-template.toml", "{dir}/themes/matugen.toml",
 				`theme = "matugen"`, "Wrote",
 			},
@@ -45,7 +46,7 @@ func TestThemeCommand(t *testing.T) {
 			},
 			wantCode:   0,
 			wantTpl:    "mine",
-			wantStdout: []string{"already exists", "[templates.notty]", `theme = "matugen"`},
+			wantStdout: []string{"already exists", "[templates.notty]", "[theme.templates.user.notty]", `theme = "matugen"`},
 		},
 		{
 			name:       "no argument",
