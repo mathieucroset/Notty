@@ -238,8 +238,15 @@ type Model struct {
 	editorStatus string
 	// baseline is the open note's content as Notty last read or wrote it:
 	// a change on disk only counts as external when the file differs
-	// from it.
+	// from it, and a save only writes over a file that still matches it.
 	baseline string
+	// baselineGen numbers the baselines read from disk (loads, reloads,
+	// "Keep mine"); a save checks the file against its own writes only
+	// when they were made under the current one.
+	baselineGen uint64
+	// extDisk is the file content the "changed on disk" dialog is about;
+	// keeping the edits makes it the baseline they overwrite.
+	extDisk string
 	// extConflict is the open note while the "changed on disk" dialog
 	// waits for an answer; its saves are held until then.
 	extConflict string
@@ -665,8 +672,9 @@ func (m *Model) quit() tea.Cmd {
 func (m *Model) handleQuitSaved(msg quitSavedMsg) tea.Cmd {
 	if msg.saved.err != nil {
 		m.discardOnQuit = true
-		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s: %v. Quit again to discard your edits.",
-			msg.saved.path, msg.saved.err))
+		ask, _ := m.changedOnDisk(msg.saved)
+		return tea.Batch(m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s: %v. Quit again to discard your edits.",
+			msg.saved.path, msg.saved.err)), ask)
 	}
 	m.editor = m.editor.MarkSaved(msg.saved.path, msg.saved.version)
 	return m.finishQuit()
@@ -715,7 +723,7 @@ func (m *Model) showNote(p, content string, line int) tea.Cmd {
 	m.editor = m.editor.SetReadOnly(m.isConflicted(p), "").Load(p, content, cur)
 	m.editorStatus = ""
 	m.extConflict = ""
-	m.baseline = content
+	m.setBaseline(content)
 	m.note = note{
 		path:  p,
 		title: vault.Title(content, p),

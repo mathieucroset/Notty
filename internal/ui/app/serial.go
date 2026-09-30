@@ -25,6 +25,13 @@ type orderedSaver struct {
 	tickets atomic.Uint64
 	mu      sync.Mutex
 	written uint64
+
+	// Note savers only, guarded by mu (held while write runs): the
+	// content of the last successful write, and the baseline generation
+	// it was made under (see Model.baselineGen).
+	last    string
+	lastGen uint64
+	hasLast bool
 }
 
 // ticket numbers a snapshot. Call it when the snapshot is taken.

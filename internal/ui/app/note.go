@@ -147,8 +147,9 @@ func (m *Model) saveThen(next tea.Msg, abort string) tea.Cmd {
 // the note open when the save failed.
 func (m *Model) handleSavedThen(msg savedThenMsg) tea.Cmd {
 	if msg.saved.err != nil {
-		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s, so %s: %v",
-			msg.saved.path, msg.abort, msg.saved.err))
+		ask, _ := m.changedOnDisk(msg.saved)
+		return tea.Batch(m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s, so %s: %v",
+			msg.saved.path, msg.abort, msg.saved.err)), ask)
 	}
 	return tea.Batch(m.handleSaved(msg.saved), emit(msg.next))
 }
@@ -193,7 +194,7 @@ func (m *Model) closeNote() {
 	m.editor = m.editor.SetReadOnly(false, "").Load("", "", buffer.Pos{})
 	m.editorStatus = ""
 	m.extConflict = ""
-	m.baseline = ""
+	m.setBaseline("")
 	m.sidebar.SetDirty("")
 }
 

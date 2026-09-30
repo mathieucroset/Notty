@@ -145,8 +145,44 @@ func (m *Model) closeWatcher() {
 	}
 }
 
+// changedOnDiskError refuses a save of the open note whose file changed
+// since Notty last read or wrote it; content is what the file holds.
+type changedOnDiskError struct{ content string }
+
+func (e *changedOnDiskError) Error() string {
+	return "the file changed on disk since Notty last read it"
+}
+
+// diskCheck is what a save of the open note expects to find on disk.
+type diskCheck struct {
+	baseline string
+	gen      uint64
+}
+
+// verify reads the note at p and returns a *changedOnDiskError unless it
+// holds the baseline, or what saver last wrote under the same baseline
+// generation (a save still being reported). A missing file overwrites
+// nothing and passes. saver.mu is held.
+func (c *diskCheck) verify(v *vault.Vault, p string, saver *orderedSaver) error {
+	disk, err := v.Read(p)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return fmt.Errorf("check the file on disk: %w", err)
+	case disk == c.baseline, saver.hasLast && saver.lastGen == c.gen && disk == saver.last:
+		return nil
+	}
+	return &changedOnDiskError{content: disk}
+}
+
 // saveNoteCmd saves content to the note at p atomically, tells the watcher
 // the write is ours, and indexes the new content.
+//
+// A save of the open note first checks that the file still holds what
+// Notty last read or wrote (the baseline): a file changed by another
+// program is never overwritten, whether or not the watcher noticed; the
+// save fails with a *changedOnDiskError instead.
 //
 // Snapshots of one note land in the order they were taken: an older one
 // that runs after a newer one was written is skipped (stale). Quit waits
@@ -164,6 +200,10 @@ func (m *Model) saveNoteCmd(p, content string, version uint64) tea.Cmd {
 		saver = &orderedSaver{}
 		m.noteSavers[p] = saver
 	}
+	var check *diskCheck
+	if p == m.note.path && p == m.editor.Path() {
+		check = &diskCheck{baseline: m.baseline, gen: m.baselineGen}
+	}
 	seq := saver.ticket()
 	inflight := m.inflight
 	inflight.Add(1)
@@ -173,7 +213,18 @@ func (m *Model) saveNoteCmd(p, content string, version uint64) tea.Cmd {
 		written := false
 		err := saver.save(seq, func() error {
 			written = true
-			return v.Save(p, content)
+			if check != nil {
+				if err := check.verify(v, p, saver); err != nil {
+					return err
+				}
+			}
+			if err := v.Save(p, content); err != nil {
+				return err
+			}
+			if check != nil {
+				saver.last, saver.lastGen, saver.hasLast = content, check.gen, true
+			}
+			return nil
 		})
 		if !written {
 			return savedMsg{path: p, version: version, stale: true}
@@ -206,6 +257,9 @@ func (m *Model) applySaved(msg savedMsg) tea.Cmd {
 	if msg.stale {
 		return nil // a newer snapshot was written
 	}
+	if cmd, ok := m.changedOnDisk(msg); ok {
+		return cmd
+	}
 	if msg.err != nil {
 		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not save %s: %v", msg.path, msg.err))
 	}
@@ -221,6 +275,18 @@ func (m *Model) applySaved(msg savedMsg) tea.Cmd {
 		return m.pushToast(msgs.ToastInfo, fmt.Sprintf("Restored %s from %s", displayName(msg.path), msg.restoredFrom))
 	}
 	return nil
+}
+
+// changedOnDisk handles a save refused because the open note's file
+// changed on disk: the file is treated as re-read, which asks what to do
+// when the buffer has other edits (or reloads it). It reports whether the
+// save was refused for that reason.
+func (m *Model) changedOnDisk(msg savedMsg) (tea.Cmd, bool) {
+	var ce *changedOnDiskError
+	if !errors.As(msg.err, &ce) {
+		return nil, false
+	}
+	return m.handleNoteReloaded(noteReloadedMsg{path: msg.path, content: ce.content}), true
 }
 
 // saveWaitLimit bounds how long quitting waits for saves still running.

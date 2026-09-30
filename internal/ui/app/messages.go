@@ -95,20 +95,27 @@ func (m *Model) handleNoteReloaded(msg noteReloadedMsg) tea.Cmd {
 			return nil // unchanged since Notty last read or wrote it
 		}
 		if m.editor.Dirty() && msg.content != m.editor.Content() {
-			return m.askExternalChange(msg.path)
+			return m.askExternalChange(msg.path, msg.content)
 		}
 	}
 	m.editor = m.editor.Reload(msg.content)
-	m.baseline = msg.content
+	m.setBaseline(msg.content)
 	m.note.title = vault.Title(msg.content, msg.path)
 	m.note.words = len(strings.Fields(msg.content))
 	m.sidebar.SetDirty(m.dirtyPath())
 	return m.syncPreview()
 }
 
-// askExternalChange opens the "changed on disk" dialog for the open note
-// and holds its saves until the user chooses.
-func (m *Model) askExternalChange(p string) tea.Cmd {
+// setBaseline records content as read from the open note's file.
+func (m *Model) setBaseline(content string) {
+	m.baseline = content
+	m.baselineGen++
+}
+
+// askExternalChange opens the "changed on disk" dialog for the open note,
+// whose file now holds disk, and holds its saves until the user chooses.
+func (m *Model) askExternalChange(p, disk string) tea.Cmd {
+	m.extDisk = disk
 	if m.extConflict == p {
 		if o := m.topOverlay(); o != nil && o.kind == overlayDialog && o.dialog.ID() == dlgExternalChange {
 			return nil // already asking; the choice re-reads the file
@@ -125,7 +132,8 @@ func (m *Model) askExternalChange(p string) tea.Cmd {
 }
 
 // resolveExternalChange acts on the dialog: reload the file into the
-// buffer, or keep the buffer, which then overwrites the file.
+// buffer, or keep the buffer, which then overwrites the file as the dialog
+// saw it (a file changed again since asks again).
 func (m *Model) resolveExternalChange(p string, choice int) tea.Cmd {
 	if choice == choiceReload && m.opts.Vault != nil && p == m.editor.Path() {
 		v := m.opts.Vault
@@ -138,6 +146,7 @@ func (m *Model) resolveExternalChange(p string, choice int) tea.Cmd {
 	if p != m.editor.Path() {
 		return nil
 	}
+	m.setBaseline(m.extDisk)
 	return m.saveRequest()
 }
 
