@@ -28,7 +28,7 @@ func processAlive(pid int) bool {
 	case err != nil:
 		return true // unknown failure: never take over a lock we cannot judge
 	}
-	defer windows.CloseHandle(h)
+	defer func() { _ = windows.CloseHandle(h) }()
 	var code uint32
 	if err := windows.GetExitCodeProcess(h, &code); err != nil {
 		return true
