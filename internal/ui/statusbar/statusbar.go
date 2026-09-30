@@ -150,12 +150,15 @@ func (m Model) View() string {
 
 	// Drop the update marker, then the help hint, then the sync text,
 	// until at least a short path (or, with no path, a one-column gap)
-	// fits. Conflict and error states
-	// need attention, so their text stays and the path gives way instead.
+	// fits. The marker also gives way to the path: it stays only while the
+	// path keeps min(its width, 24) columns. Conflict and error states need
+	// attention, so their text stays and the path gives way instead.
 	urgent := m.Sync.State == msgs.SyncConflict || m.Sync.State == msgs.SyncError
-	minMiddle := 1
+	pathW := ansi.StringWidth(m.Path)
+	minMiddle, updateMiddle := 1, 1
 	if m.Path != "" {
-		minMiddle = min(ansi.StringWidth(m.Path), 8) + 1
+		minMiddle = min(pathW, 8) + 1
+		updateMiddle = min(pathW, 24) + 1
 	}
 	var r string
 	var rw int
@@ -163,7 +166,7 @@ func (m Model) View() string {
 		r, rw = right()
 		return leftW+rw+minMiddle <= m.width
 	}
-	if !fits() {
+	if _, w := right(); leftW+w+updateMiddle > m.width {
 		showUpdate = false
 	}
 	if !fits() {

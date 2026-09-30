@@ -251,38 +251,48 @@ func TestViewNoUpdateMarkerWhenEmpty(t *testing.T) {
 }
 
 // TestViewUpdateMarkerDropsFirst checks that the marker is the first thing
-// to give way on a narrow bar, before the help hint and the sync text, and
-// that the bar never overflows.
+// to give way, before the help hint and the sync text: it is only shown
+// while the path still gets min(path width, 24) columns, and the bar never
+// overflows.
 func TestViewUpdateMarkerDropsFirst(t *testing.T) {
 	long := "Projects/Clients/Acme Corporation/Quarterly planning/Meeting notes 2026.md"
+	longName := "Notes/Quarterly planning and meeting notes for Acme 2026.md"
+	short := "a.md"
 	offline := msgs.SyncStatusMsg{State: msgs.SyncOffline, Pending: 3}
 	synced := msgs.SyncStatusMsg{State: msgs.SyncSynced}
 	conflict := msgs.SyncStatusMsg{State: msgs.SyncConflict, Conflicts: 2}
 	tests := []struct {
 		width      int
+		path       string
 		busy       string
 		st         msgs.SyncStatusMsg
 		wantUpdate bool
 		wantHelp   bool
 		wantSync   bool
 	}{
-		{80, "", synced, true, true, true},
-		{70, "", synced, true, true, true},
-		{80, "", offline, true, true, true},
-		{70, "", offline, true, true, true},
-		{80, "indexing…", offline, true, true, true},
-		{70, "indexing…", offline, false, true, true},
-		{45, "", synced, false, true, true},
-		{36, "", synced, false, false, true},
-		{24, "", synced, false, false, false},
-		{40, "", conflict, false, false, true},
-		{24, "", conflict, false, false, true},
+		{80, long, "", synced, true, true, true},
+		{70, long, "", synced, true, true, true},
+		{80, long, "", offline, true, true, true},
+		// The marker would leave the path fewer than 24 columns.
+		{70, long, "", offline, false, true, true},
+		{70, longName, "", offline, false, true, true},
+		{80, longName, "", offline, true, true, true},
+		{80, long, "indexing…", offline, false, true, true},
+		{100, long, "indexing…", offline, true, true, true},
+		{45, long, "", synced, false, true, true},
+		{36, long, "", synced, false, false, true},
+		{24, long, "", synced, false, false, false},
+		{40, long, "", conflict, false, false, true},
+		{24, long, "", conflict, false, false, true},
+		// A short path only needs its own width.
+		{44, short, "", synced, true, true, true},
+		{43, short, "", synced, false, true, true},
 	}
 	for _, tt := range tests {
 		m := New(styles(t))
 		m.SetSize(tt.width)
 		m.Mode = "NORMAL"
-		m.Path = long
+		m.Path = tt.path
 		m.Words = 7
 		m.Busy = tt.busy
 		m.Sync = tt.st
@@ -300,12 +310,20 @@ func TestViewUpdateMarkerDropsFirst(t *testing.T) {
 			{SyncText(icons.Default(), tt.st), tt.wantSync},
 		} {
 			if strings.Contains(got, c.text) != c.want {
-				t.Errorf("width %d, %s, busy %q: shows %q = %v, want %v: %q",
-					tt.width, tt.st.State, tt.busy, c.text, !c.want, c.want, got)
+				t.Errorf("width %d, %s, %s, busy %q: shows %q = %v, want %v: %q",
+					tt.width, tt.path, tt.st.State, tt.busy, c.text, !c.want, c.want, got)
 			}
 		}
 		if !strings.Contains(got, "NORMAL") {
 			t.Errorf("width %d: pill missing: %q", tt.width, got)
+		}
+		// With the marker shown, the path keeps at least 24 columns: its
+		// last 23 characters after the "…", or all of it.
+		if strings.Contains(got, "↑ v0.2.0") {
+			tail := tt.path[max(len(tt.path)-23, 0):]
+			if !strings.Contains(got, tail) {
+				t.Errorf("width %d: path cut below 24 columns for the marker: %q", tt.width, got)
+			}
 		}
 	}
 }
