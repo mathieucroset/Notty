@@ -42,8 +42,11 @@ func (m Model) View() string {
 
 func (m Model) headerLine() string {
 	label := "Find note"
-	if m.mode == FullText {
+	switch {
+	case m.mode == FullText:
 		label = "Search"
+	case m.pickTitle != "":
+		label = m.pickTitle
 	}
 	return " " + m.bgStyle(m.styles.DialogTitle, false).Render(label)
 }
@@ -64,7 +67,11 @@ func (m Model) statusLine() string {
 }
 
 func (m Model) footerLine() string {
-	return " " + m.bgStyle(m.styles.Muted, false).Render("enter open · esc close · ctrl+j/k move")
+	hint := "enter open · esc close · ctrl+j/k move"
+	if m.pickTitle != "" {
+		hint = "enter choose · esc cancel · ctrl+j/k move"
+	}
+	return " " + m.bgStyle(m.styles.Muted, false).Render(hint)
 }
 
 // paneWidths splits the body's content width cw between the list pane and

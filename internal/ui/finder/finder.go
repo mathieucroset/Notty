@@ -12,6 +12,8 @@ package finder
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -36,6 +38,10 @@ const (
 
 // CloseMsg asks the caller to close the finder overlay (esc).
 type CloseMsg struct{}
+
+// PickedMsg is enter in pick mode (see WithPick): the chosen note's path,
+// for the caller to use instead of opening it.
+type PickedMsg struct{ Path string }
 
 const (
 	// minBoxWidth and minBoxHeight are the smallest overlay box SetSize will
@@ -73,6 +79,9 @@ type Model struct {
 
 	// Fuzzy mode state.
 	fuzzy []search.FuzzyResult
+	// pickTitle is set in pick mode (WithPick): the header, and enter
+	// emits PickedMsg instead of opening the note.
+	pickTitle string
 
 	// Full-text mode state.
 	hits      []search.Hit
@@ -107,6 +116,24 @@ func New(mode Mode, notes []*index.Note, recents []string, styles theme.Styles, 
 		previewCache: newLRUCache(previewCacheCapacity),
 	}
 	if mode == Fuzzy {
+		m.recomputeFuzzy()
+	}
+	return m
+}
+
+// WithPick turns a fuzzy finder into a note picker titled title: enter
+// emits PickedMsg with the chosen path rather than opening it (esc still
+// emits CloseMsg), and the note at exclude ("" for none) is left out of
+// both the results and the recent notes.
+func (m Model) WithPick(title, exclude string) Model {
+	m.pickTitle = title
+	if exclude != "" {
+		m.notes = slices.DeleteFunc(slices.Clone(m.notes), func(n *index.Note) bool { return n.Path == exclude })
+		m.recents = slices.DeleteFunc(slices.Clone(m.recents), func(p string) bool { return p == exclude })
+		m.byPath = maps.Clone(m.byPath)
+		delete(m.byPath, exclude)
+	}
+	if m.mode == Fuzzy {
 		m.recomputeFuzzy()
 	}
 	return m
@@ -299,6 +326,9 @@ func (m Model) choose() tea.Cmd {
 		r, ok := m.currentFuzzy()
 		if !ok {
 			return nil
+		}
+		if m.pickTitle != "" {
+			return emit(PickedMsg{Path: r.Path})
 		}
 		return emit(msgs.OpenNoteMsg{Path: r.Path, Line: -1})
 	}
