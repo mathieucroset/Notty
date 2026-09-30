@@ -587,6 +587,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleWatchErr(msg)
 	case pathsGoneMsg:
 		return m, m.handlePathsGone(msg)
+	case goneCheckMsg:
+		return m, goneCmd(m.opts.Vault, msg.paths)
 	case savedMsg:
 		return m, m.handleSaved(msg)
 	case msgs.ImportImageMsg:

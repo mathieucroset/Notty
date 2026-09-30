@@ -412,7 +412,7 @@ func isMutation(msg tea.Msg) bool {
 	case dialog.ResultMsg, runPendingMsg, msgs.SaveRequestMsg,
 		msgs.TogglePinMsg, msgs.ToggleTaskMsg, msgs.ImportImageMsg, imageImportedMsg,
 		trash.RestoreMsg, history.RestoreVersionMsg,
-		msgs.OpenFileExternalMsg, restoreDeletedRemotelyMsg:
+		msgs.OpenFileExternalMsg, restoreDeletedRemotelyMsg, goneCheckMsg:
 		return true
 	}
 	return false

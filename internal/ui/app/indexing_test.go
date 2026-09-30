@@ -228,3 +228,23 @@ func TestRebuildDuringStartupKeepsStartupIndex(t *testing.T) {
 		t.Errorf("after a failed rebuild: index kept %v, indexing %v", m.ix == built.ix, m.indexing)
 	}
 }
+
+// TestRebuildDefersGoneNotesDuringMerge: notes missing from a rebuilt index
+// are forgotten only once a sync merge stops rewriting the vault.
+func TestRebuildDefersGoneNotesDuringMerge(t *testing.T) {
+	opts := testOptions(t)
+	opts.Pins = &meta.State{Pins: []string{"ideas.md"}}
+	m := start(t, opts, 120, 30)
+	if err := os.Remove(filepath.Join(opts.Vault.Root, "ideas.md")); err != nil {
+		t.Fatal(err)
+	}
+	run(t, m, hostMsg{msg: lockMutationsMsg{}})
+	run(t, m, m.rebuildIndex()())
+	if !reflect.DeepEqual(opts.Pins.Pins, []string{"ideas.md"}) {
+		t.Fatalf("pins changed during the merge: %v", opts.Pins.Pins)
+	}
+	run(t, m, hostMsg{msg: unlockMutationsMsg{}})
+	if len(opts.Pins.Pins) != 0 {
+		t.Errorf("pins = %v after the merge, want the deleted note's pin gone", opts.Pins.Pins)
+	}
+}

@@ -32,6 +32,10 @@ func buildIndexCmd(v *vault.Vault, gen int) tea.Cmd {
 	}
 }
 
+// goneCheckMsg asks to forget the listed notes that no longer exist; it
+// waits while a sync merge rewrites the vault (see isMutation).
+type goneCheckMsg struct{ paths []string }
+
 // rebuildIndex indexes the whole vault again, after the watcher lost
 // events. The current index serves until the new one lands; the changes
 // seen meanwhile are replayed on it. While a build (the startup one or a
@@ -86,7 +90,7 @@ func (m *Model) installIndex(msg indexBuiltMsg) tea.Cmd {
 	replay := reindexCmd(m.opts.Vault, m.ix, m.pendingIndex)
 	m.pendingIndex = nil
 	if msg.gen > 0 {
-		return tea.Batch(replay, goneCmd(m.opts.Vault, droppedNotes(old, m.ix)))
+		return tea.Batch(replay, emit(goneCheckMsg{paths: droppedNotes(old, m.ix)}))
 	}
 	problems := m.ix.Problems()
 	switch len(problems) {
