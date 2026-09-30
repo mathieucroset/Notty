@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,6 +21,9 @@ func TestThemeCommand(t *testing.T) {
 		wantTpl    string // expected template content, "" = not checked
 		wantNoTpl  bool   // the template must not exist afterwards
 		wantStdout []string
+		// wantPaths are paths below the config dir that the printed
+		// entries must hold, as quoted TOML strings.
+		wantPaths  []string
 		wantStderr []string
 	}{
 		{
@@ -29,9 +34,9 @@ func TestThemeCommand(t *testing.T) {
 			wantStdout: []string{
 				"[templates.notty]", "Noctalia 5", "[theme.templates.user.notty]",
 				"input_path", "output_path",
-				"{dir}/matugen-template.toml", "{dir}/themes/matugen.toml",
 				`theme = "matugen"`, "Wrote",
 			},
+			wantPaths: []string{"matugen-template.toml", "themes/matugen.toml"},
 		},
 		{
 			name: "leaves an existing template alone",
@@ -83,6 +88,9 @@ func TestThemeCommand(t *testing.T) {
 			name: "read-only config dir",
 			args: []string{"theme", "matugen"},
 			setup: func(t *testing.T, f *fixture) string {
+				if runtime.GOOS == "windows" {
+					t.Skip("Windows ignores directory permission bits: chmod cannot make a directory read-only")
+				}
 				if os.Geteuid() == 0 {
 					t.Skip("root ignores directory permissions")
 				}
@@ -104,7 +112,7 @@ func TestThemeCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// A home outside the temp dirs, so paths are printed in full.
-			t.Setenv("HOME", t.TempDir())
+			setHome(t, t.TempDir())
 			f := newFixture(t)
 			if tt.setup != nil {
 				f.configPath = tt.setup(t, f)
@@ -126,9 +134,14 @@ func TestThemeCommand(t *testing.T) {
 				}
 			}
 			for _, want := range tt.wantStdout {
-				want = strings.ReplaceAll(want, "{dir}", filepath.ToSlash(dir))
 				if !strings.Contains(f.stdout.String(), want) {
 					t.Errorf("stdout %q lacks %q", f.stdout.String(), want)
+				}
+			}
+			for _, p := range tt.wantPaths {
+				want := strconv.Quote(filepath.Join(dir, filepath.FromSlash(p)))
+				if !strings.Contains(f.stdout.String(), want) {
+					t.Errorf("stdout %q lacks %s", f.stdout.String(), want)
 				}
 			}
 			for _, want := range tt.wantStderr {
@@ -147,7 +160,7 @@ func TestThemeCommand(t *testing.T) {
 
 func TestTildePath(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	tests := []struct {
 		name, path, want string
 	}{

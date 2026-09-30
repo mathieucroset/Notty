@@ -31,6 +31,14 @@ type fixture struct {
 	detectedWith []string
 }
 
+// setHome makes dir the user's home directory for os.UserHomeDir, which
+// reads $HOME on Unix and %USERPROFILE% on Windows.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	dir := t.TempDir()
@@ -285,7 +293,7 @@ func TestUserThemeAtStartup(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// A home outside the temp dirs, so paths are printed in full.
-			t.Setenv("HOME", t.TempDir())
+			setHome(t, t.TempDir())
 			f := newFixture(t)
 			if !tt.wizard {
 				f.makeRepo(t)
