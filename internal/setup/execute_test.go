@@ -38,7 +38,12 @@ func newRemote(t *testing.T, branch string, files map[string]string) string {
 	for p, c := range files {
 		gittest.Write(t, seed, p, c)
 	}
-	gittest.CommitAll(t, seed, "Seed · seed")
+	// Plain git add, not AddAll: the remote may hold files Notty itself
+	// never commits (another tool's .notty/recovery, say).
+	gittest.Git(t, seed.Dir, "add", "-A")
+	if ok, err := seed.Commit("Seed · seed"); err != nil || !ok {
+		t.Fatalf("seed commit = %v, %v", ok, err)
+	}
 	if err := seed.RemoteAdd(remote); err != nil {
 		t.Fatal(err)
 	}

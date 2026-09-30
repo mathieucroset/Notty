@@ -839,3 +839,55 @@ func sortChanges(c []gitsync.Change) {
 		return 0
 	})
 }
+
+// TestAddAllSkipsNottyFiles: Notty's own working files stay out of commits
+// even when the vault's .gitignore (pulled from another machine, say) does
+// not list them.
+func TestAddAllSkipsNottyFiles(t *testing.T) {
+	tests := []struct {
+		path    string
+		tracked bool
+	}{
+		{"a.md", true},
+		{".notty/settings.toml", true},
+		{"Work/b.md", true},
+		{".notty/.watch-barrier-3.notty-tmp", false},
+		{"Work/b.md.notty-tmp", false},
+		{"c.md.notty-tmp", false},
+		{".notty/lock", false},
+		{".notty/recovery/Work/b.md", false},
+	}
+	env := gittest.New(t)
+	r := env.Laptop
+	gittest.Write(t, r, ".gitignore", ".DS_Store\n") // lacks Notty's entries
+	for _, tc := range tests {
+		gittest.Write(t, r, tc.path, "x\n")
+	}
+	if err := r.AddAll(); err != nil {
+		t.Fatalf("AddAll: %v", err)
+	}
+	if ok, err := r.Commit("Commit · test"); err != nil || !ok {
+		t.Fatalf("Commit = %v, %v", ok, err)
+	}
+	files := strings.Split(gittest.Git(t, r.Dir, "ls-files"), "\n")
+	for _, tc := range tests {
+		if got := slices.Contains(files, tc.path); got != tc.tracked {
+			t.Errorf("%s tracked = %v, want %v (ls-files %v)", tc.path, got, tc.tracked, files)
+		}
+	}
+	// The exclusions are written once.
+	if err := r.AddAll(); err != nil {
+		t.Fatalf("AddAll: %v", err)
+	}
+	p, err := r.GitPath("info/exclude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(data), "*.notty-tmp"); n != 1 {
+		t.Errorf("info/exclude lists *.notty-tmp %d times:\n%s", n, data)
+	}
+}

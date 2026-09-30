@@ -238,12 +238,66 @@ func (r *Repo) RenameBranch(name string) error {
 	return nil
 }
 
-// AddAll stages every change (`git add -A`). It refuses while a merge is in
-// progress (spec §7: only the resolver stages files then); the error wraps
-// ErrConflict.
+// nottyExcludes are Notty's own working files, which never belong in a
+// commit: save temp files and the watcher's barrier sentinels (*.notty-tmp),
+// the running-instance lock and the crash-recovery buffers. The vault's
+// .gitignore lists them too (vault.GitignoreEntries), but that file is
+// shared and a pulled version may drop them.
+var nottyExcludes = []string{"*.notty-tmp", ".notty/lock", ".notty/recovery/"}
+
+// excludeHeader introduces the lines ensureExcludes adds.
+const excludeHeader = "# Notty's working files, never committed (added by Notty)"
+
+// ensureExcludes adds the missing nottyExcludes to .git/info/exclude, which
+// git reads besides .gitignore and which is never shared.
+func (r *Repo) ensureExcludes() error {
+	p, err := r.GitPath("info/exclude")
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(p)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("gitsync: read info/exclude: %w", err)
+	}
+	have := map[string]bool{}
+	for line := range strings.Lines(string(data)) {
+		have[strings.TrimSpace(line)] = true
+	}
+	var add strings.Builder
+	for _, e := range nottyExcludes {
+		if !have[e] {
+			add.WriteString(e + "\n")
+		}
+	}
+	if add.Len() == 0 {
+		return nil
+	}
+	content := string(data)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	if !have[excludeHeader] {
+		content += excludeHeader + "\n"
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return fmt.Errorf("gitsync: write info/exclude: %w", err)
+	}
+	if err := os.WriteFile(p, []byte(content+add.String()), 0o644); err != nil {
+		return fmt.Errorf("gitsync: write info/exclude: %w", err)
+	}
+	return nil
+}
+
+// AddAll stages every change (`git add -A`) except Notty's own working
+// files (see nottyExcludes), which it keeps listed in .git/info/exclude. It
+// refuses while a merge is in progress (spec §7: only the resolver stages
+// files then); the error wraps ErrConflict.
 func (r *Repo) AddAll() error {
 	if r.MergeInProgress() {
 		return fmt.Errorf("gitsync: add all refused during a merge: %w", ErrConflict)
+	}
+	if err := r.ensureExcludes(); err != nil {
+		return err
 	}
 	if _, err := r.git("add", "-A"); err != nil {
 		return fmt.Errorf("gitsync: add all: %w", err)
