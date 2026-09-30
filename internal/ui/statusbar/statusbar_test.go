@@ -212,7 +212,7 @@ func TestViewUpdateMarker(t *testing.T) {
 	}{
 		{"unicode", icons.Default(), "", "↑ v0.2.0   ✓ synced   F1 help"},
 		{"ascii", ascii, "", "^ v0.2.0   + synced   F1 help"},
-		{"nerd", nerd, "", " v0.2.0   " + nerd.Synced + " synced   F1 help"},
+		{"nerd", nerd, "", nerd.Update + " v0.2.0   " + nerd.Synced + " synced   F1 help"},
 		{"before busy and sync", icons.Default(), "indexing…", "↑ v0.2.0   indexing…   ✓ synced   F1 help"},
 	}
 	for _, tt := range tests {
