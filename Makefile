@@ -1,9 +1,16 @@
 export PATH := $(HOME)/.local/go/bin:$(HOME)/go/bin:$(PATH)
 
-.PHONY: build test lint run
+PREFIX ?= $(HOME)/.local
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
+
+.PHONY: build install test lint run
 
 build:
-	CGO_ENABLED=0 go build -o notty ./cmd/notty
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o notty ./cmd/notty
+
+install: build
+	install -Dm755 notty $(PREFIX)/bin/notty
 
 test:
 	go test -race ./...

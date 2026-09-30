@@ -32,6 +32,10 @@ Bubble Tea.
 go install github.com/mathieucroset/notty/cmd/notty@latest
 ```
 
+**From source:** clone the repo, then `make install` builds a static
+binary and installs it to `~/.local/bin/notty` (set `PREFIX` to install
+elsewhere, e.g. `make install PREFIX=/usr/local`).
+
 **GitHub Releases:** download a prebuilt binary for Linux, macOS, or
 Windows (amd64/arm64) from the
 [releases page](https://github.com/mathieucroset/notty/releases).
