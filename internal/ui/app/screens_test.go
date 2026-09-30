@@ -112,6 +112,14 @@ var screenCases = []screenCase{
 		m := openShowcase(t, w, h)
 		run(t, m, keyMsg("ctrl+f"))
 		typeText(t, m, "sprint")
+		// The search runs on the finder's 50ms debounce tick. On a busy
+		// CI runner the tick can miss run's tick window and be dropped
+		// like a long timer, leaving "searching…" for good: retype the
+		// last letter, which schedules a new debounce, until one fires.
+		for i := 0; i < 5 && strings.Contains(screen(m), "searching…"); i++ {
+			run(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+			typeText(t, m, "t")
+		}
 		waitFor(t, m, func() bool {
 			return strings.Contains(screen(m), "demo") && !strings.Contains(screen(m), "searching…")
 		})
