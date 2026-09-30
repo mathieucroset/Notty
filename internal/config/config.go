@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,7 +15,7 @@ import (
 
 // Config holds notty's runtime configuration (spec §10), layered from
 // built-in defaults, the vault's .notty/settings.toml, and the local
-// config file.
+// config file. Editor is local only (see Load).
 type Config struct {
 	Vault       string
 	Theme       string
@@ -210,13 +211,24 @@ func loadOverlay(path string) (overlay, error) {
 // vault's .notty/settings.toml (only if vaultRoot is non-empty), and the
 // local config file at localPath. Missing files are fine; only keys
 // actually present in a file override the layer beneath it.
+//
+// The editor key is taken from the local file only: the vault's settings
+// travel through git, and whoever can push to a shared vault must not
+// choose the command Notty runs. An editor set there is ignored and
+// logged.
 func Load(localPath string, vaultRoot string) (Config, error) {
 	c := Default()
 
 	if vaultRoot != "" {
-		vaultOv, err := loadOverlay(filepath.Join(vaultRoot, ".notty", "settings.toml"))
+		settings := filepath.Join(vaultRoot, ".notty", "settings.toml")
+		vaultOv, err := loadOverlay(settings)
 		if err != nil {
 			return Config{}, err
+		}
+		if vaultOv.Editor != nil {
+			slog.Warn("config: ignoring the editor set in the vault settings; set it in the local config file",
+				"file", settings)
+			vaultOv.Editor = nil
 		}
 		applyOverlay(&c, vaultOv)
 	}

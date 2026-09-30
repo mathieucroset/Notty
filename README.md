@@ -146,6 +146,10 @@ Notty's local config file is optional — every setting has a default:
 
 Settings in the vault's own `.notty/settings.toml` are applied first, so
 they follow you between machines; the local config file overrides them.
+The one exception is `editor`: it names a command Notty runs, and the
+vault's settings travel through git, so anyone who can push to a shared
+vault could pick it. Notty only reads `editor` from the local config file
+and ignores it (with a line in the log) in `.notty/settings.toml`.
 Here's the full set of keys, with their defaults:
 
 ```toml
@@ -153,7 +157,7 @@ vault = "~/Notes"            # where your notes live
 theme = "catppuccin-mocha"   # a built-in or your own theme (see Themes below); also settable live from the command palette
 vim = true                   # vim-style modal editing; false for a plain typing mode
 line_numbers = false         # show line numbers in the editor (relative, when on)
-editor = ""                  # command for ctrl+e; falls back to $VISUAL, then $EDITOR, then nano (notepad on Windows); quote a path with spaces: '"C:\Program Files\Notepad++\notepad++.exe" -multiInst'
+editor = ""                  # command for ctrl+e (local config only); falls back to $VISUAL, then $EDITOR, then nano (notepad on Windows); quote a path with spaces: '"C:\Program Files\Notepad++\notepad++.exe" -multiInst'
 autosave_ms = 1000           # idle delay before autosave, in milliseconds
 icons = "unicode"            # nerd | unicode | ascii — see below
 update_check = true          # tell you when a newer release is out — see below

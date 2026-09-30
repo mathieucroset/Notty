@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -91,6 +92,56 @@ func TestLoadUpdateCheck(t *testing.T) {
 			}
 			if c.UpdateCheck != tt.want {
 				t.Errorf("UpdateCheck = %v, want %v", c.UpdateCheck, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadEditorIsLocalOnly(t *testing.T) {
+	tests := []struct {
+		name    string
+		local   string
+		vault   string
+		want    string
+		wantLog bool
+	}{
+		{name: "default", want: ""},
+		{name: "set locally", local: `editor = "vim"`, want: "vim"},
+		{name: "set in the vault", vault: `editor = "evil --payload"`, want: "", wantLog: true},
+		{name: "set in both", local: `editor = "vim"`, vault: `editor = "evil"`, want: "vim", wantLog: true},
+		{name: "vault sets other keys", local: `editor = "vim"`, vault: `theme = "dracula"`, want: "vim"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs strings.Builder
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			dir := t.TempDir()
+			local := filepath.Join(dir, "config.toml")
+			vaultRoot := filepath.Join(dir, "vault")
+			if tt.local != "" {
+				writeFile(t, local, tt.local+"\n")
+			}
+			if tt.vault != "" {
+				writeFile(t, filepath.Join(vaultRoot, ".notty", "settings.toml"), tt.vault+"\n")
+			}
+			c, err := Load(local, vaultRoot)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if c.Editor != tt.want {
+				t.Errorf("Editor = %q, want %q", c.Editor, tt.want)
+			}
+			got := 0
+			for line := range strings.Lines(logs.String()) {
+				if strings.Contains(line, "editor") {
+					got++
+				}
+			}
+			if (got > 0) != tt.wantLog || got > 1 {
+				t.Errorf("log = %q, want one line about the ignored editor: %v", logs.String(), tt.wantLog)
 			}
 		})
 	}
