@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mathieucroset/notty/internal/gitsync"
 	"github.com/mathieucroset/notty/internal/gitsync/gittest"
@@ -260,4 +261,138 @@ func TestSyncRefuses(t *testing.T) {
 			t.Errorf("exit code %d, want 2", code)
 		}
 	})
+}
+
+// readLog returns the fixture's log file, written by run's logging.
+func readLog(t *testing.T, f *fixture) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(f.dir, "state", "notty.log"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// assertSilent fails unless run wrote nothing to stdout and stderr.
+func assertSilent(t *testing.T, f *fixture) {
+	t.Helper()
+	if f.stdout.Len() != 0 || f.stderr.Len() != 0 {
+		t.Errorf("stdout %q, stderr %q; want both empty", f.stdout.String(), f.stderr.String())
+	}
+}
+
+// notty sync --quiet (notty -q's background child) writes nothing to stdout
+// or stderr: its messages go to the log, with the usual exit codes.
+func TestSyncQuiet(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func(t *testing.T, f *fixture, g *gittest.Env)
+		wantCode int
+		wantLog  []string // substrings of the log
+	}{
+		{"synced", func(t *testing.T, _ *fixture, g *gittest.Env) {
+			gittest.Write(t, g.Laptop, "Ideas.md", "# Ideas\n")
+		}, 0, nil},
+		{"offline", func(t *testing.T, _ *fixture, g *gittest.Env) {
+			gittest.Write(t, g.Laptop, "Ideas.md", "# Ideas\n")
+			g.MakeRemoteUnreachable(t)
+		}, 1, []string{"level=ERROR", "offline"}},
+		{"conflict", func(t *testing.T, _ *fixture, g *gittest.Env) {
+			conflictingChange(t, g)
+		}, 2, []string{"level=WARN", "merge conflict"}},
+		{"refused", func(_ *testing.T, f *fixture, _ *gittest.Env) {
+			f.gitFound = false
+		}, 1, []string{"level=ERROR", "git is not installed"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, g := syncFixture(t)
+			tt.setup(t, f, g)
+			if code := run([]string{"sync", "--quiet"}, f.env()); code != tt.wantCode {
+				t.Fatalf("exit code %d, want %d; log %q", code, tt.wantCode, readLog(t, f))
+			}
+			assertSilent(t, f)
+			log := readLog(t, f)
+			for _, want := range tt.wantLog {
+				if !strings.Contains(log, want) {
+					t.Errorf("log = %q, want %q in it", log, want)
+				}
+			}
+			if tt.wantCode == 0 {
+				if got := remoteSubject(t, g); !strings.Contains(got, "Ideas.md") {
+					t.Errorf("remote head subject = %q, want the commit of Ideas.md", got)
+				}
+			}
+		})
+	}
+}
+
+// --wait waits for a lock held by another process.
+func TestSyncWaitsForLock(t *testing.T) {
+	f, g := syncFixture(t)
+	lock, err := vault.AcquireLock(f.vaultDir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan struct{})
+	go func() {
+		defer close(released)
+		time.Sleep(300 * time.Millisecond)
+		_ = lock.Release()
+	}()
+	gittest.Write(t, g.Laptop, "Ideas.md", "# Ideas\n")
+	code := run([]string{"sync", "--wait", "10s"}, f.env())
+	<-released
+	if code != 0 {
+		t.Fatalf("exit code %d, stderr %q", code, f.stderr.String())
+	}
+	if got := remoteSubject(t, g); !strings.Contains(got, "Ideas.md") {
+		t.Errorf("remote head subject = %q, want the commit of Ideas.md", got)
+	}
+	assertUnlocked(t, f.vaultDir)
+}
+
+// Running out of --wait is the normal outcome while the TUI is open: an
+// error on stderr, but only an Info line in the log when quiet.
+func TestSyncWaitTimeout(t *testing.T) {
+	for _, quiet := range []bool{false, true} {
+		t.Run("quiet="+strconv.FormatBool(quiet), func(t *testing.T) {
+			f, _ := syncFixture(t)
+			lock, err := vault.AcquireLock(f.vaultDir, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = lock.Release() }()
+			args := []string{"sync", "--wait", "300ms"}
+			if quiet {
+				args = append(args, "--quiet")
+			}
+			start := time.Now()
+			if code := run(args, f.env()); code != 1 {
+				t.Fatalf("exit code %d, want 1", code)
+			}
+			if d := time.Since(start); d < 300*time.Millisecond {
+				t.Errorf("gave up after %v, want at least the 300ms wait", d)
+			}
+			const want = "vault is open in Notty"
+			if !quiet {
+				if !strings.Contains(f.stderr.String(), want) {
+					t.Errorf("stderr = %q, want %q", f.stderr.String(), want)
+				}
+				return
+			}
+			assertSilent(t, f)
+			log := readLog(t, f)
+			if !strings.Contains(log, want) || !strings.Contains(log, "level=INFO") || strings.Contains(log, "level=ERROR") {
+				t.Errorf("log = %q, want %q at Info only", log, want)
+			}
+		})
+	}
+}
+
+func TestSyncBadWait(t *testing.T) {
+	f, _ := syncFixture(t)
+	if code := run([]string{"sync", "--wait", "soon"}, f.env()); code != 2 {
+		t.Errorf("exit code %d, want 2", code)
+	}
 }

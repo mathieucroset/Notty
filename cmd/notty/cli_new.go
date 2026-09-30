@@ -10,7 +10,8 @@ const usage = `usage:
   notty [--vault <path>]                          open the TUI
   notty [--vault <path>] new "<title>" [--folder <folder>]
                                                   create a note and open it
-  notty [--vault <path>] sync                     run one sync cycle and exit
+  notty [--vault <path>] sync [--quiet] [--wait <duration>]
+                                                  run one sync cycle and exit
   notty theme matugen                             set up a matugen-generated theme
   notty --version                                 print the version
 `

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mathieucroset/notty/internal/config"
@@ -49,6 +51,8 @@ func (headlessHost) ExternalEditing() bool           { return false }
 // remote), 1 on error, and 2 on conflict.
 func runSync(args []string, vaultFlag string, e env) int {
 	flags, vaultPath := subcommandFlags("sync", vaultFlag, e)
+	quiet := flags.Bool("quiet", false, "print nothing; messages go to the log")
+	wait := flags.Duration("wait", 0, "how long to wait for a vault lock held by another process")
 	pos, err := parseInterspersed(flags, args)
 	if err != nil {
 		return flagExit(err)
@@ -57,8 +61,19 @@ func runSync(args []string, vaultFlag string, e env) int {
 		_, _ = fmt.Fprintf(e.stderr, "notty sync: unexpected argument %q\n%s", pos[0], usage)
 		return 2
 	}
+	// Quiet (notty -q's background child, amendment B2): nothing on
+	// stdout, and every stderr message goes to the log instead.
+	stdout, stderr := e.stdout, e.stderr
+	if *quiet {
+		stdout, stderr = io.Discard, logWriter{}
+	}
 	fail := func(format string, a ...any) int {
-		_, _ = fmt.Fprintf(e.stderr, "notty: "+format+"\n", a...)
+		msg := fmt.Sprintf(format, a...)
+		if *quiet {
+			slog.Error("sync: " + msg)
+		} else {
+			_, _ = fmt.Fprintf(stderr, "notty: %s\n", msg)
+		}
 		return exitError
 	}
 
@@ -81,14 +96,29 @@ func runSync(args []string, vaultFlag string, e env) int {
 		return fail("%v", err)
 	}
 
-	// Spec §9: the same lock as the TUI, for the whole run, without waiting.
+	// Spec §9: the same lock as the TUI, for the whole run, waiting up to
+	// --wait for another process to release it.
 	lock, err := vault.AcquireLock(root, 0)
+	var held vault.ErrLocked
+	if errors.As(err, &held) && *wait > 0 {
+		if *quiet {
+			slog.Info("sync: waiting for vault lock", "wait", *wait)
+		} else {
+			_, _ = fmt.Fprintln(stderr, "notty: waiting for vault lock…")
+		}
+		lock, err = vault.AcquireLock(root, *wait)
+	}
 	if err != nil {
-		var held vault.ErrLocked
 		if errors.As(err, &held) {
 			who := "vault is open in Notty"
 			if held.Pid > 0 {
 				who = fmt.Sprintf("vault is open in Notty (pid %d)", held.Pid)
+			}
+			if *quiet {
+				// The normal outcome while the TUI is open, which syncs
+				// the change itself.
+				slog.Info("sync: " + who + " — it syncs automatically")
+				return exitError
 			}
 			return fail("%s — it syncs automatically", who)
 		}
@@ -110,7 +140,26 @@ func runSync(args []string, vaultFlag string, e env) int {
 	// §7): with conflicts left it enters Conflict, and notty sync exits 2
 	// without committing; with every file resolved it commits the merge
 	// and the cycle goes on.
-	return syncOnce(repo, cfg, e.stdout, e.stderr)
+	return syncOnce(repo, cfg, stdout, stderr)
+}
+
+// logWriter is notty sync's stderr in quiet mode: it logs each line
+// written, without the "notty: " prefix, at Warn for warnings (lines
+// starting with "⚠") and at Error otherwise.
+type logWriter struct{}
+
+func (logWriter) Write(p []byte) (int, error) {
+	for _, line := range strings.Split(string(p), "\n") {
+		line = strings.TrimPrefix(strings.TrimSpace(line), "notty: ")
+		switch {
+		case line == "":
+		case strings.HasPrefix(line, "⚠"):
+			slog.Warn("sync: " + line)
+		default:
+			slog.Error("sync: " + line)
+		}
+	}
+	return len(p), nil
 }
 
 // vaultRoot loads the local config and returns the absolute vault root:
