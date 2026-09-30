@@ -163,6 +163,7 @@ type Watcher struct {
 	lastRestart    time.Time            // when a stopped watch was last restarted
 	barriers       []barrier            // barrier requests awaiting their sentinel's event
 	barrierSeq     uint64               // number of the latest barrier
+	sentinels      []uint64             // numbers of the sentinels on disk
 	trackGaps      bool                 // list the directories with a gap (kqueue), see gaps.go
 	gaps           map[string]gap       // directories with a gap -> their listing past the blocker
 }
@@ -281,6 +282,7 @@ func (w *Watcher) NoteSelfWrite(rel string) {
 // Before pausing, the outermost Pause waits (up to 200ms) until the event loop
 // has handled every change made before the call, by writing a sentinel file
 // under .notty/ (creating that directory if needed) and waiting for its event.
+// The file ends in .notty-tmp and stays until the next barrier or Close.
 // Changes made before Pause are therefore still delivered. New directories
 // keep being watched while paused.
 func (w *Watcher) Pause() {
@@ -349,6 +351,7 @@ func (w *Watcher) run() {
 	defer w.wg.Done()
 	defer close(w.errors)
 	defer close(w.events)
+	defer w.removeSentinels()
 	defer w.releaseBarriers(math.MaxUint64)
 
 	timer := time.NewTimer(debounce)
@@ -463,6 +466,13 @@ func (w *Watcher) run() {
 // creation event (or a later sentinel's) comes back through the loop, which
 // proves every kernel event queued before it has been handled. If the
 // sentinel cannot be created, req is closed at once.
+//
+// The earlier sentinels are removed first, now rather than as soon as
+// their event came back: the removal is a change of .notty, and made
+// before changes the caller then makes elsewhere, it would be handled
+// ahead of them. fsnotify's kqueue backend only lists .notty once it
+// handles that change, and would report the new sentinel, created in the
+// meantime, before the changes made before this barrier.
 func (w *Watcher) startBarrier(req chan struct{}) {
 	// Mkdir, not MkdirAll: never recreate a vault root that has been removed.
 	if err := os.Mkdir(w.abs(nottyDir), 0o755); w.rootGone || (err != nil && !errors.Is(err, fs.ErrExist)) {
@@ -479,6 +489,7 @@ func (w *Watcher) startBarrier(req chan struct{}) {
 			return
 		}
 	}
+	w.removeSentinels()
 	w.barrierSeq++
 	seq := w.barrierSeq
 	path := w.abs(barrierRel(seq))
@@ -494,12 +505,21 @@ func (w *Watcher) startBarrier(req chan struct{}) {
 		return
 	}
 	_ = f.Close()
+	w.sentinels = append(w.sentinels, seq)
 	w.barriers = append(w.barriers, barrier{seq: seq, req: req})
 }
 
+// removeSentinels removes the sentinel files created so far.
+func (w *Watcher) removeSentinels() {
+	for _, seq := range w.sentinels {
+		_ = os.Remove(w.abs(barrierRel(seq)))
+	}
+	w.sentinels = w.sentinels[:0]
+}
+
 // releaseBarriers completes the waiting barriers numbered up to seq, whose
-// sentinels were created before (or as) the one just seen, and removes
-// their sentinels.
+// sentinels were created before (or as) the one just seen. The sentinels
+// stay until the next barrier or Close (see startBarrier).
 func (w *Watcher) releaseBarriers(seq uint64) {
 	kept := w.barriers[:0]
 	for _, b := range w.barriers {
@@ -507,7 +527,6 @@ func (w *Watcher) releaseBarriers(seq uint64) {
 			kept = append(kept, b)
 			continue
 		}
-		_ = os.Remove(w.abs(barrierRel(b.seq)))
 		close(b.req)
 	}
 	clear(w.barriers[len(kept):])

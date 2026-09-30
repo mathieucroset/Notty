@@ -600,16 +600,21 @@ func TestBarrierCompletesThroughSentinelEvent(t *testing.T) {
 	}
 }
 
-func TestPauseLeavesNoBarrierFileBehind(t *testing.T) {
+// TestBarrierFiles: each barrier removes the sentinels of the earlier ones
+// just before it creates its own (removing them as soon as they are seen
+// would queue a change of .notty ahead of the changes made before the next
+// barrier, and with kqueue, which only lists a directory once it handles
+// its change, the next sentinel would be reported too early); Close removes
+// the last one.
+func TestBarrierFiles(t *testing.T) {
 	tests := []struct {
 		name    string
 		backend func(backend) backend
 	}{
 		{"system backend", nil},
 		// fsnotify's kqueue backend reports a path as created only once
-		// while it still tracks it: after Pause's barrier file is removed,
-		// a new file of the same name created before the removal was
-		// processed is never reported.
+		// while it still tracks it: a sentinel reusing a name would never
+		// be reported.
 		{"backend reporting each name once", newOnceBackend},
 	}
 	for _, tc := range tests {
@@ -620,11 +625,28 @@ func TestPauseLeavesNoBarrierFileBehind(t *testing.T) {
 			root := t.TempDir()
 			w := newTestWatcher(t, root)
 
-			w.Pause()
-			w.Resume()
+			for round := range 3 {
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					w.Pause()
+					w.Resume()
+				}()
+				select {
+				case <-done:
+				case <-time.After(waitTimeout):
+					t.Fatal("Pause and Resume never returned")
+				}
+				if left := barrierFiles(t, root); len(left) != 1 {
+					t.Fatalf("round %d: barrier files = %v, want only the latest", round, left)
+				}
+			}
 			expectNoEvent(t, w)
+			if err := w.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
 			if left := barrierFiles(t, root); len(left) > 0 {
-				t.Fatalf("barrier files still present: %v", left)
+				t.Fatalf("barrier files left after Close: %v", left)
 			}
 		})
 	}
