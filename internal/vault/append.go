@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -209,7 +210,8 @@ func (v *Vault) AppendToNote(rel, text string) error {
 
 // appendText appends text, which ends with "\n", to the regular file at the
 // clean path rel in a single write, preceded by "\n" when the file is
-// non-empty and does not end with one; then it syncs the file.
+// non-empty and does not end with one, with CRLF line endings when the file
+// has any; then it syncs the file.
 func (v *Vault) appendText(rel, text string) error {
 	abs := v.Abs(rel)
 	// Appends in this process go one at a time, so two of them cannot both
@@ -238,14 +240,22 @@ func (v *Vault) appendText(rel, text string) error {
 		_ = f.Close()
 		return fmt.Errorf("vault: append to %q: file replaced: %w", rel, ErrInvalidPath)
 	}
+	// The text keeps the note's line endings: CRLF when the note has any,
+	// as a task toggle does.
+	text = strings.ReplaceAll(text, "\r\n", "\n")
 	if size := fi.Size(); size > 0 {
-		last := make([]byte, 1)
-		if _, err := f.ReadAt(last, size-1); err != nil && !errors.Is(err, io.EOF) {
+		content := make([]byte, size)
+		n, err := f.ReadAt(content, 0)
+		if err != nil && !errors.Is(err, io.EOF) {
 			_ = f.Close()
 			return fmt.Errorf("vault: append to %q: %w", rel, err)
 		}
-		if last[0] != '\n' {
+		content = content[:n]
+		if len(content) > 0 && content[len(content)-1] != '\n' {
 			text = "\n" + text
+		}
+		if bytes.Contains(content, []byte("\r\n")) {
+			text = strings.ReplaceAll(text, "\n", "\r\n")
 		}
 	}
 	if err := writeClose(f, text); err != nil {

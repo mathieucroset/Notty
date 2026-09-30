@@ -124,6 +124,7 @@ func TestAppendToInbox(t *testing.T) {
 		{"existing with newline", "", ptr("# Inbox\n\n- a\n"), "Inbox.md", "# Inbox\n\n- a\n- hi\n"},
 		{"existing without newline", "", ptr("# Inbox\n\n- a"), "Inbox.md", "# Inbox\n\n- a\n- hi\n"},
 		{"existing empty", "Work", ptr(""), "Work/Inbox.md", "- hi\n"},
+		{"existing with CRLF", "", ptr("# Inbox\r\n\r\n- a"), "Inbox.md", "# Inbox\r\n\r\n- a\r\n- hi\r\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -200,7 +201,11 @@ func TestAppendToNote(t *testing.T) {
 		{"empty note", "", "moved\n", "moved\n"},
 		{"several lines", "a\n", "b\nc\n", "a\nb\nc\n"},
 		{"text without final newline", "a\n", "b", "a\nb\n"},
-		{"CRLF note", "a\r\n", "b\n", "a\r\nb\n"},
+		{"CRLF note", "a\r\n", "b\n", "a\r\nb\r\n"},
+		{"CRLF note without trailing newline", "a\r\nb", "c\n", "a\r\nb\r\nc\r\n"},
+		{"CRLF note, several lines", "a\r\n", "b\nc\n", "a\r\nb\r\nc\r\n"},
+		{"CRLF note, CRLF text", "a\r\n", "b\r\n", "a\r\nb\r\n"},
+		{"LF note, CRLF text", "a\n", "b\r\nc\r\n", "a\nb\nc\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
