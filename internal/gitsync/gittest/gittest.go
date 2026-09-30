@@ -33,7 +33,11 @@ func Isolate(t testing.TB) {
 	}
 	home := t.TempDir()
 	cfg := filepath.Join(home, "gitconfig")
-	const global = "[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n[tag]\n\tgpgsign = false\n"
+	// Background gc and maintenance (after a push or fetch) could still be
+	// writing into a repository when t.TempDir removes it.
+	const global = "[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n[tag]\n\tgpgsign = false\n" +
+		"[gc]\n\tauto = 0\n\tautoDetach = false\n[maintenance]\n\tauto = false\n" +
+		"[receive]\n\tautogc = false\n[fetch]\n\twriteCommitGraph = false\n"
 	if err := os.WriteFile(cfg, []byte(global), 0o644); err != nil {
 		t.Fatalf("gittest: write global config: %v", err)
 	}
