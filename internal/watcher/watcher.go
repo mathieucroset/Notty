@@ -1,7 +1,8 @@
 // Package watcher notices files changed outside the app (edits made in
 // $EDITOR, files changed by hand or by git) so the UI can re-index and reload.
 //
-// It wraps fsnotify with a recursive directory watch, the vault ignore rules,
+// It wraps fsnotify (on Windows, one recursive ReadDirectoryChangesW watch,
+// see backend_windows.go) with a recursive directory watch, the vault ignore rules,
 // suppression of the app's own saves, a pause switch for working-tree-changing
 // git operations, and a 100ms debounce that batches bursts into one Event.
 package watcher
@@ -84,7 +85,7 @@ func (s fileStamp) matches(info os.FileInfo) bool {
 // it with Close.
 type Watcher struct {
 	root   string
-	fsw    *fsnotify.Watcher
+	fsw    backend
 	events chan Event
 	errors chan error
 	done   chan struct{}
@@ -134,9 +135,9 @@ func newWatcher(root string) (*Watcher, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("watcher: root %q is not a directory", abs)
 	}
-	fsw, err := fsnotify.NewWatcher()
+	fsw, err := newBackend(abs)
 	if err != nil {
-		return nil, fmt.Errorf("watcher: create fsnotify watcher: %w", err)
+		return nil, err
 	}
 	w := &Watcher{
 		root:       abs,
@@ -315,7 +316,7 @@ func (w *Watcher) run() {
 		case <-w.done:
 			return
 
-		case fe, ok := <-w.fsw.Events:
+		case fe, ok := <-w.fsw.events():
 			if !ok {
 				return
 			}
@@ -331,7 +332,7 @@ func (w *Watcher) run() {
 			lastChange = now
 			arm(now)
 
-		case err, ok := <-w.fsw.Errors:
+		case err, ok := <-w.fsw.errors():
 			if !ok {
 				return
 			}
