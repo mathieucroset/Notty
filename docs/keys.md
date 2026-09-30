@@ -17,6 +17,14 @@ A few notes on how to read it:
   mode is on (the default). "Editor · vim off" is the full non-vim keymap.
 - "Editor · read-only" applies to a conflicted note, whether vim is on or
   off.
+- `alt+m` (move the cursor's line, or every line the selection touches, to
+  the end of another note) and `alt+M` (`alt+shift+m`: move the open note to
+  a folder) work between commands: not in insert mode, nor after an
+  operator or a count. In a conflicted note they say why they can't. The
+  command palette has both too ("Move line to note…", "Move note to
+  folder…").
+- The move dialog (sidebar `m`, or `alt+M`) also takes a folder that does
+  not exist yet: Notty asks before creating it.
 
 ## Global
 
@@ -80,6 +88,8 @@ A few notes on how to read it:
 | `/ ? n N` | search forward / backward / next / previous |
 | `"+` | system clipboard register |
 | `space` | toggle task |
+| `alt+m` | move lines to note |
+| `alt+M` | move note to folder |
 | `tab` | focus sidebar |
 | `ctrl+w h/l` | focus sidebar / main pane |
 
@@ -104,6 +114,8 @@ A few notes on how to read it:
 | `c` | change selection |
 | `y` | yank selection |
 | `> <` | indent / outdent |
+| `alt+m` | move lines to note |
+| `alt+M` | move note to folder |
 | `esc` | normal mode |
 
 ## Editor · command
@@ -132,6 +144,8 @@ A few notes on how to read it:
 | `ctrl+z` | undo |
 | `ctrl+y` | redo |
 | `shift+arrows` | select text |
+| `alt+m` | move lines to note |
+| `alt+M` | move note to folder |
 | `esc` | focus sidebar |
 
 ## Editor · read-only

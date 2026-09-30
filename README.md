@@ -13,6 +13,9 @@ Bubble Tea.
   Sixel and iTerm2 support
 - Todo lists inside notes, with a global **Tasks** view grouped by due date
 - Fuzzy finder (`ctrl+p`) and full-text search (`ctrl+f`)
+- Quick capture from any shell (`notty -q "call the plumber"`), even while
+  Notty is open, and moving lines or whole notes around without leaving the
+  editor
 - Tags (`#like-this`), pins, trash, and per-note history (powered by git)
 - Automatic, invisible sync to a private GitHub repository, with an in-app
   conflict resolver for the rare cases that need one
@@ -123,9 +126,19 @@ The essentials:
 | `ctrl+e` | Open note in `$EDITOR` |
 | `ctrl+b` | Toggle sidebar |
 | `n` / `N` | New note / new folder (sidebar) |
+| `m` | Move the selected note or folder (sidebar); a folder that doesn't exist yet is created once you confirm |
+| `alt+m` | Move the cursor's line, or every line the selection touches, to the end of another note (editor) |
+| `alt+M` | Move the open note to a folder, new or existing (editor) |
 | `space` | Toggle a task |
 | `F1` | Help |
 | `ctrl+q` | Quit |
+
+`alt+m` opens the finder to pick the note the lines go to; they are
+appended at its end and removed from the note you are in. Undo (`u` in vim,
+`ctrl+z` with vim off) puts the lines back in that note only: the copy
+appended to the other note stays. `alt+m` and `alt+M` are also in the
+command palette ("Move line to note…", "Move note to folder…"), and are
+left to the text in insert mode.
 
 The vim editor supports a full set of motions, operators, text objects, and
 registers. For the complete, per-context reference (sidebar, editor in
@@ -327,11 +340,47 @@ dark schemes.
 notty                          Open the TUI on the configured vault
 notty new "<title>" [--folder Work]
                                 Create a note (optionally inside a folder) and open it
-notty sync                      Run one headless sync cycle and exit; nonzero on conflict or error
+notty -q <text…> [--folder Work]
+                                Add a line to Inbox.md (or Work/Inbox.md) and exit
+notty sync [--quiet] [--wait 60s]
+                                Run one headless sync cycle and exit; nonzero on conflict or error.
+                                --quiet prints nothing (messages go to the log); --wait waits that
+                                long for a vault lock held by another Notty
 notty theme matugen             Write the matugen template and print the matugen config for it
 notty --vault <path>            Override the configured vault path for this run
 notty --version                 Print the version and exit
 ```
+
+### Quick notes
+
+`notty -q` (long form `--quick`) captures a thought without opening the
+TUI:
+
+```sh
+notty -q "i should do this 'n that"     # → <vault>/Inbox.md
+notty -q fix the build --folder Work     # → <vault>/Work/Inbox.md
+notty -q -- -5 degrees tonight           # text starting with "-": put it after --
+```
+
+- The words are joined with spaces into one line, added as a list item at
+  the end of `Inbox.md`. The Inbox is created (with an `# Inbox` heading)
+  the first time; `--folder` picks a folder of the vault, created if needed,
+  and may come before or after the text.
+- The line starts with the name of the directory you ran it from, so you
+  know where the thought came from: in `~/code/notty`, `notty -q fix the
+  build` adds `- (notty) fix the build`. There is no prefix in your home
+  directory, at a filesystem root (`/`, `C:\`) or in the vault itself.
+- In a git vault (the usual setup), a background `notty sync` commits the
+  line and pushes it when a remote is set up; `notty -q` itself returns at
+  once. It works while Notty is open too: the
+  app sees the new line, shows it if the Inbox is open (unsaved edits there
+  are never overwritten: you get the usual "changed on disk" choice) and
+  syncs it. Running `notty` right after `notty -q` may wait a few seconds
+  for that background sync to release the vault.
+- If the Inbox has an unresolved sync conflict, `notty -q` refuses and asks
+  you to resolve it in Notty first.
+- The vault must be set up already (run `notty` once): `notty -q` never
+  starts the setup wizard.
 
 ## Vault layout and data safety
 
