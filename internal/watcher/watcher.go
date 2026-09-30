@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -85,6 +86,7 @@ func (s fileStamp) matches(info os.FileInfo) bool {
 type Watcher struct {
 	root   string
 	fsw    *fsnotify.Watcher
+	log    *slog.Logger
 	events chan Event
 	errors chan error
 	done   chan struct{}
@@ -100,6 +102,7 @@ type Watcher struct {
 
 	// Owned by the run goroutine.
 	dirs           map[string]bool      // watched directories, vault-relative ("." = root)
+	skipped        map[string]bool      // directories not watched for lack of permission, already logged
 	pending        map[string]time.Time // changed paths not yet debounced -> last change
 	ready          map[string]bool      // debounced paths awaiting delivery
 	urgent         []error              // errors delivered even when the Errors buffer is full
@@ -109,11 +112,13 @@ type Watcher struct {
 }
 
 // New starts watching root and every directory below it, except ignored ones.
-// Only a root that cannot be read or watched is an error; subdirectories that
-// cannot be (for example because of permissions) are skipped and reported on
-// Errors.
+// Only a root that cannot be read or watched is an error. Subdirectories the
+// user may not read are skipped and logged, once per directory: they were
+// locked on purpose, and reporting them would warn about them on every start.
+// Subdirectories that cannot be watched for other reasons (the inotify watch
+// limit) are skipped and reported on Errors.
 func New(root string) (*Watcher, error) {
-	w, err := newWatcher(root)
+	w, err := newWatcher(root, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -121,8 +126,12 @@ func New(root string) (*Watcher, error) {
 	return w, nil
 }
 
-// newWatcher sets up the watches without starting the event loop.
-func newWatcher(root string) (*Watcher, error) {
+// newWatcher sets up the watches without starting the event loop. A nil log
+// means slog's default logger.
+func newWatcher(root string, log *slog.Logger) (*Watcher, error) {
+	if log == nil {
+		log = slog.Default()
+	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("watcher: resolve root: %w", err)
@@ -141,12 +150,14 @@ func newWatcher(root string) (*Watcher, error) {
 	w := &Watcher{
 		root:       abs,
 		fsw:        fsw,
+		log:        log,
 		events:     make(chan Event),
 		errors:     make(chan error, errBuffer),
 		done:       make(chan struct{}),
 		ctl:        make(chan chan struct{}),
 		selfWrites: map[string]fileStamp{},
 		dirs:       map[string]bool{},
+		skipped:    map[string]bool{},
 		pending:    map[string]time.Time{},
 		ready:      map[string]bool{},
 	}
@@ -171,8 +182,9 @@ func (w *Watcher) start() {
 func (w *Watcher) Events() <-chan Event { return w.events }
 
 // Errors delivers non-fatal watcher errors: directories that cannot be read or
-// watched, and event queue overflows (after which a full re-index is
-// advisable). It is closed by Close.
+// watched (except for lack of permission, which is only logged), and event
+// queue overflows (after which a full re-index is advisable). It is closed by
+// Close.
 func (w *Watcher) Errors() <-chan error { return w.errors }
 
 // NoteSelfWrite records that the app has just written rel (call it right after
@@ -546,9 +558,10 @@ func (w *Watcher) isSelfWrite(rel string, now time.Time) bool {
 
 // addTree watches rel and every non-ignored directory below it. When found is
 // non-nil, it is called with every path discovered below rel. A directory that
-// cannot be read or watched (permissions, inotify watch limit) is skipped and
-// its error collected in errs; fatal is non-nil only when the vault root itself
-// cannot be walked or watched.
+// cannot be read or watched is skipped: for lack of permission it is logged
+// (see skip), otherwise (inotify watch limit) its error is collected in errs.
+// fatal is non-nil only when the vault root itself cannot be walked or
+// watched.
 func (w *Watcher) addTree(rel string, found func(string)) (errs []error, fatal error) {
 	fatal = filepath.WalkDir(w.abs(rel), func(p string, d fs.DirEntry, err error) error {
 		sub, ok := w.rel(p)
@@ -561,6 +574,8 @@ func (w *Watcher) addTree(rel string, found func(string)) (errs []error, fatal e
 				return fmt.Errorf("watcher: walk vault root: %w", err)
 			case errors.Is(err, fs.ErrNotExist):
 				// Vanished while walking.
+			case errors.Is(err, fs.ErrPermission):
+				w.skip(sub, err)
 			default:
 				errs = append(errs, fmt.Errorf("watcher: walk %s: %w", sub, err))
 			}
@@ -587,26 +602,45 @@ func (w *Watcher) addTree(rel string, found func(string)) (errs []error, fatal e
 				return fmt.Errorf("watcher: watch vault root: %w", err)
 			case errors.Is(err, fs.ErrNotExist):
 				// Vanished while walking.
+			case errors.Is(err, fs.ErrPermission):
+				w.skip(sub, err)
 			default:
 				errs = append(errs, fmt.Errorf("watcher: watch %s: %w", sub, err))
 			}
 			return filepath.SkipDir
 		}
 		w.dirs[sub] = true
+		delete(w.skipped, sub)
 		return nil
 	})
 	return errs, fatal
 }
 
-// unwatchTree drops the watches on rel and every directory below it. It must
-// run before a directory renamed within the vault is watched again under its
-// new name, because the kernel keeps the old watch on the moved directory.
+// skip logs that the directory rel is not watched because the user may not
+// read it, once until it is removed or becomes readable.
+func (w *Watcher) skip(rel string, err error) {
+	if w.skipped[rel] {
+		return
+	}
+	w.skipped[rel] = true
+	w.log.Warn("watcher: directory not readable, changes inside it are not noticed", "dir", rel, "err", err)
+}
+
+// unwatchTree drops the watches on rel and every directory below it, and
+// forgets the skipped directories there. It must run before a directory
+// renamed within the vault is watched again under its new name, because the
+// kernel keeps the old watch on the moved directory.
 func (w *Watcher) unwatchTree(rel string) {
 	prefix := rel + "/"
 	for d := range w.dirs {
 		if d == rel || strings.HasPrefix(d, prefix) {
 			delete(w.dirs, d)
 			_ = w.fsw.Remove(w.abs(d)) // already gone if the directory was deleted
+		}
+	}
+	for d := range w.skipped {
+		if d == rel || strings.HasPrefix(d, prefix) {
+			delete(w.skipped, d)
 		}
 	}
 }
