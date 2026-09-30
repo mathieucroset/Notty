@@ -167,6 +167,13 @@ type diskCheck struct {
 // holds the baseline, or what saver last wrote under the same baseline
 // generation (a save still being reported). A missing file overwrites
 // nothing and passes. saver.mu is held.
+//
+// The check and the write that follows are not atomic: another program
+// writing the file in the millisecond between verify and vault.Save is
+// still overwritten. No portable file lock keeps other editors out, and the
+// window is the time of one read plus the start of the save, so the check
+// catches every edit made while the buffer was being typed, not a write
+// racing the save itself.
 func (c *diskCheck) verify(v *vault.Vault, p string, saver *orderedSaver) error {
 	disk, err := v.Read(p)
 	switch {

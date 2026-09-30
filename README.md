@@ -182,6 +182,15 @@ protocol = "auto"             # kitty | sixel | iterm | halfblocks | off — "au
 max_import_mb = 5             # images larger than this ask for confirmation before importing
 ```
 
+On Windows, an editor that is a batch file, such as VS Code's `code.cmd`,
+cannot open notes whose path contains `%`, `!`, `&`, `|`, `<`, `>`, `^`
+or `"`. Windows runs batch files through cmd.exe, which reads those
+characters as commands, variables or redirections even in a file name, and
+there is no safe way to escape all of them. Notty refuses with a message
+instead of running such a command line. Rename the note, or set `editor`
+to the program the batch file starts (for VS Code,
+`'"C:\Users\you\AppData\Local\Programs\Microsoft VS Code\Code.exe" -w'`).
+
 `icons` picks the glyphs Notty draws for folders, notes, pins, task
 checkboxes, sync states, toasts and the like:
 

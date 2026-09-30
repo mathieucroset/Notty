@@ -102,7 +102,11 @@ func (b *rdcwBackend) Add(string) error {
 	}
 	b.started = true
 	if parent := filepath.Dir(b.root); parent != b.root && !b.parent {
-		// Best effort: without it, only a deleted root is noticed.
+		// Best effort: without it, only a deleted root is noticed. The
+		// parent's watch is only (re)started here, with the root's: one
+		// that fails alone stays down until the root's watch restarts
+		// (after ErrWatchStopped), and meanwhile only a deleted root, not
+		// a renamed one, is noticed.
 		if b.start(parent, false) == nil {
 			b.parent = true
 		}
