@@ -15,6 +15,9 @@ import (
 // maxCollisions bounds the " 2", " 3", ... suffix search.
 const maxCollisions = 10000
 
+// closeFile closes f; tests make it fail.
+var closeFile = (*os.File).Close
+
 // Read returns the content of the file at rel.
 func (v *Vault) Read(rel string) (string, error) {
 	b, err := os.ReadFile(v.Abs(rel))
@@ -128,7 +131,13 @@ func (v *Vault) CreateNote(folder, title string) (string, error) {
 		if err != nil {
 			return err
 		}
-		return f.Close()
+		if err := closeFile(f); err != nil {
+			// Release the name: claim would take the file for someone
+			// else's and try the next name.
+			_ = os.Remove(abs)
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("vault: create note %q: %w", heading, err)
@@ -170,7 +179,8 @@ func (v *Vault) CreateFolder(parent, name string) (string, error) {
 // named "attachments" at the root becomes "attachments 2"). It returns the
 // claimed path. A name counts as taken when create fails and an entry
 // exists there, whatever the error: on Windows, creating a file where a
-// folder is fails with "is a directory", not fs.ErrExist.
+// folder is fails with "Access is denied" (ERROR_ACCESS_DENIED), not
+// fs.ErrExist.
 func (v *Vault) claim(dir, base, ext string, create func(abs string) error) (string, error) {
 	for i := 1; i <= maxCollisions; i++ {
 		name := base + ext

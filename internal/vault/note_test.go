@@ -185,6 +185,26 @@ func TestCreateNote(t *testing.T) {
 	assertNoTmp(t, v.Root)
 }
 
+// TestCreateNoteCloseFailure: a reserved name whose file cannot be closed
+// is released again, and the error returned.
+func TestCreateNoteCloseFailure(t *testing.T) {
+	v := openVault(t)
+	closeErr := errors.New("close failed")
+	prev := closeFile
+	closeFile = func(f *os.File) error {
+		_ = f.Close()
+		return closeErr
+	}
+	t.Cleanup(func() { closeFile = prev })
+
+	if _, err := v.CreateNote("", "Idea"); !errors.Is(err, closeErr) {
+		t.Fatalf("CreateNote error = %v, want the close error", err)
+	}
+	if _, err := os.Lstat(filepath.Join(v.Root, "Idea.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("reserved file left behind (stat err = %v)", err)
+	}
+}
+
 func TestCreateNoteCollidesWithFolder(t *testing.T) {
 	v := openVault(t)
 	mkfiles(t, v.Root, "Idea.md/")
