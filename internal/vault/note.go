@@ -251,8 +251,9 @@ func (v *Vault) moveAndRewrite(oldRel, newRel string) (string, error) {
 // Move moves the note, folder or file at rel into destFolder ("" for the
 // root), creating destFolder if needed. It fails with ErrExists if the
 // target is taken, and with ErrInvalidPath if destFolder is rel itself, lies
-// inside rel, is not a folder, or is (inside) a reserved location such as
-// .trash or attachments, or if the moved name is reserved there.
+// inside rel, is not a folder or goes through a symlink or a file, or is
+// (inside) a reserved location such as .trash or attachments, or if the
+// moved name is reserved there.
 //
 // A moved note's note-relative image links, or those of every note inside
 // a moved folder, are rewritten so they keep pointing at the same files.
@@ -268,8 +269,13 @@ func (v *Vault) Move(rel, destFolder string) (string, error) {
 	if inReserved(dest) || reserved(dest, path.Base(src)) {
 		return "", fmt.Errorf("vault: move %q to %q: reserved location: %w", src, dest, ErrInvalidPath)
 	}
-	if fi, err := os.Stat(v.Abs(dest)); err == nil && !fi.IsDir() {
-		return "", fmt.Errorf("vault: move %q: destination %q is not a folder: %w", src, dest, ErrInvalidPath)
+	if _, err := os.Lstat(v.Abs(src)); err != nil {
+		return "", fmt.Errorf("vault: move %q: %w", src, err)
+	}
+	// Every existing segment of the destination must be a real folder: a
+	// symlink would take the entry out of the vault.
+	if err := v.mkdirReal(dest); err != nil {
+		return "", fmt.Errorf("vault: move %q: %w", src, err)
 	}
 	return v.moveAndRewrite(src, path.Join(dest, path.Base(src)))
 }

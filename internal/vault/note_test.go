@@ -423,6 +423,43 @@ func TestMoveErrors(t *testing.T) {
 	}
 }
 
+// A move never leaves the vault through a symlinked folder, whether the
+// destination is the link itself or lies below it.
+func TestMoveThroughSymlinkRefused(t *testing.T) {
+	tests := []struct {
+		name, rel, dest string
+	}{
+		{"note into the link", "a.md", "ext"},
+		{"note below the link", "a.md", "ext/sub"},
+		{"folder into the link", "Work", "ext"},
+		{"folder below the link", "Work", "ext/sub/deeper"},
+		{"note below a nested link", "a.md", "Real/ext"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := openVault(t)
+			mkfiles(t, v.Root, "a.md", "Work/b.md", "Real/")
+			outside := t.TempDir()
+			link := "ext"
+			if strings.HasPrefix(tt.dest, "Real/") {
+				link = "Real/ext"
+			}
+			if err := os.Symlink(outside, v.Abs(link)); err != nil {
+				t.Skipf("symlinks unsupported: %v", err)
+			}
+			if _, err := v.Move(tt.rel, tt.dest); !errors.Is(err, ErrInvalidPath) {
+				t.Fatalf("Move(%q, %q) error = %v, want ErrInvalidPath", tt.rel, tt.dest, err)
+			}
+			if !exists(v, tt.rel) {
+				t.Errorf("%s left the vault", tt.rel)
+			}
+			if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+				t.Errorf("written outside the vault: %v", entries)
+			}
+		})
+	}
+}
+
 func TestMoveSiblingPrefixAllowed(t *testing.T) {
 	// "Work" -> "WorkX" must not be mistaken for moving into a descendant.
 	v := openVault(t)
