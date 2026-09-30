@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -214,6 +215,55 @@ func TestMoveRejectsInvalidFolders(t *testing.T) {
 			}
 			if exists(opts.Vault, "outside") || exists(opts.Vault, ".hidden") || exists(opts.Vault, "Work/Sub") || exists(opts.Vault, "a") {
 				t.Error("a folder was created")
+			}
+		})
+	}
+}
+
+// A symlinked folder would take the entry out of the vault: the dialog
+// refuses it, and so does a result that did not come through the dialog.
+func TestMoveRefusesSymlinkedFolder(t *testing.T) {
+	tests := []struct {
+		name, path, folder string
+		typed              bool
+	}{
+		{"note typed", "ideas.md", "ext", true},
+		{"folder typed", "Work", "ext", true},
+		{"note below the link typed", "ideas.md", "ext/sub", true},
+		{"note result", "ideas.md", "ext", false},
+		{"folder result", "Work", "ext/sub", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := testOptions(t)
+			outside := t.TempDir()
+			if err := os.Symlink(outside, opts.Vault.Abs("ext")); err != nil {
+				t.Skipf("symlinks unsupported: %v", err)
+			}
+			m := start(t, opts, 120, 30)
+			run(t, m, msgs.RequestMove{Path: tt.path})
+			if tt.typed {
+				submitMove(t, m, tt.folder)
+				if !moveDialogFor(m, tt.path) {
+					t.Fatalf("the move dialog closed:\n%s", screen(m))
+				}
+				if s := screen(m); !strings.Contains(s, "Not a folder: ext") {
+					t.Errorf("validation error missing:\n%s", s)
+				}
+			} else {
+				run(t, m, dialog.ResultMsg{ID: dlgMove, OK: true, Value: tt.folder})
+				if m.overlayOpen() {
+					t.Errorf("a dialog opened:\n%s", screen(m))
+				}
+				if !hasToast(m, msgs.ToastWarn, "Not a folder: ext") {
+					t.Errorf("toasts = %v", toastTexts(m))
+				}
+			}
+			if !exists(opts.Vault, tt.path) {
+				t.Errorf("%s left the vault", tt.path)
+			}
+			if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+				t.Errorf("written outside the vault: %v", entries)
 			}
 		})
 	}

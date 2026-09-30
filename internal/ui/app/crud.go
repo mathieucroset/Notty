@@ -185,8 +185,8 @@ func (m *Model) moveOpenNote() tea.Cmd {
 // moveDest checks the folder typed in the move dialog for p and returns it
 // in clean form, spelled like the existing folders it names (they are
 // matched ignoring case). It need not exist, but it must be a valid folder
-// name (the rules of vault.ValidateFolderPath), not a file or below one,
-// and not p itself or inside it.
+// name (the rules of vault.ValidateFolderPath), not a file or a symlink or
+// below one, and not p itself or inside it.
 func (m *Model) moveDest(p, typed string) (string, error) {
 	dest, err := vault.ValidateFolderPath(typed)
 	if err != nil {
@@ -200,7 +200,9 @@ func (m *Model) moveDest(p, typed string) (string, error) {
 				break
 			}
 			cur = path.Join(cur, seg)
-			if fi, err := os.Stat(m.opts.Vault.Abs(cur)); err == nil && !fi.IsDir() {
+			// Lstat: a symlink to a folder is not a folder of the vault,
+			// and moving through it would leave the vault.
+			if fi, err := os.Lstat(m.opts.Vault.Abs(cur)); err == nil && !fi.IsDir() {
 				return "", validationError("Not a folder: " + cur)
 			}
 		}

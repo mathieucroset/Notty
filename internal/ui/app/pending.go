@@ -100,7 +100,7 @@ func (m *Model) runPending(op pendingOp, res dialog.ResultMsg) tea.Cmd {
 			return nil
 		}
 		op.dest, op.skipExistCheck = dest, true
-		if _, err := os.Stat(v.Abs(dest)); errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Lstat(v.Abs(dest)); errors.Is(err, fs.ErrNotExist) {
 			return m.confirmMoveToNewFolder(op)
 		}
 	}
