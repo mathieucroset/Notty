@@ -3,6 +3,7 @@ package vault
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -280,4 +281,73 @@ func TestErrLockedError(t *testing.T) {
 			t.Errorf("Error() = %q, want %q", got, tt.want)
 		}
 	}
+}
+
+// TestAcquireLockRetriesDeletePending covers Windows' answer for a lock file
+// being deleted by the previous holder: opening or creating it fails with
+// access denied until its last handle closes. That is a busy lock, not a
+// failure, until the wait runs out.
+func TestAcquireLockRetriesDeletePending(t *testing.T) {
+	denied := fmt.Errorf("open lock: %w", fs.ErrPermission)
+	tests := []struct {
+		name          string
+		pending       bool // the platform reports delete-pending as access denied
+		createDenials int  // createLock fails this many times, then works
+		readDenials   int  // readLockFile fails this many times (after an ErrExist)
+		wait          time.Duration
+		wantErr       error // nil: acquired
+	}{
+		{name: "create denied then free", pending: true, createDenials: 2, wait: time.Second},
+		{name: "read denied then free", pending: true, readDenials: 2, wait: time.Second},
+		{name: "denied past the wait", pending: true, createDenials: 1000, wait: 250 * time.Millisecond, wantErr: fs.ErrPermission},
+		{name: "not delete-pending: fails at once", pending: false, createDenials: 1, wait: time.Second, wantErr: fs.ErrPermission},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			creates, reads := 0, 0
+			exist := tt.readDenials > 0
+			swapLockOps(t,
+				func(path, content string) error {
+					creates++
+					if creates <= tt.createDenials {
+						return denied
+					}
+					if exist && reads <= tt.readDenials {
+						return fs.ErrExist
+					}
+					return createLock(path, content)
+				},
+				func(path string) (ErrLocked, []byte, error) {
+					reads++
+					if reads <= tt.readDenials {
+						return ErrLocked{}, nil, denied
+					}
+					return readLockFile(path)
+				},
+				func(err error) bool { return tt.pending && errors.Is(err, fs.ErrPermission) },
+			)
+			start := time.Now()
+			l, err := AcquireLock(t.TempDir(), tt.wait)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tt.wantErr)
+				}
+				if !tt.pending && time.Since(start) > tt.wait/2 {
+					t.Errorf("waited %v for a hard failure", time.Since(start))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("AcquireLock: %v", err)
+			}
+			_ = l.Release()
+		})
+	}
+}
+
+func swapLockOps(t *testing.T, create func(string, string) error, read func(string) (ErrLocked, []byte, error), pending func(error) bool) {
+	t.Helper()
+	oc, or, op := createLockFn, readLockFn, deletePending
+	createLockFn, readLockFn, deletePending = create, read, pending
+	t.Cleanup(func() { createLockFn, readLockFn, deletePending = oc, or, op })
 }

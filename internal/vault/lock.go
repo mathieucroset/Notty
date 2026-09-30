@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,20 @@ import (
 
 // lockPollInterval is how often AcquireLock retries a held lock.
 const lockPollInterval = 100 * time.Millisecond
+
+// createLockFn and readLockFn are the lock file operations; tests swap them.
+var (
+	createLockFn = createLock
+	readLockFn   = readLockFile
+)
+
+// deletePending reports whether err is how the platform answers for a lock
+// file the previous holder is deleting. Windows fails to create or open a
+// delete-pending file with access denied until its last handle closes; such
+// a lock is busy, not broken.
+var deletePending = func(err error) bool {
+	return runtime.GOOS == "windows" && errors.Is(err, fs.ErrPermission)
+}
 
 // corruptLockGrace is how long an unparsable lock file is treated as held
 // (its creator may still be writing it) before it counts as stale.
@@ -64,15 +79,30 @@ func AcquireLock(root string, wait time.Duration) (*Lock, error) {
 		content: fmt.Sprintf("%d %s\n", os.Getpid(), host),
 	}
 	deadline := time.Now().Add(wait)
+	// pause sleeps before the next attempt; false means the wait ran out.
+	pause := func() bool {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		time.Sleep(min(lockPollInterval, remaining))
+		return true
+	}
 	for {
-		err := createLock(l.path, l.content)
+		err := createLockFn(l.path, l.content)
 		if err == nil {
 			return l, nil
+		}
+		if deletePending(err) {
+			if pause() {
+				continue
+			}
+			return nil, fmt.Errorf("vault: lock: %w", err)
 		}
 		if !errors.Is(err, fs.ErrExist) {
 			return nil, fmt.Errorf("vault: lock: %w", err)
 		}
-		held, seen, err := readLockFile(l.path)
+		held, seen, err := readLockFn(l.path)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			// Either released since our attempt (retry at once), or a
@@ -83,6 +113,11 @@ func AcquireLock(root string, wait time.Duration) (*Lock, error) {
 				}
 			}
 			continue
+		case deletePending(err):
+			if pause() {
+				continue
+			}
+			return nil, fmt.Errorf("vault: lock: %w", err)
 		case err != nil:
 			return nil, fmt.Errorf("vault: lock: %w", err)
 		case isStale(l.path, held, host):
@@ -91,11 +126,9 @@ func AcquireLock(root string, wait time.Duration) (*Lock, error) {
 			}
 			continue
 		}
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
+		if !pause() {
 			return nil, held
 		}
-		time.Sleep(min(lockPollInterval, remaining))
 	}
 }
 
