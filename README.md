@@ -345,11 +345,6 @@ go test ./...            # run the test suite
 golangci-lint run        # lint
 ```
 
-See the [design spec](docs/superpowers/specs/2026-09-29-notty-design.md)
-for the full architecture, and the
-[implementation plan](docs/superpowers/plans/2026-09-29-notty.md) for how
-it was built.
-
 ## License
 
 [MIT](LICENSE)

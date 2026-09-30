@@ -3,3 +3,4 @@
 *.test
 coverage.out
 /.claude/worktrees/
+/docs/superpowers/
