@@ -41,6 +41,10 @@ type savedMsg struct {
 	// stale reports a snapshot skipped because a newer one of the same
 	// note was already written.
 	stale bool
+	// checked reports a save of the open note, checked against the
+	// baseline of generation gen (see Model.baselineGen).
+	checked bool
+	gen     uint64
 }
 
 // listenWatcherCmd waits for the next watcher event or error. It returns
@@ -238,7 +242,11 @@ func (m *Model) saveNoteCmd(p, content string, version uint64) tea.Cmd {
 		if ix != nil {
 			ix.UpdateContent(p, content)
 		}
-		return savedMsg{path: p, content: content, version: version}
+		msg := savedMsg{path: p, content: content, version: version}
+		if check != nil {
+			msg.checked, msg.gen = true, check.gen
+		}
+		return msg
 	}
 }
 
@@ -265,7 +273,9 @@ func (m *Model) applySaved(msg savedMsg) tea.Cmd {
 	}
 	m.queueReindex(msg.path)
 	m.discardOnQuit = false // a later quit must save again
-	if msg.path == m.editor.Path() {
+	if msg.path == m.editor.Path() && msg.checked && msg.gen == m.baselineGen {
+		// A save reported after the file was re-read (a newer baseline)
+		// leaves that baseline alone.
 		m.baseline = msg.content
 	}
 	m.editor = m.editor.MarkSaved(msg.path, msg.version)

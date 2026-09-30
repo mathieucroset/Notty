@@ -228,3 +228,24 @@ func TestSaveOfExternallyMatchingContentIsQuiet(t *testing.T) {
 		t.Errorf("identical content: overlay %v dirty %v", m.overlayOpen(), m.editor.Dirty())
 	}
 }
+
+// TestLateSaveReportKeepsNewerBaseline: a save reported after the file was
+// re-read from disk must not take the baseline back to what it wrote.
+func TestLateSaveReportKeepsNewerBaseline(t *testing.T) {
+	opts := testOptions(t)
+	m := openNote(t, opts, "ideas.md")
+	insertText(t, m, "mine ")
+	saved := m.saveEditorCmd()().(savedMsg) // written, not yet reported
+	writeFile(t, opts.Vault, "ideas.md", external)
+	run(t, m, noteReloadedMsg{path: "ideas.md", content: external, force: true})
+	run(t, m, saved)
+	if m.baseline != external {
+		t.Fatalf("baseline = %q, want the content re-read after the save", m.baseline)
+	}
+	// The file still holds the baseline: a new save goes through.
+	insertText(t, m, "again ")
+	run(t, m, keyMsg("ctrl+s"))
+	if got := readFile(t, opts.Vault, "ideas.md"); got != m.editor.Content() {
+		t.Fatalf("save refused: file %q, overlays %v", got, m.overlays)
+	}
+}
