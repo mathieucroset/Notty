@@ -73,7 +73,11 @@ func writeHugePNG(t *testing.T, dir string, w, h uint32) string {
 }
 
 func newTestViewer(paths []string, proto imgrender.Protocol, in io.Reader) (*Viewer, *bytes.Buffer) {
-	v := New(paths, 0, imgrender.Caps{Viewer: proto})
+	root := ""
+	if len(paths) > 0 {
+		root = filepath.Dir(paths[0])
+	}
+	v := New(root, paths, 0, imgrender.Caps{Viewer: proto})
 	v.Size = func() (int, int, error) { return 80, 24, nil }
 	v.Open = func(string) error { return nil }
 	// One key per read, as typed, unless the test needs the real reader
@@ -335,6 +339,41 @@ func TestRunOpenMissingFile(t *testing.T) {
 		t.Error("opener called for a missing file")
 	}
 	assertOrder(t, out.String(), "image not found", "gone.png  1/1    file not found", altLeave)
+}
+
+// TestRunOpenRefusesNonImages: "open" hands a file to the system opener,
+// which would run a script: only image files inside the vault are opened.
+func TestRunOpenRefusesNonImages(t *testing.T) {
+	tests := []struct {
+		name string
+		make func(t *testing.T, vault string) string
+	}{
+		{"batch file", func(t *testing.T, v string) string {
+			p := filepath.Join(v, "run.bat")
+			if err := os.WriteFile(p, []byte("echo hi"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}},
+		{"image outside the vault", func(t *testing.T, _ string) string {
+			return writePNG(t, t.TempDir(), "o.png", 10, 10)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			vault := t.TempDir()
+			p := tc.make(t, vault)
+			v, out := newTestViewer([]string{p}, imgrender.ProtoHalfBlocks, strings.NewReader("oq"))
+			v.Root = vault
+			called := false
+			v.Open = func(string) error { called = true; return nil }
+			runViewer(t, v)
+			if called {
+				t.Error("opener called for a file that is not an image in the vault")
+			}
+			assertOrder(t, out.String(), "not opened", altLeave)
+		})
+	}
 }
 
 func TestRunProtoOff(t *testing.T) {

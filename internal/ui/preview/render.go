@@ -71,11 +71,15 @@ func hashString(s string) uint64 {
 // imgItem is one image of an Image segment, ready to lay out.
 type imgItem struct {
 	link links.ImageLink
-	abs  string // absolute path of an existing file; "" for external, escaping or missing links
+	abs  string // absolute path of an image file in the vault (see links.CheckImageFile); "" otherwise
 	name string
 	// reason is set when the image cannot be shown ("missing", "external",
-	// "unreadable", "too large"); it renders as a warning chip.
+	// "not an image", "outside the vault", "unreadable", "too large"); it
+	// renders as a warning chip.
 	reason string
+	// refused is set for a file that exists but is not opened as an image
+	// (a script, a symlink out of the vault): opening it explains why.
+	refused bool
 	// rows are the rendered rows (half-blocks or Kitty placeholders); nil
 	// with an empty reason means a plain chip (images off).
 	rows    []string
@@ -287,7 +291,16 @@ func (j renderJob) image(link links.ImageLink) *imgItem {
 		item.reason = "missing"
 		return item
 	}
-	// Only existing files reach the image viewer.
+	// Only image files inside the vault reach the image viewer, which can
+	// hand them to the system opener: never a linked script, nor a symlink
+	// to one or out of the vault.
+	if err := links.CheckImageFile(j.vaultRoot, abs); err != nil {
+		item.reason, item.refused = "not an image", true
+		if errors.Is(err, links.ErrOutsideVault) {
+			item.reason = "outside the vault"
+		}
+		return item
+	}
 	item.abs = abs
 
 	proto := j.caps.Inline

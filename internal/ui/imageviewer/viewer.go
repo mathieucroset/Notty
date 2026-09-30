@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"github.com/mathieucroset/notty/internal/imgrender"
+	"github.com/mathieucroset/notty/internal/links"
 )
 
 // Terminal sequences written by the viewer.
@@ -53,6 +54,9 @@ type Viewer struct {
 	// when out of range). Run updates Index as the user navigates.
 	Paths []string
 	Index int
+	// Root is the vault: Open only hands the system opener image files
+	// inside it (see links.CheckImageFile).
+	Root string
 	// Caps.Viewer picks the protocol; CellW and CellH size the image.
 	Caps imgrender.Caps
 
@@ -80,9 +84,10 @@ type Viewer struct {
 	watch func(size func() (int, int, error)) (resized <-chan struct{}, stop func())
 }
 
-// New returns a viewer for paths starting at index.
-func New(paths []string, index int, caps imgrender.Caps) *Viewer {
-	return &Viewer{Paths: paths, Index: index, Caps: caps}
+// New returns a viewer for paths, images of the vault at root, starting at
+// index.
+func New(root string, paths []string, index int, caps imgrender.Caps) *Viewer {
+	return &Viewer{Root: root, Paths: paths, Index: index, Caps: caps}
 }
 
 // SetStdin sets the terminal input (tea.ExecCommand).
@@ -221,6 +226,8 @@ func (s *session) handle(batch []Key) bool {
 			path := s.v.Paths[s.index]
 			if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 				s.status = "file not found"
+			} else if err := links.CheckImageFile(s.v.Root, path); err != nil {
+				s.status = "not opened: " + err.Error()
 			} else if err := s.open(path); err != nil {
 				s.status = "open failed: " + err.Error()
 			}

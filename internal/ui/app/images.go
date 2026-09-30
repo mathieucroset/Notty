@@ -159,7 +159,7 @@ func (m *Model) openImageViewer(msg msgs.OpenImageViewerMsg) tea.Cmd {
 	if len(msg.Paths) == 0 {
 		return nil
 	}
-	v := imageviewer.New(msg.Paths, msg.Index, m.opts.Caps)
+	v := imageviewer.New(vaultRoot(m.opts), msg.Paths, msg.Index, m.opts.Caps)
 	m.beginExec()
 	return execCommand(v, func(err error) tea.Msg {
 		return imageViewerDoneMsg{err: err, quit: v.QuitRequested}

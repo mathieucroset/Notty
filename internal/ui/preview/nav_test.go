@@ -1,8 +1,10 @@
 package preview
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -274,6 +276,75 @@ func TestMissingImagesNotOpenedInViewer(t *testing.T) {
 	want := msgs.OpenImageViewerMsg{Paths: []string{filepath.Join(vault, "ok.png")}, Index: 0}
 	if len(out) != 1 || !reflect.DeepEqual(out[0], want) {
 		t.Fatalf("enter emitted %#v, want %#v", out, want)
+	}
+}
+
+// TestUnsafeLinkedFilesNotOpened: only real images inside the vault reach
+// the image viewer, whose "open" hands them to the system opener. A linked
+// script is refused with a toast.
+func TestUnsafeLinkedFilesNotOpened(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		make   func(t *testing.T, vault string)
+		reason string // "" when the image opens
+	}{
+		{"batch file", "run.bat", func(t *testing.T, v string) { writeRaw(t, filepath.Join(v, "run.bat")) }, "not an image"},
+		{"macOS command", "run.command", func(t *testing.T, v string) { writeRaw(t, filepath.Join(v, "run.command")) }, "not an image"},
+		{"symlink to a script", "pic.png", func(t *testing.T, v string) {
+			symlinkOrSkip(t, filepath.Join(v, "script.command"), filepath.Join(v, "pic.png"))
+			writeRaw(t, filepath.Join(v, "script.command"))
+		}, "not an image"},
+		{"symlink to an image outside the vault", "pic.png", func(t *testing.T, v string) {
+			outside := filepath.Join(t.TempDir(), "secret.png")
+			writePNG(t, outside, 16, 16)
+			symlinkOrSkip(t, outside, filepath.Join(v, "pic.png"))
+		}, "outside the vault"},
+		{"image", "ok.png", func(t *testing.T, v string) { writePNG(t, filepath.Join(v, "ok.png"), 16, 16) }, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			vault := t.TempDir()
+			tc.make(t, vault)
+			m := newTest(t, imgrender.ProtoHalfBlocks, vault)
+			m, _ = setContent(t, m, "n.md", "![]("+tc.target+")")
+			m, _ = press(m, "]", "i")
+			_, out := press(m, "enter")
+			if len(out) != 1 {
+				t.Fatalf("enter emitted %#v, want one message", out)
+			}
+			if tc.reason == "" {
+				want := msgs.OpenImageViewerMsg{Paths: []string{filepath.Join(vault, tc.target)}, Index: 0}
+				if !reflect.DeepEqual(out[0], want) {
+					t.Fatalf("enter emitted %#v, want %#v", out[0], want)
+				}
+				return
+			}
+			toast, ok := out[0].(msgs.ToastMsg)
+			if !ok || toast.Level != msgs.ToastWarn || !strings.Contains(toast.Text, tc.reason) {
+				t.Fatalf("enter emitted %#v, want a warning toast about %q", out[0], tc.reason)
+			}
+			if v := ansi.Strip(m.View()); !strings.Contains(v, "("+tc.reason+")") {
+				t.Errorf("chip does not say %q:\n%s", tc.reason, v)
+			}
+		})
+	}
+}
+
+func writeRaw(t *testing.T, p string) {
+	t.Helper()
+	if err := os.WriteFile(p, []byte("echo hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func symlinkOrSkip(t *testing.T, target, link string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks needs a privilege on Windows")
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
 	}
 }
 

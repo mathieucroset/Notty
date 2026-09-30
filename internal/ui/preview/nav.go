@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"fmt"
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
@@ -160,6 +161,10 @@ func (m Model) openImage() tea.Cmd {
 	}
 	idx := m.doc.pathIdx[m.imgIdx]
 	if idx < 0 {
+		if item := m.doc.images[m.imgIdx]; item.refused {
+			return emit(msgs.ToastMsg{Level: msgs.ToastWarn,
+				Text: fmt.Sprintf("Not opening %s: %s", item.name, item.reason)})
+		}
 		return nil
 	}
 	return emit(msgs.OpenImageViewerMsg{Paths: slices.Clone(m.doc.paths), Index: idx})
