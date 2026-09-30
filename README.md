@@ -352,4 +352,4 @@ it was built.
 
 ## License
 
-TBD
+[MIT](LICENSE)
