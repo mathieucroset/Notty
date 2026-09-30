@@ -500,6 +500,28 @@ func TestThemeWatcher(t *testing.T) {
 	}
 }
 
+// TestThemeWatcherIgnoresParentFiles: .toml files next to the themes
+// directory (config.toml, the matugen template) are not themes, even where
+// the parent directory is watched too (Windows).
+func TestThemeWatcherIgnoresParentFiles(t *testing.T) {
+	parent := t.TempDir()
+	tw, err := newThemeWatcher(filepath.Join(parent, "themes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tw.Close() })
+	for _, n := range []string{"config.toml", "matugen-template.toml"} {
+		if err := os.WriteFile(filepath.Join(parent, n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case got := <-tw.out:
+		t.Errorf("batch %v for files outside the themes directory", got)
+	case <-time.After(3 * themeDebounce):
+	}
+}
+
 // TestThemeWatcherDirReplaced: when the themes directory itself is removed
 // or renamed, the watcher watches the directory at that path again
 // (re-created when absent) and reports the theme files it now holds.

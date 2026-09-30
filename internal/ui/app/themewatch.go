@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -30,7 +31,9 @@ const themeDebounce = 200 * time.Millisecond
 type themeWatcher struct {
 	w   *fsnotify.Watcher
 	dir string
-	out chan []string
+	// parent is dir's parent when it is watched too (Windows), else "".
+	parent string
+	out    chan []string
 	// done is closed by Close; exited when the loop has returned.
 	done, exited chan struct{}
 	closeOnce    sync.Once
@@ -55,6 +58,14 @@ func newThemeWatcher(dir string) (*themeWatcher, error) {
 		out:    make(chan []string, 1),
 		done:   make(chan struct{}),
 		exited: make(chan struct{}),
+	}
+	if runtime.GOOS == "windows" {
+		// On Windows a directory's own watch never reports that directory
+		// being removed or renamed; its parent's watch does. Best effort:
+		// without it, only a deleted themes directory is noticed.
+		if parent := filepath.Dir(tw.dir); parent != tw.dir && fw.Add(parent) == nil {
+			tw.parent = parent
+		}
 	}
 	go tw.loop()
 	return tw, nil
@@ -83,13 +94,17 @@ func (tw *themeWatcher) loop() {
 			if ev.Op == fsnotify.Chmod {
 				continue // attributes only: the colors did not change
 			}
-			if filepath.Clean(ev.Name) == tw.dir && ev.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
+			name := filepath.Clean(ev.Name)
+			if name == tw.dir && ev.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
 				slog.Warn("themes directory removed or renamed: watching it again", "dir", tw.dir, "op", ev.Op.String())
 				rewatch = true
 				timer.Reset(themeDebounce)
 				continue
 			}
-			if n, ok := strings.CutSuffix(filepath.Base(ev.Name), theme.ThemeExt); ok && n != "" {
+			if filepath.Dir(name) != tw.dir {
+				continue // in the parent, or in a stale watch of a renamed directory
+			}
+			if n, ok := strings.CutSuffix(filepath.Base(name), theme.ThemeExt); ok && n != "" {
 				pending[n] = true
 				timer.Reset(themeDebounce)
 			}
@@ -125,6 +140,12 @@ func (tw *themeWatcher) rewatch(pending map[string]bool) {
 		return
 	}
 	_ = tw.w.Remove(tw.dir) // a stale watch of a renamed directory, if any
+	for _, p := range tw.w.WatchList() {
+		// On Windows a stale watch follows the renamed directory's new name.
+		if p != tw.dir && p != tw.parent {
+			_ = tw.w.Remove(p)
+		}
+	}
 	if err := tw.w.Add(tw.dir); err != nil {
 		slog.Warn("live theme reload stopped", "err", err)
 		return
