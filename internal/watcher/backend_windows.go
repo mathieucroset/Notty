@@ -325,8 +325,9 @@ func (w *dirWatch) cancelRead() {
 }
 
 // deliver sends the events in buf, a list of FILE_NOTIFY_INFORMATION
-// records. The parent's watch only reports the root's own removal or
-// renaming. It reports false once the backend is closed.
+// records. Changes inside .git directories are dropped here, before they
+// cost anything more. The parent's watch only reports the root's own
+// removal or renaming. It reports false once the backend is closed.
 func (b *rdcwBackend) deliver(w *dirWatch, buf []byte) bool {
 	for off := 0; off+12 <= len(buf); {
 		next := int(binary.LittleEndian.Uint32(buf[off:]))
@@ -340,11 +341,15 @@ func (b *rdcwBackend) deliver(w *dirWatch, buf []byte) bool {
 		for i := range name {
 			name[i] = binary.LittleEndian.Uint16(buf[start+2*i:])
 		}
-		full := filepath.Join(w.dir, windows.UTF16ToString(name))
+		rel := windows.UTF16ToString(name)
+		full := filepath.Join(w.dir, rel)
 		op := opOf(action)
 		switch {
 		case op == 0:
 		case w.root:
+			if inGitDir(rel) {
+				break
+			}
 			if !b.sendEvent(fsnotify.Event{Name: full, Op: op}) {
 				return false
 			}
@@ -359,6 +364,18 @@ func (b *rdcwBackend) deliver(w *dirWatch, buf []byte) bool {
 		off += next
 	}
 	return true
+}
+
+// inGitDir reports whether rel, a path relative to the root with "\"
+// separators, is a .git directory or lies inside one. The watcher ignores
+// those paths too (see ignored).
+func inGitDir(rel string) bool {
+	for part := range strings.SplitSeq(rel, `\`) {
+		if strings.EqualFold(part, ".git") {
+			return true
+		}
+	}
+	return false
 }
 
 // opOf maps a FILE_ACTION_* code to fsnotify's operations, as fsnotify
