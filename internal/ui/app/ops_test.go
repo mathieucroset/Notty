@@ -154,17 +154,14 @@ func TestOpOnOpenNoteAbortsWhenSaveFails(t *testing.T) {
 	opts := testOptions(t)
 	m := openNote(t, opts, "ideas.md")
 	insertText(t, m, "unsaved ")
-	root := opts.Vault.Root
-	if err := os.Chmod(root, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	blockSave(t, opts.Vault, "ideas.md")
 	run(t, m, msgs.RequestRename{Path: "ideas.md"})
 	confirm(t, m, "thoughts")
 	if !hasToast(m, msgs.ToastError, "was not renamed") {
 		t.Errorf("toasts = %v", toastTexts(m))
 	}
-	if !exists(opts.Vault, "ideas.md") || m.NotePath() != "ideas.md" || !m.editor.Dirty() {
+	renamed := exists(opts.Vault, "thoughts.md") || exists(opts.Vault, "thoughts")
+	if renamed || !exists(opts.Vault, "ideas.md") || m.NotePath() != "ideas.md" || !m.editor.Dirty() {
 		t.Error("the rename went ahead after the save failed")
 	}
 }

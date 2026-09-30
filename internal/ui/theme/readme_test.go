@@ -16,7 +16,9 @@ func TestReadmeThemeExample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, rest, ok := strings.Cut(string(b), readmeMarker)
+	// A Windows checkout (core.autocrlf) may have CRLF line endings.
+	readme := strings.ReplaceAll(string(b), "\r\n", "\n")
+	_, rest, ok := strings.Cut(readme, readmeMarker)
 	if !ok {
 		t.Fatal("README has no example theme marker")
 	}

@@ -3,6 +3,7 @@ package attach
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -37,29 +38,34 @@ func TestParsePastedPath(t *testing.T) {
 		paste  string
 		want   string
 		wantOK bool
+		// shellEscaped pastes rely on POSIX shell backslash escapes.
+		shellEscaped bool
 	}{
-		{"plain existing path", imgPath, imgPath, true},
-		{"double quoted", `"` + imgPath + `"`, imgPath, true},
-		{"single quoted", "'" + imgPath + "'", imgPath, true},
-		{"surrounding whitespace and newline trimmed", "  " + imgPath + "\n", imgPath, true},
-		{"file:// prefix", "file://" + imgPath, imgPath, true},
-		{"file:// with %20 encoding", "file://" + filepath.Join(dir, "my%20photo%20(1).png"), imgPath, true},
-		{"shell escaped spaces", filepath.Join(dir, `my\ photo\ (1).png`), imgPath, true},
-		{"shell escaped parens", filepath.Join(dir, `my photo \(1\).png`), imgPath, true},
-		{"tilde expansion", "~/notty-test-home-img.png", homeImg, true},
-		{"multi-line rejected", imgPath + "\nsecond line", "", false},
-		{"non-image extension rejected", txtPath, "", false},
-		{"non-existent path rejected", filepath.Join(dir, "missing.png"), "", false},
-		{"empty input rejected", "", "", false},
+		{"plain existing path", imgPath, imgPath, true, false},
+		{"double quoted", `"` + imgPath + `"`, imgPath, true, false},
+		{"single quoted", "'" + imgPath + "'", imgPath, true, false},
+		{"surrounding whitespace and newline trimmed", "  " + imgPath + "\n", imgPath, true, false},
+		{"file:// prefix", "file://" + imgPath, imgPath, true, false},
+		{"file:// with %20 encoding", "file://" + filepath.Join(dir, "my%20photo%20(1).png"), imgPath, true, false},
+		{"shell escaped spaces", filepath.Join(dir, `my\ photo\ (1).png`), imgPath, true, true},
+		{"shell escaped parens", filepath.Join(dir, `my photo \(1\).png`), imgPath, true, true},
+		{"tilde expansion", "~/notty-test-home-img.png", homeImg, true, false},
+		{"multi-line rejected", imgPath + "\nsecond line", "", false, false},
+		{"non-image extension rejected", txtPath, "", false, false},
+		{"non-existent path rejected", filepath.Join(dir, "missing.png"), "", false, false},
+		{"empty input rejected", "", "", false, false},
 		{"uppercase extension accepted", func() string {
 			p := filepath.Join(dir, "upper.PNG")
 			_ = os.WriteFile(p, []byte("x"), 0o644)
 			return p
-		}(), filepath.Join(dir, "upper.PNG"), true},
+		}(), filepath.Join(dir, "upper.PNG"), true, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.shellEscaped && runtime.GOOS == "windows" {
+				t.Skip(`on Windows "\" is a path separator, never a shell escape (see windows_paste_test.go)`)
+			}
 			got, ok := ParsePastedPath(tt.paste, exists)
 			if ok != tt.wantOK {
 				t.Fatalf("ParsePastedPath(%q) ok = %v, want %v (got %q)", tt.paste, ok, tt.wantOK, got)

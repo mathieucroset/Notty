@@ -168,7 +168,9 @@ func (v *Vault) CreateFolder(parent, name string) (string, error) {
 // claim calls create on dir/base+ext, then dir/base 2+ext, ... until create
 // succeeds, skipping names that already exist or are reserved (so a folder
 // named "attachments" at the root becomes "attachments 2"). It returns the
-// claimed path.
+// claimed path. A name counts as taken when create fails and an entry
+// exists there, whatever the error: on Windows, creating a file where a
+// folder is fails with "is a directory", not fs.ErrExist.
 func (v *Vault) claim(dir, base, ext string, create func(abs string) error) (string, error) {
 	for i := 1; i <= maxCollisions; i++ {
 		name := base + ext
@@ -179,12 +181,15 @@ func (v *Vault) claim(dir, base, ext string, create func(abs string) error) (str
 			continue
 		}
 		rel := path.Join(dir, name)
-		err := create(v.Abs(rel))
+		abs := v.Abs(rel)
+		err := create(abs)
 		if err == nil {
 			return rel, nil
 		}
 		if !errors.Is(err, fs.ErrExist) {
-			return "", err
+			if _, serr := os.Lstat(abs); serr != nil {
+				return "", err
+			}
 		}
 	}
 	return "", fmt.Errorf("no free name for %q: %w", base+ext, ErrExists)

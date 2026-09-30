@@ -512,14 +512,29 @@ func TestRunNoPaths(t *testing.T) {
 }
 
 func TestRunClampsIndexAndSanitizesName(t *testing.T) {
-	dir := t.TempDir()
-	a := writePNG(t, dir, "a\x1b[31m.png", 10, 10)
-	v, out := newTestViewer([]string{a}, imgrender.ProtoHalfBlocks, strings.NewReader("q"))
-	v.Index = 7
-	runViewer(t, v)
-	s := out.String()
-	assertOrder(t, s, "a?[31m.png", "1/1")
-	if strings.Contains(s, "a\x1b[31m") {
-		t.Error("file name control characters reached the terminal")
+	tests := []struct {
+		name, file, shown, control string
+		// c0 names hold a C0 control character, which Windows forbids in
+		// file names.
+		c0 bool
+	}{
+		{"escape", "a\x1b[31m.png", "a?[31m.png", "\x1b", true},
+		{"C1 control sequence introducer", "a\u009b31m.png", "a?31m.png", "\u009b", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.c0 && runtime.GOOS == "windows" {
+				t.Skip("Windows forbids control characters 1-31 in file names")
+			}
+			a := writePNG(t, t.TempDir(), tt.file, 10, 10)
+			v, out := newTestViewer([]string{a}, imgrender.ProtoHalfBlocks, strings.NewReader("q"))
+			v.Index = 7
+			runViewer(t, v)
+			s := out.String()
+			assertOrder(t, s, tt.shown, "1/1")
+			if strings.Contains(s, "a"+tt.control) {
+				t.Error("file name control characters reached the terminal")
+			}
+		})
 	}
 }

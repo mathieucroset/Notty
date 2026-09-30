@@ -294,3 +294,34 @@ func TestEditorCommand(t *testing.T) {
 		t.Error("OpenFileExternalMsg returned no command")
 	}
 }
+
+// TestSplitCommand: an editor setting is split on blanks, with quotes
+// grouping a program path that holds spaces ("C:\Program Files\...").
+// Backslashes are kept: they separate paths on Windows.
+func TestSplitCommand(t *testing.T) {
+	tests := []struct {
+		name, cmd, goos string
+		want            []string
+	}{
+		{"plain words", "code -w", "linux", []string{"code", "-w"}},
+		{"extra blanks", "  code \t -w  ", "linux", []string{"code", "-w"}},
+		{"blank", "   ", "linux", nil},
+		{"double-quoted windows program", `"C:\Program Files\Notepad++\notepad++.exe" -multiInst`, "windows",
+			[]string{`C:\Program Files\Notepad++\notepad++.exe`, "-multiInst"}},
+		{"unquoted windows program", `C:\Windows\notepad.exe`, "windows", []string{`C:\Windows\notepad.exe`}},
+		{"apostrophe on windows is literal", `C:\Users\O'Brien\ed.exe -n`, "windows", []string{`C:\Users\O'Brien\ed.exe`, "-n"}},
+		{"single-quoted unix program", `'/Applications/Sublime Text.app/bin/subl' -w`, "darwin",
+			[]string{"/Applications/Sublime Text.app/bin/subl", "-w"}},
+		{"quoted argument", `vim -c "set tw=80"`, "linux", []string{"vim", "-c", "set tw=80"}},
+		{"quote inside a word", `ed --opt="a b"`, "linux", []string{"ed", "--opt=a b"}},
+		{"empty quotes", `ed ""`, "linux", []string{"ed", ""}},
+		{"unterminated quote", `ed "a b`, "linux", []string{"ed", "a b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := splitCommand(tt.cmd, tt.goos); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("splitCommand(%q, %s) = %q, want %q", tt.cmd, tt.goos, got, tt.want)
+			}
+		})
+	}
+}

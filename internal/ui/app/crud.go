@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -368,11 +369,50 @@ func (m *Model) pathRemoved(p string, keepDirty bool) tea.Cmd {
 
 // editorCommand builds the $EDITOR command for the file at abs.
 func (m *Model) editorCommand(abs string) *exec.Cmd {
-	fields := strings.Fields(m.opts.Config.EditorCommand(os.Getenv, runtime.GOOS))
+	fields := splitCommand(m.opts.Config.EditorCommand(os.Getenv, runtime.GOOS), runtime.GOOS)
 	if len(fields) == 0 {
 		fields = []string{"nano"}
 	}
 	return exec.Command(fields[0], append(fields[1:], abs)...) //nolint:gosec // the user's own editor
+}
+
+// splitCommand splits an editor setting into the program and its
+// arguments. Words are separated by blanks; double quotes, and on Unix
+// single quotes too, group a word holding blanks, such as
+// "C:\Program Files\Notepad++\notepad++.exe". Backslashes are kept as they
+// are: on Windows they separate paths.
+func splitCommand(s, goos string) []string {
+	var (
+		args  []string
+		word  strings.Builder
+		inArg bool // a word has started, possibly as empty quotes
+		quote rune // the open quote, 0 outside quotes
+	)
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				word.WriteRune(r)
+			}
+		case r == '"' || (r == '\'' && goos != "windows"):
+			quote, inArg = r, true
+		case unicode.IsSpace(r):
+			if inArg {
+				args = append(args, word.String())
+				word.Reset()
+				inArg = false
+			}
+		default:
+			word.WriteRune(r)
+			inArg = true
+		}
+	}
+	if inArg {
+		args = append(args, word.String())
+	}
+	return args
 }
 
 // openExternal hands the vault file at rel to $EDITOR.

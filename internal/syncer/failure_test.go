@@ -86,7 +86,10 @@ func fakeSSHAuthFailure(t *testing.T, repo *gitsync.Repo) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GIT_SSH_COMMAND", script)
+	// git runs GIT_SSH_COMMAND through sh, even on Windows (Git for
+	// Windows' sh), where the backslashes of a native path would be read
+	// as escapes: pass the path quoted and with forward slashes.
+	t.Setenv("GIT_SSH_COMMAND", "'"+filepath.ToSlash(script)+"'")
 	gittest.Git(t, repo.Dir, "remote", "set-url", "origin", "ssh://git@example.invalid/notes.git")
 }
 

@@ -3,6 +3,7 @@ package vault
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -150,6 +151,9 @@ func TestTree(t *testing.T) {
 }
 
 func TestTreeUnreadableSubdir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows ignores directory permission bits: chmod cannot make a folder unreadable")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}

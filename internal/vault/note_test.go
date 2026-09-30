@@ -2,8 +2,10 @@ package vault
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -69,6 +71,9 @@ func TestSaveAndRead(t *testing.T) {
 }
 
 func TestSavePreservesMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no permission bits beyond read-only: every writable file reports 0666")
+	}
 	v := openVault(t)
 	mkfiles(t, v.Root, "m.md")
 	if err := os.Chmod(v.Abs("m.md"), 0o600); err != nil {
@@ -189,6 +194,43 @@ func TestCreateNoteCollidesWithFolder(t *testing.T) {
 	}
 	if rel != "Idea 2.md" {
 		t.Errorf("rel = %q, want %q", rel, "Idea 2.md")
+	}
+}
+
+// TestClaimSkipsTakenNames: a taken name is a collision whatever error
+// creating it gives. On Windows, opening a folder as a new file fails with
+// "is a directory", not fs.ErrExist.
+func TestClaimSkipsTakenNames(t *testing.T) {
+	errIsDir := errors.New("is a directory")
+	errDisk := errors.New("disk on fire")
+	tests := []struct {
+		name    string
+		takenFn func(abs string) error // create's error for a taken name
+		freeErr error                  // create's error for a free name
+		wantRel string
+		wantErr error
+	}{
+		{"taken reports exists", func(string) error { return fs.ErrExist }, nil, "Idea 2.md", nil},
+		{"taken reports another error", func(string) error { return errIsDir }, nil, "Idea 2.md", nil},
+		{"free name fails", func(string) error { return fs.ErrExist }, errDisk, "", errDisk},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := openVault(t)
+			mkfiles(t, v.Root, "Idea.md/")
+			rel, err := v.claim("", "Idea", noteExt, func(abs string) error {
+				if _, err := os.Lstat(abs); err == nil {
+					return tt.takenFn(abs)
+				}
+				if tt.freeErr != nil {
+					return tt.freeErr
+				}
+				return os.WriteFile(abs, nil, 0o644)
+			})
+			if !errors.Is(err, tt.wantErr) || rel != tt.wantRel {
+				t.Fatalf("claim = %q, %v; want %q, %v", rel, err, tt.wantRel, tt.wantErr)
+			}
+		})
 	}
 }
 

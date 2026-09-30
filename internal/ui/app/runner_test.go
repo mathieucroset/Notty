@@ -29,9 +29,16 @@ import (
 //     waitFor delivers them.
 //
 // Any other command still running after cmdLimit fails the test.
+//
+// waitFor gives up after waitLimit. It returns as soon as its condition
+// holds, so the limit only matters for a test about to fail; it is
+// generous because what it waits on may be real git work in the
+// background (a first sync with a merge), which a busy Windows runner has
+// taken more than 5s to finish.
 const (
 	tickWindow = 200 * time.Millisecond
 	cmdLimit   = 5 * time.Second
+	waitLimit  = 30 * time.Second
 )
 
 // bgCmd is a command running in the background.
@@ -214,13 +221,13 @@ func execCmd(t *testing.T, m *Model, cmd tea.Cmd) []tea.Msg {
 }
 
 // waitFor processes background messages (watcher events) until cond holds,
-// failing after 5s.
+// failing after waitLimit.
 func waitFor(t *testing.T, m *Model, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(cmdLimit)
+	deadline := time.Now().Add(waitLimit)
 	for !cond() {
 		if time.Now().After(deadline) {
-			t.Fatal("condition not met after 5s")
+			t.Fatalf("condition not met after %v", waitLimit)
 		}
 		if msgs := collect(m, false); len(msgs) > 0 {
 			drive(t, m, msgs)
