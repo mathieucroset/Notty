@@ -30,14 +30,20 @@ func TestLargeCountsAreFast(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			start := time.Now()
-			_, b, _ := run(t, tt.in, tt.keys)
-			elapsed := time.Since(start)
-			if !tt.check(b) {
-				t.Errorf("wrong result: %d lines, line 0 len %d", b.LineCount(), b.LineLen(0))
+			// The fastest of a few runs, against a budget far above normal
+			// (a few ms) and far below a count handled one step at a time
+			// (seconds): a busy CI runner can't fail it, a regression can.
+			best := time.Duration(1<<63 - 1)
+			for range 3 {
+				start := time.Now()
+				_, b, _ := run(t, tt.in, tt.keys)
+				best = min(best, time.Since(start))
+				if !tt.check(b) {
+					t.Fatalf("wrong result: %d lines, line 0 len %d", b.LineCount(), b.LineLen(0))
+				}
 			}
-			if elapsed > 50*time.Millisecond*raceSlowdown {
-				t.Errorf("took %v", elapsed)
+			if best > 250*time.Millisecond*raceSlowdown {
+				t.Errorf("fastest of 3 runs took %v", best)
 			}
 		})
 	}
