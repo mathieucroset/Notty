@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -32,8 +33,20 @@ func LoadState(path string) State {
 	return s
 }
 
-// Save writes s to path atomically (a temp file renamed into place), with
-// mode 0o600, creating the directory (0o700) if needed.
+// Temp files Save writes: tmpPrefix + random + tmpSuffix. One older than
+// staleTemp was left behind by a crash and is removed.
+const (
+	tmpPrefix = ".update-check-"
+	tmpSuffix = ".tmp"
+	staleTemp = time.Minute
+)
+
+// Save writes s to path atomically (a temp file synced, then renamed into
+// place), with mode 0o600, creating the directory (0o700) if needed. It
+// also removes temp files a crashed save left behind.
+//
+// Two instances starting at once may each run the check and show the toast
+// once, and the last write wins; that is accepted rather than locking.
 func (s State) Save(path string) error {
 	data, err := json.Marshal(s)
 	if err != nil {
@@ -43,7 +56,8 @@ func (s State) Save(path string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("update: creating state directory %s: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".update-check-*.tmp")
+	removeStaleTemps(dir, time.Now())
+	tmp, err := os.CreateTemp(dir, tmpPrefix+"*"+tmpSuffix)
 	if err != nil {
 		return fmt.Errorf("update: creating temp state file in %s: %w", dir, err)
 	}
@@ -58,6 +72,10 @@ func (s State) Save(path string) error {
 		_ = tmp.Close()
 		return fmt.Errorf("update: setting state file mode: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("update: syncing temp state file %s: %w", tmpPath, err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("update: closing temp state file %s: %w", tmpPath, err)
 	}
@@ -65,6 +83,26 @@ func (s State) Save(path string) error {
 		return fmt.Errorf("update: renaming temp state file to %s: %w", path, err)
 	}
 	return nil
+}
+
+// removeStaleTemps removes Save's temp files in dir older than staleTemp,
+// best effort: a newer one may belong to another instance saving now.
+func removeStaleTemps(dir string, now time.Time) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.Type().IsRegular() || !strings.HasPrefix(name, tmpPrefix) || !strings.HasSuffix(name, tmpSuffix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || now.Sub(info.ModTime()) <= staleTemp {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, name))
+	}
 }
 
 // Due reports whether a network check is needed: never checked, or

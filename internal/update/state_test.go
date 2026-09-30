@@ -92,6 +92,54 @@ func TestSaveRoundTrips(t *testing.T) {
 	}
 }
 
+func TestSaveRemovesStaleTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	files := []struct {
+		name string
+		age  time.Duration
+		kept bool
+	}{
+		{".update-check-111.tmp", 2 * time.Minute, false},   // left by a crash
+		{".update-check-222.tmp", 48 * time.Hour, false},    // long gone
+		{".update-check-333.tmp", 10 * time.Second, true},   // another instance saving now
+		{".notty-config-444.tmp", 48 * time.Hour, true},     // not ours
+		{"update-check-555.tmp", 48 * time.Hour, true},      // not ours
+		{".update-check-666.tmp.bak", 48 * time.Hour, true}, // not ours
+		{"notty.log", 48 * time.Hour, true},                 // not ours
+		{"repo-1234abcd.json", 48 * time.Hour, true},        // not ours
+		{".update-check-777.tmpx", 48 * time.Hour, true},    // not ours
+		{".update-check-.tmp", 2 * time.Minute, false},      // empty random part
+		{".update-check-888.tmp", 61 * time.Second, false},  // just over a minute
+		{".update-check-999.tmp", 59 * time.Second, true},   // just under a minute
+		{".update-check-000.tmp", -time.Hour, true},         // from the future
+		{".update-check-aaa.tmp", time.Minute + time.Hour, false},
+	}
+	for _, f := range files {
+		p := filepath.Join(dir, f.name)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		mt := now.Add(-f.age)
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(dir, "update-check.json")
+	if err := (State{Latest: "v0.2.0"}).Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	for _, f := range files {
+		_, err := os.Stat(filepath.Join(dir, f.name))
+		if kept := err == nil; kept != f.kept {
+			t.Errorf("%s (age %v): kept = %v, want %v", f.name, f.age, kept, f.kept)
+		}
+	}
+	if got := LoadState(path); got.Latest != "v0.2.0" {
+		t.Errorf("state not saved: %+v", got)
+	}
+}
+
 func TestSaveFailsWhenTheDirIsAFile(t *testing.T) {
 	blocker := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
