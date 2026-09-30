@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -159,35 +160,54 @@ func TestAddAndRemove(t *testing.T) {
 }
 
 func TestAddRemoveLiteralPaths(t *testing.T) {
-	env := gittest.New(t)
-	r := env.Laptop
-	for _, p := range []string{"a[1].md", "a1.md", ":odd.md", "*.md"} {
-		gittest.Write(t, r, p, p+"\n")
+	tests := []struct {
+		name string
+		// literal is a file name git would read as a pattern or as
+		// pathspec magic; bystander is a file that reading would match.
+		literal, bystander string
+		// windowsInvalid names cannot exist on Windows, which reserves
+		// ':' and '*' in file names.
+		windowsInvalid bool
+	}{
+		{"glob brackets", "a[1].md", "a1.md", false},
+		{"glob star", "*.md", "a1.md", true},
+		{"pathspec magic", ":odd.md", "odd.md", true},
 	}
-	if err := r.Add("a[1].md", ":odd.md"); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-	if got := gittest.Git(t, r.Dir, "diff", "--cached", "--name-only"); got != ":odd.md\na[1].md" {
-		t.Fatalf("staged = %q, want only the literal paths", got)
-	}
-	gittest.CommitAll(t, r, "all")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.windowsInvalid && runtime.GOOS == "windows" {
+				t.Skip(`Windows reserves ':' and '*' in file names`)
+			}
+			env := gittest.New(t)
+			r := env.Laptop
+			for _, p := range []string{tt.literal, tt.bystander} {
+				gittest.Write(t, r, p, p+"\n")
+			}
+			if err := r.Add(tt.literal); err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+			if got := gittest.Git(t, r.Dir, "diff", "--cached", "--name-only"); got != tt.literal {
+				t.Fatalf("staged = %q, want only %q", got, tt.literal)
+			}
+			gittest.CommitAll(t, r, "all")
 
-	if err := r.Remove("a[1].md", "*.md"); err != nil {
-		t.Fatalf("Remove: %v", err)
-	}
-	if got := gittest.Git(t, r.Dir, "ls-files"); got != ":odd.md\nREADME.md\na1.md" {
-		t.Fatalf("tracked after Remove = %q, want a1.md and README.md kept", got)
-	}
-	for _, p := range []string{"a1.md", ":odd.md", "README.md"} {
-		if _, err := os.Stat(filepath.Join(r.Dir, p)); err != nil {
-			t.Errorf("%s deleted by Remove of a glob-like path: %v", p, err)
-		}
-	}
-	if err := r.Remove(":odd.md"); err != nil {
-		t.Fatalf("Remove(:odd.md): %v", err)
-	}
-	if got := gittest.Git(t, r.Dir, "ls-files"); got != "README.md\na1.md" {
-		t.Fatalf("tracked after Remove(:odd.md) = %q", got)
+			if err := r.Remove(tt.literal); err != nil {
+				t.Fatalf("Remove: %v", err)
+			}
+			want := []string{"README.md", tt.bystander}
+			slices.Sort(want)
+			if got := gittest.Git(t, r.Dir, "ls-files"); got != strings.Join(want, "\n") {
+				t.Fatalf("tracked after Remove = %q, want %q", got, want)
+			}
+			for _, p := range want {
+				if _, err := os.Stat(filepath.Join(r.Dir, p)); err != nil {
+					t.Errorf("%s deleted by Remove(%q): %v", p, tt.literal, err)
+				}
+			}
+			if _, err := os.Lstat(filepath.Join(r.Dir, tt.literal)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("%s still on disk after Remove (stat err %v)", tt.literal, err)
+			}
+		})
 	}
 }
 
