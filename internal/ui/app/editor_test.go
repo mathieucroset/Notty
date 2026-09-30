@@ -11,6 +11,7 @@ import (
 	"github.com/mathieucroset/notty/internal/buffer"
 	"github.com/mathieucroset/notty/internal/ui/editor"
 	"github.com/mathieucroset/notty/internal/ui/msgs"
+	"github.com/mathieucroset/notty/internal/vault"
 )
 
 // fakeClipboard keeps tests away from the system clipboard.
@@ -149,15 +150,31 @@ func TestSwitchingNotesSavesAndRemembersCursor(t *testing.T) {
 	}
 }
 
+// blockSave makes saving the note at rel fail, on every OS, by putting a
+// folder in its place (chmod cannot: Windows ignores a folder's permission
+// bits). unblock removes the folder, so the next save recreates the note.
+func blockSave(t *testing.T, v *vault.Vault, rel string) (unblock func()) {
+	t.Helper()
+	abs := v.Abs(rel)
+	if err := os.Remove(abs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(abs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		if err := os.Remove(abs); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestSwitchKeepsNoteOpenWhenSaveFails(t *testing.T) {
 	opts := testOptions(t)
 	m := openNote(t, opts, "ideas.md")
 	insertText(t, m, "unsaved ")
-	root := opts.Vault.Root
-	if err := os.Chmod(root, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	unblock := blockSave(t, opts.Vault, "ideas.md")
 	run(t, m, msgs.OpenNoteMsg{Path: "Work/Standup notes.md", Line: -1})
 	if m.NotePath() != "ideas.md" || !strings.HasPrefix(m.editor.Content(), "unsaved ") || !m.editor.Dirty() {
 		t.Fatalf("switch went ahead after a failed save: open %q", m.NotePath())
@@ -166,9 +183,7 @@ func TestSwitchKeepsNoteOpenWhenSaveFails(t *testing.T) {
 		t.Errorf("toasts = %v", toastTexts(m))
 	}
 	// Once saving works again, switching saves then loads.
-	if err := os.Chmod(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	unblock()
 	run(t, m, msgs.OpenNoteMsg{Path: "Work/Standup notes.md", Line: -1})
 	if m.NotePath() != "Work/Standup notes.md" {
 		t.Fatalf("open note = %q", m.NotePath())
