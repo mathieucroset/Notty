@@ -50,7 +50,10 @@ brew install mathieucroset/tap/notty
 `update_check` under [Configuration](#configuration)). To upgrade:
 
 - Go install: run the same `go install …@latest` command again.
-- From source: pull the latest changes, then `make install` again.
+- From source: pull the latest changes, then `make install` again. (A
+  build made exactly at a release tag checks for updates, but its toast
+  shows the generic "download" hint; pulling and running `make install`
+  again is still the way to update.)
 - GitHub Releases: download the new binary and replace the old one.
 - Homebrew: `brew upgrade notty`.
 
