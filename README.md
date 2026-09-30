@@ -3,9 +3,6 @@
 A terminal markdown notes app with automatic GitHub sync, built in Go with
 Bubble Tea.
 
-![Notty](docs/screenshot.png)
-<!-- TODO: replace with a real screenshot of the main screen once the UI has shipped. -->
-
 ## Features
 
 - Folders and plain markdown notes, organized in a tree sidebar
