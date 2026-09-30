@@ -2,10 +2,13 @@ package watcher
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +28,50 @@ func newTestWatcher(t *testing.T, root string) *Watcher {
 	}
 	t.Cleanup(func() { _ = w.Close() })
 	return w
+}
+
+// logBuffer collects a watcher's log.
+type logBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *logBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *logBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// count is the number of log lines containing s.
+func (l *logBuffer) count(s string) int {
+	n := 0
+	for line := range strings.Lines(l.String()) {
+		if strings.Contains(line, s) {
+			n++
+		}
+	}
+	return n
+}
+
+func (l *logBuffer) logger() *slog.Logger { return slog.New(slog.NewTextHandler(l, nil)) }
+
+// newLoggedWatcher is newTestWatcher with the watcher's log captured.
+func newLoggedWatcher(t *testing.T, root string) (*Watcher, *logBuffer) {
+	t.Helper()
+	log := &logBuffer{}
+	w, err := newWatcher(root, log.logger())
+	if err != nil {
+		t.Fatalf("newWatcher: %v", err)
+	}
+	w.start()
+	t.Cleanup(func() { _ = w.Close() })
+	return w, log
 }
 
 func writeFile(t *testing.T, root, rel, content string) {
@@ -148,7 +195,7 @@ func TestDirectoryWriteNotRecorded(t *testing.T) {
 			root := t.TempDir()
 			writeFile(t, root, "Work/Standup.md", "x")
 			writeFile(t, root, "a.md", "x")
-			w, err := newWatcher(root) // event loop not started
+			w, err := newWatcher(root, nil) // event loop not started
 			if err != nil {
 				t.Fatalf("newWatcher: %v", err)
 			}
@@ -312,7 +359,7 @@ func TestSelfWriteStamp(t *testing.T) {
 				t.Skip("no inode/ctime on this platform")
 			}
 			root := t.TempDir()
-			w, err := newWatcher(root) // event loop not started
+			w, err := newWatcher(root, nil) // event loop not started
 			if err != nil {
 				t.Fatalf("newWatcher: %v", err)
 			}
@@ -710,21 +757,15 @@ func TestUnreadableSubdirectoryIsNotFatal(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 
-	w := newTestWatcher(t, root)
-
-	select {
-	case err := <-w.Errors():
-		if err == nil {
-			t.Fatal("nil error delivered")
-		}
-	case <-time.After(waitTimeout):
-		t.Fatal("no error reported for the unreadable directory")
-	}
+	w, log := newLoggedWatcher(t, root)
 
 	writeFile(t, root, "a.md", "still watched")
-	ev := nextEvent(t, w) // also fails on any further error
+	ev := nextEvent(t, w) // also fails on any watcher error
 	if !slices.Equal(ev.Paths, []string{"a.md"}) {
 		t.Fatalf("paths = %v, want [a.md]", ev.Paths)
+	}
+	if n := log.count("dir=locked"); n != 1 {
+		t.Fatalf("locked logged %d times, want 1:\n%s", n, log)
 	}
 }
 
@@ -733,7 +774,7 @@ func TestUnreadableNewSubdirectoryIsNotFatal(t *testing.T) {
 		t.Skip("needs a non-root user on a POSIX system to deny directory access")
 	}
 	root := t.TempDir()
-	w := newTestWatcher(t, root)
+	w, log := newLoggedWatcher(t, root)
 
 	// Created with no permissions at all, so the watcher cannot watch it.
 	locked := filepath.Join(root, "locked")
@@ -741,19 +782,59 @@ func TestUnreadableNewSubdirectoryIsNotFatal(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
-
-	select {
-	case err := <-w.Errors():
-		if err == nil {
-			t.Fatal("nil error delivered")
-		}
-	case <-time.After(waitTimeout):
-		t.Fatal("no error reported for the unreadable directory")
-	}
-	collectUntil(t, w, "locked")
+	collectUntil(t, w, "locked") // also fails on any watcher error
 
 	writeFile(t, root, "sub/a.md", "still watched")
 	collectUntil(t, w, "sub/a.md")
+	if n := log.count("dir=locked"); n != 1 {
+		t.Fatalf("locked logged %d times, want 1:\n%s", n, log)
+	}
+}
+
+// TestUnwatchableDirectoryLoggedOnce feeds the watcher the same creation
+// event twice, as the kqueue backend (macOS, BSD) does for an entry it
+// cannot open: the directory is logged once, and never reported on Errors.
+// Once it is gone, a new one by the same name is logged again.
+func TestUnwatchableDirectoryLoggedOnce(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a non-root user on a POSIX system to deny directory access")
+	}
+	root := t.TempDir()
+	log := &logBuffer{}
+	w, err := newWatcher(root, log.logger()) // event loop not started
+	if err != nil {
+		t.Fatalf("newWatcher: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+
+	locked := filepath.Join(root, "locked")
+	mkLocked := func() {
+		t.Helper()
+		if err := os.Mkdir(locked, 0); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	mkLocked()
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	create := fsnotify.Event{Name: locked, Op: fsnotify.Create}
+	w.handle(create, time.Now())
+	w.handle(create, time.Now())
+	if n := log.count("dir=locked"); n != 1 {
+		t.Fatalf("locked logged %d times, want 1:\n%s", n, log)
+	}
+	if n := len(w.errors); n != 0 {
+		t.Fatalf("%d errors reported, want none: %v", n, <-w.errors)
+	}
+
+	if err := os.Remove(locked); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	w.handle(fsnotify.Event{Name: locked, Op: fsnotify.Remove}, time.Now())
+	mkLocked()
+	w.handle(create, time.Now())
+	if n := log.count("dir=locked"); n != 2 {
+		t.Fatalf("locked logged %d times after being recreated, want 2:\n%s", n, log)
+	}
 }
 
 func TestRootRemovalReportsError(t *testing.T) {
@@ -794,7 +875,7 @@ func TestRootRemovalReportsError(t *testing.T) {
 func TestOverflowDeliveredWhenErrorBufferFullAndWatchesResynced(t *testing.T) {
 	root := t.TempDir()
 	mkdir(t, root, "missed")
-	w, err := newWatcher(root)
+	w, err := newWatcher(root, nil)
 	if err != nil {
 		t.Fatalf("newWatcher: %v", err)
 	}

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
 	"github.com/mathieucroset/notty/internal/meta"
@@ -144,7 +143,7 @@ func TestPinTogglePersists(t *testing.T) {
 // the selected note, # opens the tag picker and enter filters by the tag.
 func TestPinAndFilterFlow(t *testing.T) {
 	opts := taggedOptions(t)
-	tm := teatest.NewTestModel(t, New(opts), teatest.WithInitialTermSize(120, 30))
+	tm := newProgram(t, opts)
 	waitScreen(t, tm, "#work")
 
 	// Rows: Work, ideas.md. Pin ideas.
@@ -161,7 +160,7 @@ func TestPinAndFilterFlow(t *testing.T) {
 
 	tm.Send(keyMsg("ctrl+q"))
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
-	final := tm.FinalModel(t).(*Model)
+	final := finalModel(t, tm)
 	if final.filterTag != "work" {
 		t.Errorf("filterTag = %q, want work", final.filterTag)
 	}
@@ -172,18 +171,4 @@ func TestPinAndFilterFlow(t *testing.T) {
 	if !reflect.DeepEqual(saved.Pins, []string{"ideas.md"}) {
 		t.Errorf("saved pins = %v", saved.Pins)
 	}
-}
-
-// waitScreen waits until the program's output contains every want.
-func waitScreen(t *testing.T, tm *teatest.TestModel, want ...string) {
-	t.Helper()
-	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
-		s := ansi.Strip(string(b))
-		for _, w := range want {
-			if !strings.Contains(s, w) {
-				return false
-			}
-		}
-		return true
-	}, teatest.WithDuration(5*time.Second))
 }

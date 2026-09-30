@@ -28,7 +28,7 @@ func TestWatcherExternalEditRefreshes(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = w.Close() })
 	opts.Watcher = w
-	tm := teatest.NewTestModel(t, New(opts), teatest.WithInitialTermSize(120, 30))
+	tm := newProgram(t, opts)
 	waitScreen(t, tm, "N O T E S", "ideas")
 
 	writeFile(t, opts.Vault, "ideas.md", "# Ideas\n\nnow tagged #fresh\n")
@@ -37,7 +37,7 @@ func TestWatcherExternalEditRefreshes(t *testing.T) {
 
 	tm.Send(keyMsg("ctrl+q"))
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
-	final := tm.FinalModel(t).(*Model)
+	final := finalModel(t, tm)
 	if n, ok := final.ix.Get("ideas.md"); !ok || !index.HasTag(n, "fresh") {
 		t.Errorf("index not refreshed: %+v", n)
 	}

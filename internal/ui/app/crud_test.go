@@ -55,7 +55,7 @@ func hasToast(m *Model, level msgs.ToastLevel, substr string) bool {
 // the note opens.
 func TestCreateFolderThenNoteFlow(t *testing.T) {
 	opts := testOptions(t)
-	tm := teatest.NewTestModel(t, New(opts), teatest.WithInitialTermSize(120, 30))
+	tm := newProgram(t, opts)
 	waitScreen(t, tm, "N O T E S", "ideas")
 
 	// Rows: Work, ideas.md. On ideas, N creates the folder at the root.
@@ -78,7 +78,7 @@ func TestCreateFolderThenNoteFlow(t *testing.T) {
 
 	tm.Send(keyMsg("ctrl+q"))
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
-	final := tm.FinalModel(t).(*Model)
+	final := finalModel(t, tm)
 	if final.NotePath() != "Projects/Standup.md" {
 		t.Errorf("NotePath = %q, want Projects/Standup.md", final.NotePath())
 	}

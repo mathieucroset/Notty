@@ -145,7 +145,7 @@ func TestQuitDeletesKittyImages(t *testing.T) {
 	writeFile(t, opts.Vault, "pics.md", "# Pics\n\n![](/attachments/pic.png)\n")
 	opts.Local.LastNote = "pics.md"
 
-	tm := teatest.NewTestModel(t, New(opts), teatest.WithInitialTermSize(120, 30))
+	tm := newProgram(t, opts)
 	waitScreen(t, tm, "Pics")
 	tm.Send(keyMsg("ctrl+g"))
 	tm.Send(keyMsg("ctrl+g"))
@@ -154,7 +154,7 @@ func TestQuitDeletesKittyImages(t *testing.T) {
 	}, teatest.WithDuration(5*time.Second))
 	tm.Send(keyMsg("ctrl+q"))
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
-	final := tm.FinalModel(t).(*Model)
+	final := finalModel(t, tm)
 	if final.preview.KittyCleanup() == "" {
 		t.Fatal("no Kitty image was recorded as transmitted")
 	}
