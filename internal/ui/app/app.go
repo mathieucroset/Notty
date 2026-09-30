@@ -195,8 +195,11 @@ type Model struct {
 	// ix is the note index, nil until the startup build finishes.
 	ix       *index.Index
 	indexing bool
-	// pendingIndex holds paths changed while the startup index was
-	// building; they are re-read once it lands.
+	// indexGen numbers the index builds: 0 at startup, then one per
+	// rebuild; only the newest build is installed.
+	indexGen int
+	// pendingIndex holds paths changed while an index was building;
+	// they are re-read once it lands.
 	pendingIndex []string
 	// filterTag is the tag the sidebar tree is filtered by, or "".
 	filterTag string
@@ -375,7 +378,7 @@ func (m *Model) Init() tea.Cmd {
 		return warnings
 	}
 	m.indexing = true
-	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault), m.startupTrashCmd(),
+	return tea.Batch(loadTreeCmd(m.opts.Vault), buildIndexCmd(m.opts.Vault, 0), m.startupTrashCmd(),
 		listenWatcherCmd(m.opts.Watcher), m.reopenLastNoteCmd(), m.readyTickCmd(), m.startSyncCmds(),
 		listRecoveredCmd(m.opts.Vault), m.startUpdateCheck(), warnings)
 }

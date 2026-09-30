@@ -90,6 +90,12 @@ type barrier struct {
 // renamed. The watcher reports nothing further; the caller should close it.
 var ErrRootGone = errors.New("watcher: vault root was removed or renamed")
 
+// ErrEventsLost is matched (errors.Is) by the error delivered on Errors when
+// changes were missed: after an event queue overflow, or once a stopped
+// watch was restarted. The caller should re-index the whole vault. It is
+// fsnotify.ErrEventOverflow.
+var ErrEventsLost = fsnotify.ErrEventOverflow
+
 // ErrWatchStopped is delivered on Errors when the operating system stopped
 // reporting changes (on Windows, the vault's watch failed) and restarting
 // the watch did not work: changes made outside the app are no longer
@@ -235,11 +241,9 @@ func (w *Watcher) start() {
 func (w *Watcher) Events() <-chan Event { return w.events }
 
 // Errors delivers watcher errors: directories that cannot be read or watched
-// (except for lack of permission, which is only logged); lost events, as an
-// error matching fsnotify.ErrEventOverflow, after which the caller should
-// re-index the whole vault (never while paused: the caller re-indexes after
-// the git operation anyway); ErrWatchStopped; and ErrRootGone. It is closed
-// by Close.
+// (except for lack of permission, which is only logged); ErrEventsLost, never
+// while paused (the caller re-indexes after the git operation anyway);
+// ErrWatchStopped; and ErrRootGone. It is closed by Close.
 func (w *Watcher) Errors() <-chan error { return w.errors }
 
 // NoteSelfWrite records that the app has just written rel (call it right after

@@ -11,35 +11,65 @@ import (
 	"github.com/mathieucroset/notty/internal/vault"
 )
 
-// indexBuiltMsg carries the index built at startup.
+// indexBuiltMsg carries a freshly built index: the startup one, or a
+// rebuild (gen > 0) after the watcher lost events.
 type indexBuiltMsg struct {
 	ix  *index.Index
 	err error
+	gen int
 }
 
 // indexChangedMsg reports that the index was updated off the UI goroutine,
 // so the views derived from it (tags, filter, tasks) must be refreshed.
 type indexChangedMsg struct{}
 
-// buildIndexCmd indexes the whole vault off the UI goroutine.
-func buildIndexCmd(v *vault.Vault) tea.Cmd {
+// buildIndexCmd indexes the whole vault off the UI goroutine; gen numbers
+// the build (0 at startup).
+func buildIndexCmd(v *vault.Vault, gen int) tea.Cmd {
 	return func() tea.Msg {
 		ix, err := index.Build(v)
-		return indexBuiltMsg{ix: ix, err: err}
+		return indexBuiltMsg{ix: ix, err: err, gen: gen}
 	}
 }
 
-// handleIndexBuilt installs the startup index and warns once about
-// per-file problems.
+// rebuildIndex indexes the whole vault again, after the watcher lost
+// events. The current index serves until the new one lands; the changes
+// seen meanwhile are replayed on it.
+func (m *Model) rebuildIndex() tea.Cmd {
+	if m.opts.Vault == nil {
+		return nil
+	}
+	m.indexGen++
+	m.indexing = true
+	return buildIndexCmd(m.opts.Vault, m.indexGen)
+}
+
+// handleIndexBuilt installs a freshly built index and replays the changes
+// seen while it was built. It warns once, at startup, about per-file
+// problems; after a rebuild it forgets the notes that are gone.
 func (m *Model) handleIndexBuilt(msg indexBuiltMsg) tea.Cmd {
+	if msg.gen != m.indexGen {
+		return nil // superseded by a newer build
+	}
 	m.indexing = false
 	if msg.err != nil {
+		if msg.gen > 0 {
+			m.pendingIndex = nil // the current index was kept up to date
+			return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not index the vault again: %v", msg.err))
+		}
 		return m.pushToast(msgs.ToastError, fmt.Sprintf("Could not index the vault: %v", msg.err))
 	}
+	old := m.ix
 	m.ix = msg.ix
+	if p := m.editor.Path(); p != "" && m.editor.Dirty() {
+		m.ix.UpdateContent(p, m.editor.Content()) // the index follows the buffer
+	}
 	m.refreshIndexViews()
 	replay := reindexCmd(m.opts.Vault, m.ix, m.pendingIndex)
 	m.pendingIndex = nil
+	if msg.gen > 0 {
+		return tea.Batch(replay, goneCmd(m.opts.Vault, droppedNotes(old, m.ix)))
+	}
 	problems := m.ix.Problems()
 	switch len(problems) {
 	case 0:
@@ -50,10 +80,24 @@ func (m *Model) handleIndexBuilt(msg indexBuiltMsg) tea.Cmd {
 	return tea.Batch(replay, m.pushToast(msgs.ToastWarn, fmt.Sprintf("%d notes have problems, first: %v", len(problems), problems[0])))
 }
 
-// queueReindex remembers paths changed while the startup index builds (the
-// build may have read them before the change), to re-read once it lands.
+// droppedNotes lists the notes of old that are missing from ix.
+func droppedNotes(old, ix *index.Index) []string {
+	if old == nil {
+		return nil
+	}
+	var gone []string
+	for _, n := range old.Notes() {
+		if _, ok := ix.Get(n.Path); !ok {
+			gone = append(gone, n.Path)
+		}
+	}
+	return gone
+}
+
+// queueReindex remembers paths changed while the index builds (the build
+// may have read them before the change), to re-read once it lands.
 func (m *Model) queueReindex(paths ...string) {
-	if m.ix != nil || !m.indexing {
+	if !m.indexing {
 		return
 	}
 	for _, p := range paths {

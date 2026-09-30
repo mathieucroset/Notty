@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -108,6 +109,62 @@ func TestWatcherErrors(t *testing.T) {
 	}
 	run(t, m, watchErrMsg{err: watcher.ErrRootGone})
 	if !hasToast(m, msgs.ToastError, "vault folder was removed") {
+		t.Errorf("toasts = %v", toastTexts(m))
+	}
+}
+
+func TestWatcherLostEventsReindexVault(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"overflow", fmt.Errorf("watcher: events lost: %w", watcher.ErrEventsLost)},
+		{"restarted watch", fmt.Errorf("watcher: events lost: %w (read failed)", watcher.ErrEventsLost)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := testOptions(t)
+			opts.Pins = &meta.State{Pins: []string{"Work/Standup notes.md"}}
+			m := start(t, opts, 120, 30)
+			run(t, m, msgs.OpenNoteMsg{Path: "ideas.md", Line: -1})
+
+			// Changes whose events were lost.
+			writeFile(t, opts.Vault, "ideas.md", "# Ideas\n\nchanged unseen #lost\n")
+			writeFile(t, opts.Vault, "Unseen.md", "# Unseen\n")
+			if err := os.Remove(filepath.Join(opts.Vault.Root, "Work", "Standup notes.md")); err != nil {
+				t.Fatal(err)
+			}
+			run(t, m, watchErrMsg{err: tc.err})
+
+			if !strings.Contains(screen(m), "changed unseen") {
+				t.Errorf("open note not reloaded:\n%s", screen(m))
+			}
+			if n, _ := m.ix.Get("ideas.md"); !index.HasTag(n, "lost") {
+				t.Error("changed note not re-indexed")
+			}
+			if _, ok := m.ix.Get("Unseen.md"); !ok {
+				t.Error("new note not indexed")
+			}
+			if _, ok := m.ix.Get("Work/Standup notes.md"); ok {
+				t.Error("deleted note still indexed")
+			}
+			if len(opts.Pins.Pins) != 0 {
+				t.Errorf("pins = %v, want the deleted note's pin gone", opts.Pins.Pins)
+			}
+			if m.indexing {
+				t.Error("still indexing")
+			}
+			if texts := toastTexts(m); len(texts) != 0 {
+				t.Errorf("toasts = %v, want none", texts)
+			}
+		})
+	}
+}
+
+func TestWatcherStoppedToasts(t *testing.T) {
+	m := start(t, testOptions(t), 120, 30)
+	run(t, m, watchErrMsg{err: fmt.Errorf("%w: C:\\vault: read failed", watcher.ErrWatchStopped)})
+	if !hasToast(m, msgs.ToastError, "changes made outside Notty are no longer noticed") {
 		t.Errorf("toasts = %v", toastTexts(m))
 	}
 }

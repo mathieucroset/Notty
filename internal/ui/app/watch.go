@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,9 +109,19 @@ func (m *Model) handlePathsGone(msg pathsGoneMsg) tea.Cmd {
 }
 
 // handleWatchErr reports a watcher error. When the vault root itself is
-// gone the watcher stops for good.
+// gone the watcher stops for good. Lost events are recovered by indexing
+// the whole vault again and re-reading the tree and the open note.
 func (m *Model) handleWatchErr(msg watchErrMsg) tea.Cmd {
-	if errors.Is(msg.err, watcher.ErrRootGone) {
+	switch {
+	case errors.Is(msg.err, watcher.ErrEventsLost):
+		slog.Warn("file watcher lost events: re-indexing the vault", "err", msg.err)
+		return tea.Batch(m.rebuildIndex(), loadTreeCmd(m.opts.Vault), m.reloadNoteIf(m.note.path),
+			listenWatcherCmd(m.opts.Watcher))
+	case errors.Is(msg.err, watcher.ErrWatchStopped):
+		return tea.Batch(m.pushToast(msgs.ToastError, fmt.Sprintf(
+			"Notty stopped watching the vault: changes made outside Notty are no longer noticed. Restart Notty to watch it again. (%v)",
+			msg.err)), listenWatcherCmd(m.opts.Watcher))
+	case errors.Is(msg.err, watcher.ErrRootGone):
 		var closeCmd tea.Cmd
 		if w := m.opts.Watcher; w != nil {
 			m.opts.Watcher = nil
