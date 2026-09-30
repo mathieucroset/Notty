@@ -926,6 +926,27 @@ func TestUnwatchableDirectoryLoggedOnce(t *testing.T) {
 	}
 }
 
+func TestSkipMessage(t *testing.T) {
+	tests := []struct {
+		goos       string
+		notNoticed bool // claims changes inside are not noticed
+	}{
+		{"linux", true},
+		{"darwin", true},
+		// The recursive watch of the root still reports changes inside a
+		// folder that cannot be listed.
+		{"windows", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.goos, func(t *testing.T) {
+			msg := skipMessage(tc.goos)
+			if got := strings.Contains(msg, "not noticed"); got != tc.notNoticed {
+				t.Fatalf("skipMessage(%s) = %q, claims changes are not noticed: %v, want %v", tc.goos, msg, got, tc.notNoticed)
+			}
+		})
+	}
+}
+
 func TestRootRemovalReportsError(t *testing.T) {
 	tests := []struct {
 		name   string

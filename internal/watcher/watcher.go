@@ -15,6 +15,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -800,7 +801,17 @@ func (w *Watcher) skip(rel string, err error) {
 		return
 	}
 	w.skipped[rel] = true
-	w.log.Warn("watcher: directory not readable, changes inside it are not noticed", "dir", rel, "err", err)
+	w.log.Warn(skipMessage(runtime.GOOS), "dir", rel, "err", err)
+}
+
+// skipMessage is the log message for a directory skipped for lack of
+// permission on goos. On Windows the root's recursive watch still reports
+// the changes inside it; only its current entries are not listed.
+func skipMessage(goos string) string {
+	if goos == "windows" {
+		return "watcher: directory not readable, its entries are not listed"
+	}
+	return "watcher: directory not readable, changes inside it are not noticed"
 }
 
 // unwatchTree drops the watches on rel and every directory below it, and
