@@ -136,15 +136,20 @@ func (s fileStamp) matches(info os.FileInfo) bool {
 // Watcher reports changes under a vault root. Create it with New and release
 // it with Close.
 type Watcher struct {
-	root   string
-	fsw    backend
-	log    *slog.Logger
-	events chan Event
-	errors chan error
-	done   chan struct{}
-	ctl    chan chan struct{} // barrier requests to the run goroutine
-	wg     sync.WaitGroup
-	once   sync.Once
+	root string
+	// rootInfo identifies the vault root directory as found by New: an
+	// event reporting the root removed or renamed while the root path
+	// still names that same directory (a rename only by case) is not a
+	// loss of the root.
+	rootInfo os.FileInfo
+	fsw      backend
+	log      *slog.Logger
+	events   chan Event
+	errors   chan error
+	done     chan struct{}
+	ctl      chan chan struct{} // barrier requests to the run goroutine
+	wg       sync.WaitGroup
+	once     sync.Once
 
 	pauseMu sync.Mutex // serializes Pause and Resume
 
@@ -200,12 +205,16 @@ func newWatcher(root string, log *slog.Logger) (*Watcher, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("watcher: root %q is not a directory", abs)
 	}
+	// Where the file ID is read lazily (Windows), read it now, while the
+	// path still names this directory.
+	_ = os.SameFile(info, info)
 	fsw, err := openBackend(abs)
 	if err != nil {
 		return nil, err
 	}
 	w := &Watcher{
 		root:       abs,
+		rootInfo:   info,
 		fsw:        fsw,
 		log:        log,
 		events:     make(chan Event),
@@ -610,7 +619,7 @@ func (w *Watcher) handle(fe fsnotify.Event, now time.Time) bool {
 		return false
 	}
 	if rel == "." {
-		if (fe.Has(fsnotify.Remove) || fe.Has(fsnotify.Rename)) && !w.rootGone {
+		if (fe.Has(fsnotify.Remove) || fe.Has(fsnotify.Rename)) && !w.rootGone && !w.rootStillThere() {
 			w.rootGone = true
 			w.urgent = append(w.urgent, ErrRootGone)
 		}
@@ -676,6 +685,13 @@ func (w *Watcher) handle(fe fsnotify.Event, now time.Time) bool {
 	}
 	w.pending[rel] = now
 	return true
+}
+
+// rootStillThere reports whether the root path still names the directory
+// New found there.
+func (w *Watcher) rootStillThere() bool {
+	info, err := os.Stat(w.root)
+	return err == nil && os.SameFile(info, w.rootInfo)
 }
 
 // flush moves the pending paths that have been quiet for debounce to the

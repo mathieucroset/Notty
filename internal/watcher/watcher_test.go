@@ -961,6 +961,49 @@ func TestRootRemovalReportsError(t *testing.T) {
 	}
 }
 
+// TestRootEventWhileRootStillThere: renaming the vault root only by case
+// (Notes -> notes) on a case-insensitive file system reports the root
+// renamed, although the path still names the same directory.
+func TestRootEventWhileRootStillThere(t *testing.T) {
+	tests := []struct {
+		name     string
+		change   func(t *testing.T, root string)
+		op       fsnotify.Op
+		wantGone bool
+	}{
+		{"renamed, same directory still at the path", func(*testing.T, string) {}, fsnotify.Rename, false},
+		{"removed, same directory still at the path", func(*testing.T, string) {}, fsnotify.Remove, false},
+		{"deleted", func(t *testing.T, root string) {
+			if err := os.RemoveAll(root); err != nil {
+				t.Fatal(err)
+			}
+		}, fsnotify.Remove, true},
+		{"replaced by another directory", func(t *testing.T, root string) {
+			if err := os.Rename(root, root+"-old"); err != nil {
+				t.Fatal(err)
+			}
+			mkdir(t, root, "")
+		}, fsnotify.Rename, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "vault")
+			mkdir(t, root, "")
+			w, err := newWatcher(root, nil) // event loop not started
+			if err != nil {
+				t.Fatalf("newWatcher: %v", err)
+			}
+			t.Cleanup(func() { _ = w.Close() })
+
+			tc.change(t, root)
+			w.handle(fsnotify.Event{Name: w.root, Op: tc.op}, time.Now())
+			if gone := slices.ContainsFunc(w.urgent, func(e error) bool { return errors.Is(e, ErrRootGone) }); gone != tc.wantGone {
+				t.Fatalf("ErrRootGone queued = %v, want %v", gone, tc.wantGone)
+			}
+		})
+	}
+}
+
 func TestOverflowDeliveredWhenErrorBufferFullAndWatchesResynced(t *testing.T) {
 	root := t.TempDir()
 	mkdir(t, root, "missed")
