@@ -140,6 +140,16 @@ appended to the other note stays. `alt+m` and `alt+M` are also in the
 command palette ("Move line to note…", "Move note to folder…"), and are
 left to the text in insert mode.
 
+On macOS, `alt` is the Option key, and the terminal must send it as Alt
+(Meta) for `alt+m` / `alt+M` to reach Notty; by default Option types
+characters such as `µ` instead:
+
+- **Terminal**: Settings → Profiles → Keyboard → check *Use Option as Meta
+  key*.
+- **iTerm2**: Settings → Profiles → Keys → General → set *Left Option key*
+  (and *Right Option key*, if you use it) to *Esc+*.
+- Ghostty: `macos-option-as-alt = true`; kitty: `macos_option_as_alt yes`.
+
 The vim editor supports a full set of motions, operators, text objects, and
 registers. For the complete, per-context reference (sidebar, editor in
 every mode, preview, Tasks, Trash, resolver, history, image viewer, wizard,
@@ -372,11 +382,15 @@ notty -q -- -5 degrees tonight           # text starting with "-": put it after 
   directory, at a filesystem root (`/`, `C:\`) or in the vault itself.
 - In a git vault (the usual setup), a background `notty sync` commits the
   line and pushes it when a remote is set up; `notty -q` itself returns at
-  once. It works while Notty is open too: the
-  app sees the new line, shows it if the Inbox is open (unsaved edits there
-  are never overwritten: you get the usual "changed on disk" choice) and
-  syncs it. Running `notty` right after `notty -q` may wait a few seconds
-  for that background sync to release the vault.
+  once. It works while Notty is open too: the app sees the new line, shows
+  it if the Inbox is open (with unsaved edits there you get the usual
+  "changed on disk" choice) and syncs it. Running `notty` right after
+  `notty -q` may wait a few seconds for that background sync to release the
+  vault.
+- One narrow race remains: while the Inbox is open in Notty with unsaved
+  edits, a capture landing in the instant Notty saves the Inbox can be
+  overwritten by that save. To be safe, capture into an Inbox you are not
+  editing (or save it first).
 - If the Inbox has an unresolved sync conflict, `notty -q` refuses and asks
   you to resolve it in Notty first.
 - The vault must be set up already (run `notty` once): `notty -q` never
